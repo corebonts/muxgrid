@@ -14,6 +14,7 @@ import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import io.github.corebonts.muxgrid.core.model.StreamTicket
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +31,7 @@ class TvheadendRepository(
 ) {
     private val settings = SettingsRepository(context.applicationContext, formFactor)
     private val htspClient = HtspClient(scope = scope)
+    private var backgroundDisconnectJob: Job? = null
     private val store = TvheadendStore(
         epochSecondsProvider = {
             val offsetMs = (connectionState.value as? ConnectionState.Connected)?.serverClockOffsetMs ?: 0L
@@ -99,6 +101,30 @@ class TvheadendRepository(
         val profile = serverProfile.value ?: return
         if (profile.isConfigured) {
             htspClient.connect(profile)
+        }
+    }
+
+    fun setForeground(isForeground: Boolean, keepAliveInBackground: Boolean = false) {
+        if (isForeground) {
+            backgroundDisconnectJob?.cancel()
+            backgroundDisconnectJob = null
+            htspClient.suppressTransientErrors = false
+            val state = htspClient.connectionState.value
+            val profile = serverProfile.value
+            if (profile != null && profile.isConfigured &&
+                (state is ConnectionState.Disconnected || (state is ConnectionState.Error && !state.isAuthError))
+            ) {
+                htspClient.connect(profile)
+            }
+        } else {
+            htspClient.suppressTransientErrors = true
+            backgroundDisconnectJob?.cancel()
+            if (!keepAliveInBackground) {
+                backgroundDisconnectJob = scope.launch {
+                    delay(3_000L)
+                    htspClient.disconnect()
+                }
+            }
         }
     }
 

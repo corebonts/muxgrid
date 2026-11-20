@@ -52,6 +52,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.tv.material3.Border
 import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
@@ -259,6 +262,21 @@ private fun TvLiveChannelsScreen(
     onOpenServerSetup: () -> Unit,
     onRetryConnect: () -> Unit,
 ) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var visibleError by remember { mutableStateOf<ConnectionState.Error?>(null) }
+
+    LaunchedEffect(connectionState, lifecycleOwner) {
+        visibleError = null
+        if (connectionState is ConnectionState.Error) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                if (!connectionState.isAuthError) {
+                    delay(1_200L)
+                }
+                visibleError = connectionState
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -315,7 +333,7 @@ private fun TvLiveChannelsScreen(
             }
         }
 
-        if (connectionState is ConnectionState.Error) {
+        visibleError?.let { errState ->
             Spacer(Modifier.height(10.dp))
             Row(
                 modifier = Modifier
@@ -328,9 +346,9 @@ private fun TvLiveChannelsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(connectionState.message, color = MuxGridColors.TextPrimary, fontSize = 14.sp)
-                Button(onClick = if (connectionState.isAuthError) onOpenServerSetup else onRetryConnect) {
-                    Text(if (connectionState.isAuthError) "Edit Server" else "Retry")
+                Text(errState.message, color = MuxGridColors.TextPrimary, fontSize = 14.sp)
+                Button(onClick = if (errState.isAuthError) onOpenServerSetup else onRetryConnect) {
+                    Text(if (errState.isAuthError) "Edit Server" else "Retry")
                 }
             }
         }

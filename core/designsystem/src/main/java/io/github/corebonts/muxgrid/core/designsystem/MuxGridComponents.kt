@@ -354,13 +354,17 @@ private fun SelectableOptionRow(
             color = MuxGridColors.TextPrimary,
             fontSize = 13.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            modifier = Modifier.weight(1f),
         )
         if (selected) {
+            Spacer(Modifier.width(12.dp))
             Text(
                 text = "Active",
                 color = MuxGridColors.AccentBlueLight,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
             )
         }
     }

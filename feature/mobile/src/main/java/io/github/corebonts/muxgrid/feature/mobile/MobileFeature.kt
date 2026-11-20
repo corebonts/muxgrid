@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -51,6 +53,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.data.TvheadendRepository
@@ -223,6 +228,21 @@ private fun MobileLiveChannelsScreen(
     onOpenServerSetup: () -> Unit,
     onRetryConnect: () -> Unit,
 ) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var visibleError by remember { mutableStateOf<ConnectionState.Error?>(null) }
+
+    LaunchedEffect(connectionState, lifecycleOwner) {
+        visibleError = null
+        if (connectionState is ConnectionState.Error) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                if (!connectionState.isAuthError) {
+                    delay(1_200L)
+                }
+                visibleError = connectionState
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -262,7 +282,7 @@ private fun MobileLiveChannelsScreen(
             }
         }
 
-        if (connectionState is ConnectionState.Error) {
+        visibleError?.let { errState ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -275,21 +295,21 @@ private fun MobileLiveChannelsScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = connectionState.message,
+                    text = errState.message,
                     color = MuxGridColors.TextPrimary,
                     fontSize = 13.sp,
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = if (connectionState.isAuthError) "Edit" else "Retry",
+                    text = if (errState.isAuthError) "Edit" else "Retry",
                     color = MuxGridColors.AccentBlueLight,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .clickable {
-                            if (connectionState.isAuthError) onOpenServerSetup() else onRetryConnect()
+                            if (errState.isAuthError) onOpenServerSetup() else onRetryConnect()
                         }
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                 )
@@ -545,13 +565,19 @@ private fun MobileLivePlayerScreen(
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 // Top dark gradient scrim
+                val scrimBtnColors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = MuxGridColors.ScrimSurface,
+                    contentColor = Color.White,
+                )
+                val scrimBtnBorder = BorderStroke(1.dp, Color.White.copy(alpha = 0.24f))
+
                 Row(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
                         .background(
                             Brush.verticalGradient(
-                                listOf(MuxGridColors.ScrimSurface, Color.Transparent),
+                                listOf(Color.Black.copy(alpha = 0.82f), Color.Transparent),
                             ),
                         )
                         .statusBarsPadding()
@@ -563,7 +589,11 @@ private fun MobileLivePlayerScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f),
                     ) {
-                        OutlinedButton(onClick = onExit) {
+                        OutlinedButton(
+                            onClick = onExit,
+                            colors = scrimBtnColors,
+                            border = scrimBtnBorder,
+                        ) {
                             Text("Back", color = Color.White, fontSize = 13.sp)
                         }
                         Spacer(Modifier.width(10.dp))
@@ -592,7 +622,7 @@ private fun MobileLivePlayerScreen(
                             nowNext?.now?.let { now ->
                                 Text(
                                     text = now.title,
-                                    color = MuxGridColors.TextSecondary,
+                                    color = Color.White.copy(alpha = 0.82f),
                                     fontSize = 12.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -602,14 +632,12 @@ private fun MobileLivePlayerScreen(
                     }
 
                     Spacer(Modifier.width(8.dp))
-                    Button(
+                    OutlinedButton(
                         onClick = { trackPanelOpen = !trackPanelOpen },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MuxGridColors.ScrimLight,
-                            contentColor = Color.White,
-                        ),
+                        colors = scrimBtnColors,
+                        border = scrimBtnBorder,
                     ) {
-                        Text("Tracks", fontSize = 13.sp)
+                        Text("Tracks", color = Color.White, fontSize = 13.sp)
                     }
                 }
 
@@ -620,7 +648,7 @@ private fun MobileLivePlayerScreen(
                         .fillMaxWidth()
                         .background(
                             Brush.verticalGradient(
-                                listOf(Color.Transparent, MuxGridColors.ScrimSurface),
+                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.86f)),
                             ),
                         )
                         .navigationBarsPadding()
@@ -653,6 +681,7 @@ private fun MobileLivePlayerScreen(
                                 Text(
                                     text = "· ${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}",
                                     style = MuxGridType.TabularSmall,
+                                    color = Color.White.copy(alpha = 0.85f),
                                 )
                             }
                         }
@@ -666,6 +695,8 @@ private fun MobileLivePlayerScreen(
                         if (canZap) {
                             OutlinedButton(
                                 onClick = onZapPrevious,
+                                colors = scrimBtnColors,
+                                border = scrimBtnBorder,
                                 modifier = Modifier.weight(1f),
                             ) {
                                 Text("Prev Ch", color = Color.White, fontSize = 13.sp)
@@ -687,6 +718,8 @@ private fun MobileLivePlayerScreen(
                         if (canZap) {
                             OutlinedButton(
                                 onClick = onZapNext,
+                                colors = scrimBtnColors,
+                                border = scrimBtnBorder,
                                 modifier = Modifier.weight(1f),
                             ) {
                                 Text("Next Ch", color = Color.White, fontSize = 13.sp)
@@ -701,7 +734,9 @@ private fun MobileLivePlayerScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.45f))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
                     .padding(20.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -715,7 +750,7 @@ private fun MobileLivePlayerScreen(
                     onSelectSubtitle = { playbackEngine.setSubtitleTrack(it) },
                     onSelectPreset = onSelectPreset,
                     onClose = { trackPanelOpen = false },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.widthIn(max = 540.dp).fillMaxWidth(),
                 )
             }
         }

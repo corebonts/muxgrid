@@ -17,6 +17,8 @@ import io.github.corebonts.muxgrid.feature.tv.TvMvpRoot
 
 class MainActivity : ComponentActivity() {
 
+    private var appContainer: MuxGridAppContainer? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
@@ -25,6 +27,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val container = (application as MuxGridApplication).container
+        appContainer = container
         val isTv = container.formFactor == FormFactor.TV
 
         setContent {
@@ -57,5 +60,23 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        appContainer?.repository?.setForeground(isForeground = true)
+    }
+
+    override fun onStop() {
+        val container = appContainer
+        if (container != null) {
+            val status = container.playbackEngine.state.value.status
+            val keepAlive = status == PlaybackStatus.PLAYING || status == PlaybackStatus.BUFFERING
+            container.repository.setForeground(
+                isForeground = false,
+                keepAliveInBackground = keepAlive,
+            )
+        }
+        super.onStop()
     }
 }

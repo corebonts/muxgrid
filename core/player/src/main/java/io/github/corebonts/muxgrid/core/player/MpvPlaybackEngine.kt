@@ -403,15 +403,20 @@ class MpvPlaybackEngine(
                     val instance = mpv ?: return@execute
                     if (instance.isInitialized) {
                         refreshTracksLocked(instance)
-                    }
-                }
-                _state.update { current ->
-                    if (explicitlyStopped || current.status == PlaybackStatus.ERROR) {
-                        current
-                    } else {
-                        current.copy(
-                            status = if (current.isPaused) PlaybackStatus.PAUSED else PlaybackStatus.PLAYING,
-                        )
+                        val realPaused = runCatching { instance.getPropertyBoolean("pause") }.getOrNull()
+                        val realHwdec = runCatching { instance.getPropertyString("hwdec-current") }.getOrNull()
+                        _state.update { current ->
+                            if (explicitlyStopped || current.status == PlaybackStatus.ERROR) {
+                                current
+                            } else {
+                                val paused = realPaused ?: current.isPaused
+                                current.copy(
+                                    isPaused = paused,
+                                    hwdecCurrent = realHwdec ?: current.hwdecCurrent,
+                                    status = if (paused) PlaybackStatus.PAUSED else PlaybackStatus.PLAYING,
+                                )
+                            }
+                        }
                     }
                 }
             }

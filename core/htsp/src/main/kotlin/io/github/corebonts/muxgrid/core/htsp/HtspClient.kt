@@ -48,6 +48,9 @@ class HtspClient(
     @Volatile
     private var activeSession: Session? = null
 
+    @Volatile
+    var suppressTransientErrors: Boolean = false
+
     fun connect(profile: ServerProfile) {
         connectionJob?.cancel()
         activeSession?.close()
@@ -60,13 +63,18 @@ class HtspClient(
 
         connectionJob = scope.launch(Dispatchers.IO) {
             var backoffMs = INITIAL_BACKOFF_MS
+            var hadSuccessfulSync = false
+            var consecutiveFailures = 0
             while (isActive) {
                 var stopRetrying = false
+                var fastRetry = false
                 try {
                     _connectionState.value = ConnectionState.Connecting
                     runSession(profile) {
                         // Reset backoff once initial sync completes
                         backoffMs = INITIAL_BACKOFF_MS
+                        hadSuccessfulSync = true
+                        consecutiveFailures = 0
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -77,18 +85,29 @@ class HtspClient(
                     )
                     stopRetrying = true
                 } catch (e: Exception) {
-                    _connectionState.value = ConnectionState.Error(
-                        message = e.message ?: "Connection lost",
-                        isAuthError = false,
-                    )
+                    consecutiveFailures++
+                    val isFirstDropAfterSync = hadSuccessfulSync && consecutiveFailures == 1
+                    if (suppressTransientErrors || isFirstDropAfterSync) {
+                        _connectionState.value = ConnectionState.Connecting
+                        fastRetry = isFirstDropAfterSync && !suppressTransientErrors
+                    } else {
+                        _connectionState.value = ConnectionState.Error(
+                            message = e.message ?: "Connection lost",
+                            isAuthError = false,
+                        )
+                    }
                 } finally {
                     activeSession?.close()
                     activeSession = null
                 }
 
                 if (stopRetrying || !isActive) break
-                delay(backoffMs)
-                backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
+                if (fastRetry) {
+                    delay(400L)
+                } else {
+                    delay(backoffMs)
+                    backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
+                }
             }
         }
     }
