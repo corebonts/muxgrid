@@ -1,5 +1,8 @@
 package io.github.corebonts.muxgrid.core.designsystem
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,12 +21,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -54,6 +57,7 @@ import io.github.corebonts.muxgrid.core.model.VideoAspectMode
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 
 @Composable
 fun ChannelPiconBadge(
@@ -64,13 +68,13 @@ fun ChannelPiconBadge(
     modifier: Modifier = Modifier,
     size: Dp = 48.dp,
 ) {
-    val shape = RoundedCornerShape(12.dp)
+    val shape = MuxGridShapes.Badge
     Box(
         modifier = modifier
             .size(size)
             .clip(shape)
-            .background(Color(0xFF202433))
-            .border(1.dp, MuxGridColors.HairlineBorder, shape),
+            .background(MuxGridColors.PiconSurface)
+            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, shape),
         contentAlignment = Alignment.Center,
     ) {
         if (piconModel != null) {
@@ -114,24 +118,40 @@ private fun PiconFallbackLabel(
 }
 
 @Composable
+fun rememberStableDurationSec(ms: Long, resetKey: Any? = null): Long {
+    val clampedMs = ms.coerceAtLeast(0L)
+    val shownSec = remember(resetKey) { mutableLongStateOf((clampedMs + 500L) / 1000L) }
+    val diffMs = clampedMs - (shownSec.longValue * 1000L)
+    if (abs(diffMs) >= 700L) {
+        shownSec.longValue = (clampedMs + 500L) / 1000L
+    }
+    return shownSec.longValue
+}
+
+@Composable
 fun LiveProgressBar(
     progress: Float,
     modifier: Modifier = Modifier,
     fillColor: Color = MuxGridColors.AccentBlueLight,
 ) {
     val clamped = progress.coerceIn(0f, 1f)
+    val animatedProgress by animateFloatAsState(
+        targetValue = clamped,
+        animationSpec = tween(durationMillis = 220, easing = LinearEasing),
+        label = "liveProgress",
+    )
     Box(
         modifier = modifier
             .height(3.dp)
-            .clip(RoundedCornerShape(50))
+            .clip(MuxGridShapes.Pill)
             .background(MuxGridColors.TrackBackground),
     ) {
-        if (clamped > 0f) {
+        if (animatedProgress > 0f) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(clamped)
+                    .fillMaxWidth(animatedProgress)
                     .fillMaxHeight()
-                    .clip(RoundedCornerShape(50))
+                    .clip(MuxGridShapes.Pill)
                     .background(fillColor),
             )
         }
@@ -152,9 +172,9 @@ fun ConnectionStatusBadge(
     }
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(50))
+            .clip(MuxGridShapes.Pill)
             .background(MuxGridColors.CardSurface)
-            .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(50))
+            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Pill)
             .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -186,12 +206,12 @@ fun PlayerErrorToast(
     val title = if (isTunerBusy) "Tuner Busy" else "Playback Error"
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
+            .clip(MuxGridShapes.Row)
             .background(MuxGridColors.ScrimSurface)
             .border(
-                width = 1.dp,
+                width = MuxGridBorders.Hairline,
                 color = MuxGridColors.CoralLive.copy(alpha = 0.65f),
-                shape = RoundedCornerShape(14.dp),
+                shape = MuxGridShapes.Row,
             )
             .clickable(onClick = onDismiss)
             .padding(horizontal = 14.dp, vertical = 10.dp),
@@ -247,9 +267,9 @@ fun TrackAndPresetPanel(
     Column(
         modifier = modifier
             .heightIn(max = 460.dp)
-            .clip(RoundedCornerShape(18.dp))
+            .clip(MuxGridShapes.CardLg)
             .background(MuxGridColors.ScrimSurface)
-            .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(18.dp))
+            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.CardLg)
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -268,7 +288,7 @@ fun TrackAndPresetPanel(
                 modifier = Modifier
                     .focusRequester(closeFocusRequester)
                     .onFocusChanged { closeFocused = it.isFocused }
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(MuxGridShapes.Sm)
                     .background(if (closeFocused) MuxGridColors.FocusBorder else Color.Transparent)
                     .clickable(onClick = onClose)
                     .padding(horizontal = 10.dp, vertical = 4.dp),
@@ -333,12 +353,12 @@ fun TrackAndPresetPanel(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(MuxGridShapes.Control)
                             .background(if (selected) MuxGridColors.AccentBlue else MuxGridColors.CardSurface)
                             .border(
-                                1.dp,
+                                MuxGridBorders.Hairline,
                                 if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
-                                RoundedCornerShape(10.dp),
+                                MuxGridShapes.Control,
                             )
                             .clickable { onSelectAspectMode(mode) }
                             .padding(vertical = 8.dp),
@@ -346,7 +366,7 @@ fun TrackAndPresetPanel(
                     ) {
                         Text(
                             text = mode.label,
-                            color = if (selected) Color.White else MuxGridColors.TextSecondary,
+                            color = if (selected) MuxGridColors.OnAccent else MuxGridColors.TextSecondary,
                             fontSize = 12.sp,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                             maxLines = 1,
@@ -379,9 +399,9 @@ private fun SelectableOptionRow(
         modifier = Modifier
             .fillMaxWidth()
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(10.dp))
+            .clip(MuxGridShapes.Control)
             .background(bg)
-            .border(if (focused) 2.dp else 1.dp, borderColor, RoundedCornerShape(10.dp))
+            .border(if (focused) MuxGridBorders.Focused else MuxGridBorders.Hairline, borderColor, MuxGridShapes.Control)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 9.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -464,9 +484,9 @@ fun DvrStateBadge(
     }
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(50))
+            .clip(MuxGridShapes.Pill)
             .background(color.copy(alpha = 0.16f))
-            .border(1.dp, color.copy(alpha = 0.42f), RoundedCornerShape(50))
+            .border(MuxGridBorders.Hairline, color.copy(alpha = 0.42f), MuxGridShapes.Pill)
             .padding(horizontal = 8.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -496,9 +516,9 @@ fun TimeshiftNoticeBanner(
 ) {
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(50))
+            .clip(MuxGridShapes.Pill)
             .background(MuxGridColors.ScrimSurface)
-            .border(1.dp, MuxGridColors.AmberWarn.copy(alpha = 0.55f), RoundedCornerShape(50))
+            .border(MuxGridBorders.Hairline, MuxGridColors.AmberWarn.copy(alpha = 0.55f), MuxGridShapes.Pill)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),

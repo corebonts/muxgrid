@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -44,7 +43,9 @@ import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrSeriesGroup
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMs
@@ -111,12 +112,12 @@ internal fun MobileRecordingsScreen(
                 val selected = filter == tab
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(50))
+                        .clip(MuxGridShapes.Pill)
                         .background(if (selected) MuxGridColors.AccentBlue else MuxGridColors.CardSurface)
                         .border(
-                            1.dp,
+                            MuxGridBorders.Hairline,
                             if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
-                            RoundedCornerShape(50),
+                            MuxGridShapes.Pill,
                         )
                         .clickable { filter = tab }
                         .padding(horizontal = 14.dp, vertical = 7.dp),
@@ -349,7 +350,7 @@ private fun RecordingNowCard(
     onStop: () -> Unit,
     onAbort: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = MuxGridShapes.Card
     val dur = entry.durationSec.coerceAtLeast(1L)
     val elapsed = (nowEpochSec - entry.startEpochSec).coerceIn(0L, dur)
     val progress = elapsed.toFloat() / dur.toFloat()
@@ -359,7 +360,7 @@ private fun RecordingNowCard(
             .fillMaxWidth()
             .clip(shape)
             .background(MuxGridColors.CardSurfaceElevated)
-            .border(1.dp, MuxGridColors.CoralLive.copy(alpha = 0.45f), shape)
+            .border(MuxGridBorders.Hairline, MuxGridColors.CoralLive.copy(alpha = 0.45f), shape)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -426,7 +427,7 @@ private fun CompletedRecordingCard(
     onToggleWatched: () -> Unit,
     onRequestDelete: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = MuxGridShapes.Card
     val sizeLabel = formatFileSize(entry.dataSize)
     val metaParts = listOfNotNull(
         channel?.name,
@@ -442,7 +443,7 @@ private fun CompletedRecordingCard(
             .clip(shape)
             .background(MuxGridColors.CardSurface)
             .border(
-                1.dp,
+                MuxGridBorders.Hairline,
                 if (entry.isFileMissing) MuxGridColors.CoralLive.copy(alpha = 0.4f) else MuxGridColors.HairlineBorder,
                 shape,
             )
@@ -568,7 +569,7 @@ private fun SeriesGroupCard(
     onToggleWatched: (DvrEntry) -> Unit,
     onRequestDelete: (DvrEntry) -> Unit,
 ) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = MuxGridShapes.Card
     val latest = group.entries.first()
     val channel = channelById[latest.channelId]
     val unwatchedCount = group.entries.count { !it.isWatched }
@@ -578,7 +579,7 @@ private fun SeriesGroupCard(
             .fillMaxWidth()
             .clip(shape)
             .background(MuxGridColors.CardSurface)
-            .border(1.dp, MuxGridColors.HairlineBorder, shape)
+            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, shape)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -612,7 +613,7 @@ private fun SeriesGroupCard(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(50))
+                        .clip(MuxGridShapes.Pill)
                         .background(MuxGridColors.AccentBlue.copy(alpha = 0.16f))
                         .padding(horizontal = 8.dp, vertical = 3.dp),
                 )
@@ -654,13 +655,13 @@ private fun ScheduledTimerCard(
     imageLoader: ImageLoader,
     onCancel: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(14.dp)
+    val shape = MuxGridShapes.Row
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(MuxGridColors.CardSurface)
-            .border(1.dp, MuxGridColors.HairlineBorder, shape)
+            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, shape)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -699,13 +700,13 @@ private fun FailedRecordingCard(
     imageLoader: ImageLoader,
     onDelete: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(14.dp)
+    val shape = MuxGridShapes.Row
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(MuxGridColors.CardSurface)
-            .border(1.dp, MuxGridColors.HairlineBorder, shape)
+            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, shape)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

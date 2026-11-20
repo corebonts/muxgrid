@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,7 +44,9 @@ import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMs
@@ -99,9 +100,7 @@ internal fun TvRecordingsScreen(
     }
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 12.dp),
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 6.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
@@ -181,9 +180,9 @@ internal fun TvRecordingsScreen(
             Column(
                 modifier = Modifier
                     .widthIn(min = 380.dp, max = 560.dp)
-                    .clip(RoundedCornerShape(20.dp))
+                    .clip(MuxGridShapes.Dialog)
                     .background(MuxGridColors.CardSurfaceElevated)
-                    .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(20.dp))
+                    .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
                     .padding(22.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -401,18 +400,23 @@ private fun TvRecordingShelf(
     imageLoader: ImageLoader,
     onClickEntry: (DvrEntry) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(title, style = MuxGridType.Title, fontSize = 18.sp)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = title,
+            style = MuxGridType.Title,
+            fontSize = 18.sp,
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
-            contentPadding = PaddingValues(horizontal = 4.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
         ) {
             items(entries, key = { it.id }) { entry ->
                 val ch = channelById[entry.channelId]
                 Surface(
                     onClick = { onClickEntry(entry) },
                     modifier = Modifier.width(300.dp),
-                    shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(16.dp)),
+                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Card),
                     colors = ClickableSurfaceDefaults.colors(
                         containerColor = MuxGridColors.CardSurface,
                         contentColor = MuxGridColors.TextPrimary,
@@ -421,12 +425,12 @@ private fun TvRecordingShelf(
                     ),
                     border = ClickableSurfaceDefaults.border(
                         border = Border(
-                            border = BorderStroke(1.dp, MuxGridColors.HairlineBorder),
-                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder),
+                            shape = MuxGridShapes.Card,
                         ),
                         focusedBorder = Border(
-                            border = BorderStroke(2.5.dp, MuxGridColors.FocusBorder),
-                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(MuxGridBorders.FocusedCard, MuxGridColors.FocusBorder),
+                            shape = MuxGridShapes.Card,
                         ),
                     ),
                     scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),

@@ -6,6 +6,9 @@ import android.content.ContextWrapper
 import android.media.AudioManager
 import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -36,7 +39,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -79,11 +81,14 @@ import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.TimeshiftNoticeBanner
 import io.github.corebonts.muxgrid.core.designsystem.TrackAndPresetPanel
-import io.github.corebonts.muxgrid.core.designsystem.formatDurationMs
+import io.github.corebonts.muxgrid.core.designsystem.formatDurationSec
+import io.github.corebonts.muxgrid.core.designsystem.rememberStableDurationSec
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
@@ -307,7 +312,7 @@ internal fun MobilePlayerScreen(
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color(0xFF151926), MuxGridColors.CanvasPhone, Color.Black),
+                            listOf(MuxGridColors.AudioStageTop, MuxGridColors.CanvasPhone, Color.Black),
                         ),
                     ),
                 contentAlignment = Alignment.Center,
@@ -342,9 +347,9 @@ internal fun MobilePlayerScreen(
                     }
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
+                            .clip(MuxGridShapes.Pill)
                             .background(MuxGridColors.AccentBlue.copy(alpha = 0.2f))
-                            .border(1.dp, MuxGridColors.AccentBlueLight.copy(alpha = 0.5f), RoundedCornerShape(50))
+                            .border(MuxGridBorders.Hairline, MuxGridColors.AccentBlueLight.copy(alpha = 0.5f), MuxGridShapes.Pill)
                             .padding(horizontal = 12.dp, vertical = 4.dp),
                     ) {
                         Text(
@@ -376,15 +381,15 @@ internal fun MobilePlayerScreen(
                 modifier = Modifier
                     .align(if (isForward) Alignment.CenterEnd else Alignment.CenterStart)
                     .padding(horizontal = 36.dp)
-                    .clip(RoundedCornerShape(50))
+                    .clip(MuxGridShapes.Pill)
                     .background(MuxGridColors.ScrimSurface)
-                    .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(50))
+                    .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, MuxGridShapes.Pill)
                     .padding(horizontal = 18.dp, vertical = 10.dp),
             ) {
                 Text(
                     text = if (isForward) "+${fb.deltaSec}s" else "${fb.deltaSec}s",
                     style = MuxGridType.TabularNumber,
-                    color = Color.White,
+                    color = MuxGridColors.OnAccent,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                 )
@@ -396,16 +401,16 @@ internal fun MobilePlayerScreen(
             Box(
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .clip(RoundedCornerShape(50))
+                    .clip(MuxGridShapes.Pill)
                     .background(MuxGridColors.ScrimSurface)
-                    .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(50))
+                    .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, MuxGridShapes.Pill)
                     .padding(horizontal = 18.dp, vertical = 10.dp),
             ) {
                 val prefix = if (fb.kind == DragFeedbackKind.BRIGHTNESS) "Brightness" else "Volume"
                 Text(
                     text = "$prefix ${fb.percent}%",
                     style = MuxGridType.TabularNumber,
-                    color = Color.White,
+                    color = MuxGridColors.OnAccent,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -585,9 +590,17 @@ internal fun MobilePlayerScreen(
                         val durationMs = playbackState.durationMs.coerceAtLeast(1L)
                         val displayPosMs = if (isScrubbing) scrubPositionMs else playbackState.positionMs.coerceIn(0L, durationMs)
                         val sliderFraction = (displayPosMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                        val animatedFraction by animateFloatAsState(
+                            targetValue = sliderFraction,
+                            animationSpec = tween(durationMillis = 220, easing = LinearEasing),
+                            label = "recSliderProgress",
+                        )
+                        val stablePosSec = rememberStableDurationSec(displayPosMs, playbackState.dvrEntryId)
+                        val stableDurSec = rememberStableDurationSec(playbackState.durationMs, playbackState.dvrEntryId)
+                        val shownPosSec = if (isScrubbing) (displayPosMs + 500L) / 1000L else stablePosSec
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Slider(
-                                value = sliderFraction,
+                                value = if (isScrubbing) sliderFraction else animatedFraction,
                                 onValueChange = { fraction ->
                                     isScrubbing = true
                                     scrubPositionMs = (fraction.coerceIn(0f, 1f) * durationMs).toLong()
@@ -598,7 +611,7 @@ internal fun MobilePlayerScreen(
                                 },
                                 valueRange = 0f..1f,
                                 colors = SliderDefaults.colors(
-                                    thumbColor = Color.White,
+                                    thumbColor = MuxGridColors.OnAccent,
                                     activeTrackColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.AccentBlueLight,
                                     inactiveTrackColor = MuxGridColors.TrackBackground,
                                 ),
@@ -609,9 +622,9 @@ internal fun MobilePlayerScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    text = formatDurationMs(displayPosMs),
+                                    text = formatDurationSec(shownPosSec),
                                     style = MuxGridType.TabularSmall,
-                                    color = Color.White,
+                                    color = MuxGridColors.OnAccent,
                                 )
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -624,14 +637,14 @@ internal fun MobilePlayerScreen(
                                         Text(
                                             text = "${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}",
                                             style = MuxGridType.TabularSmall,
-                                            color = Color.White.copy(alpha = 0.78f),
+                                            color = MuxGridColors.OnAccent.copy(alpha = 0.78f),
                                         )
                                     }
                                 }
                                 Text(
-                                    text = formatDurationMs(playbackState.durationMs),
+                                    text = formatDurationSec(stableDurSec),
                                     style = MuxGridType.TabularSmall,
-                                    color = Color.White.copy(alpha = 0.85f),
+                                    color = MuxGridColors.OnAccent.copy(alpha = 0.85f),
                                 )
                             }
                         }
@@ -684,20 +697,24 @@ internal fun MobilePlayerScreen(
                                 modifier = Modifier.weight(1f),
                             ) {
                                 if (playbackState.isBehindLive) {
+                                    val stableLiveOffsetSec = rememberStableDurationSec(
+                                        playbackState.liveEdgeOffsetMs,
+                                        playbackState.channelId,
+                                    )
                                     Row(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(50))
+                                            .clip(MuxGridShapes.Pill)
                                             .background(MuxGridColors.AccentBlue.copy(alpha = 0.9f))
-                                            .border(1.dp, MuxGridColors.AccentBlueLight, RoundedCornerShape(50))
+                                            .border(MuxGridBorders.Hairline, MuxGridColors.AccentBlueLight, MuxGridShapes.Pill)
                                             .clickable { playbackEngine.seekToLiveEdge() }
                                             .padding(horizontal = 12.dp, vertical = 5.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     ) {
                                         Text(
-                                            text = "-${formatDurationMs(playbackState.liveEdgeOffsetMs)} · Back to Live",
+                                            text = "-${formatDurationSec(stableLiveOffsetSec)} · Back to Live",
                                             style = MuxGridType.TabularSmall,
-                                            color = Color.White,
+                                            color = MuxGridColors.OnAccent,
                                             fontWeight = FontWeight.SemiBold,
                                         )
                                     }
@@ -771,11 +788,19 @@ internal fun MobilePlayerScreen(
                                 playbackState.positionMs.coerceIn(bufStart, bufEnd)
                             }
                             val sliderFraction = ((displayPosMs - bufStart).toFloat() / bufWindow.toFloat()).coerceIn(0f, 1f)
+                            val animatedFraction by animateFloatAsState(
+                                targetValue = sliderFraction,
+                                animationSpec = tween(durationMillis = 220, easing = LinearEasing),
+                                label = "liveSliderProgress",
+                            )
                             val displayOffsetMs = (bufEnd - displayPosMs).coerceAtLeast(0L)
+                            val stableOffsetSec = rememberStableDurationSec(displayOffsetMs, playbackState.channelId)
+                            val stableBufSec = rememberStableDurationSec(bufWindow, playbackState.channelId)
+                            val shownOffsetSec = if (isScrubbing) (displayOffsetMs + 500L) / 1000L else stableOffsetSec
 
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Slider(
-                                    value = sliderFraction,
+                                    value = if (isScrubbing) sliderFraction else animatedFraction,
                                     onValueChange = { fraction ->
                                         isScrubbing = true
                                         scrubPositionMs = bufStart + (fraction.coerceIn(0f, 1f) * bufWindow).toLong()
@@ -786,7 +811,7 @@ internal fun MobilePlayerScreen(
                                     },
                                     valueRange = 0f..1f,
                                     colors = SliderDefaults.colors(
-                                        thumbColor = Color.White,
+                                        thumbColor = MuxGridColors.OnAccent,
                                         activeTrackColor = MuxGridColors.AccentBlueLight,
                                         inactiveTrackColor = MuxGridColors.TrackBackground,
                                     ),
@@ -796,14 +821,14 @@ internal fun MobilePlayerScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                 ) {
                                     Text(
-                                        text = if (displayOffsetMs >= 2_000L) "-${formatDurationMs(displayOffsetMs)}" else "Live edge",
+                                        text = if (displayOffsetMs >= 2_000L) "-${formatDurationSec(shownOffsetSec)}" else "Live edge",
                                         style = MuxGridType.TabularSmall,
-                                        color = Color.White,
+                                        color = MuxGridColors.OnAccent,
                                     )
                                     Text(
-                                        text = "Buffer ${formatDurationMs(bufWindow)}",
+                                        text = "Buffer ${formatDurationSec(stableBufSec)}",
                                         style = MuxGridType.TabularSmall,
-                                        color = Color.White.copy(alpha = 0.78f),
+                                        color = MuxGridColors.OnAccent.copy(alpha = 0.78f),
                                     )
                                 }
                             }
@@ -898,7 +923,7 @@ internal fun MobilePlayerScreen(
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(MuxGridShapes.Sm)
                                 .clickable { quickZapOpen = false }
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
                         )
@@ -913,14 +938,14 @@ internal fun MobilePlayerScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(MuxGridShapes.Badge)
                                     .background(
                                         if (isCurrent) MuxGridColors.AccentBlue.copy(alpha = 0.25f) else MuxGridColors.CardSurface,
                                     )
                                     .border(
-                                        1.dp,
+                                        MuxGridBorders.Hairline,
                                         if (isCurrent) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
-                                        RoundedCornerShape(12.dp),
+                                        MuxGridShapes.Badge,
                                     )
                                     .clickable {
                                         quickZapOpen = false
@@ -972,7 +997,7 @@ internal fun MobilePlayerScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.55f))
+                    .background(MuxGridColors.OverlayBackdrop)
                     .statusBarsPadding()
                     .navigationBarsPadding()
                     .padding(20.dp),

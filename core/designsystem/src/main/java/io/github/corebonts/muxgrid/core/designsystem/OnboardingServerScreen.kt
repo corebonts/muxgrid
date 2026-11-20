@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -149,9 +148,9 @@ fun OnboardingServerScreen(
             modifier = Modifier
                 .widthIn(max = if (isTv) 680.dp else 540.dp)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
+                .clip(MuxGridShapes.Sheet)
                 .background(MuxGridColors.CardSurface)
-                .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(22.dp))
+                .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Sheet)
                 .verticalScroll(rememberScrollState())
                 .padding(if (isTv) 20.dp else 24.dp),
             verticalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 14.dp),
@@ -313,7 +312,7 @@ fun OnboardingServerScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(MuxGridShapes.Badge)
                         .background(bg)
                         .padding(10.dp),
                 ) {

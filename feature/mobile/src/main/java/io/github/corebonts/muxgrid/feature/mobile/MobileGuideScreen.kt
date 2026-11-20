@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -49,7 +48,9 @@ import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.buildUpcomingDays
 import io.github.corebonts.muxgrid.core.designsystem.filterEpgEventsForDay
@@ -137,9 +138,9 @@ internal fun MobileGuideScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 6.dp)
-                .clip(RoundedCornerShape(14.dp))
+                .clip(MuxGridShapes.Row)
                 .background(MuxGridColors.CardSurface)
-                .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(14.dp))
+                .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Row)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -168,7 +169,7 @@ internal fun MobileGuideScreen(
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(MuxGridShapes.Xs)
                         .clickable { searchQuery = "" }
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
@@ -188,19 +189,19 @@ internal fun MobileGuideScreen(
                     val selected = idx == selectedDayIndex
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
+                            .clip(MuxGridShapes.Pill)
                             .background(if (selected) MuxGridColors.AccentBlue else MuxGridColors.CardSurface)
                             .border(
-                                1.dp,
+                                MuxGridBorders.Hairline,
                                 if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
-                                RoundedCornerShape(50),
+                                MuxGridShapes.Pill,
                             )
                             .clickable { selectedDayIndex = idx }
                             .padding(horizontal = 13.dp, vertical = 6.dp),
                     ) {
                         Text(
                             text = formatDayLabel(day, nowEpochSec),
-                            color = if (selected) Color.White else MuxGridColors.TextSecondary,
+                            color = if (selected) MuxGridColors.OnAccent else MuxGridColors.TextSecondary,
                             fontSize = 12.sp,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                         )
@@ -220,12 +221,12 @@ internal fun MobileGuideScreen(
                     val selected = ch.id == effectiveChannelId
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(MuxGridShapes.Badge)
                             .background(if (selected) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface)
                             .border(
-                                1.dp,
+                                MuxGridBorders.Hairline,
                                 if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
-                                RoundedCornerShape(12.dp),
+                                MuxGridShapes.Badge,
                             )
                             .clickable { selectedChannelId = ch.id }
                             .padding(horizontal = 10.dp, vertical = 6.dp),
@@ -270,14 +271,14 @@ internal fun MobileGuideScreen(
                 items(agendaItems, key = { it.first.id }) { (event, channel) ->
                     val linkedDvr = findMatchingDvrEntry(event, dvrEntries)
                     val isLiveNow = nowEpochSec in event.startEpochSec until event.stopEpochSec
-                    val shape = RoundedCornerShape(14.dp)
+                    val shape = MuxGridShapes.Row
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(shape)
                             .background(if (isLiveNow) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface)
                             .border(
-                                1.dp,
+                                MuxGridBorders.Hairline,
                                 if (isLiveNow) MuxGridColors.AccentBlue.copy(alpha = 0.45f) else MuxGridColors.HairlineBorder,
                                 shape,
                             )

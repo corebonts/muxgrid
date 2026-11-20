@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -60,11 +59,14 @@ import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.TimeshiftNoticeBanner
 import io.github.corebonts.muxgrid.core.designsystem.TrackAndPresetPanel
-import io.github.corebonts.muxgrid.core.designsystem.formatDurationMs
+import io.github.corebonts.muxgrid.core.designsystem.formatDurationSec
+import io.github.corebonts.muxgrid.core.designsystem.rememberStableDurationSec
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
@@ -105,6 +107,7 @@ internal fun TvPlayerScreen(
     var seekOsdTrigger by remember { mutableLongStateOf(0L) }
     var seekOsdVisible by remember { mutableStateOf(false) }
     var suppressNextCenterKeyUp by remember { mutableStateOf(false) }
+    var suppressNextBackKeyUp by remember { mutableStateOf(false) }
 
     // Progressive seek state (10s -> 30s -> 1m -> 5m with short settle commit)
     var pendingSeekTargetMs by remember { mutableStateOf<Long?>(null) }
@@ -205,6 +208,9 @@ internal fun TvPlayerScreen(
             .focusable()
             .onPreviewKeyEvent { keyEvent ->
                 val code = keyEvent.nativeKeyEvent.keyCode
+                val isBackKey = code == KeyEvent.KEYCODE_BACK ||
+                    code == KeyEvent.KEYCODE_ESCAPE ||
+                    code == KeyEvent.KEYCODE_BUTTON_B
                 if (keyEvent.type == KeyEventType.KeyUp) {
                     if (suppressNextCenterKeyUp && (
                             code == KeyEvent.KEYCODE_DPAD_CENTER ||
@@ -215,10 +221,28 @@ internal fun TvPlayerScreen(
                         suppressNextCenterKeyUp = false
                         return@onPreviewKeyEvent true
                     }
+                    if (suppressNextBackKeyUp && isBackKey) {
+                        suppressNextBackKeyUp = false
+                        return@onPreviewKeyEvent true
+                    }
                     return@onPreviewKeyEvent false
                 }
                 if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when {
+                    isBackKey && (trackPanelOpen || hudVisible) -> {
+                        if (trackPanelOpen) {
+                            trackPanelOpen = false
+                        } else {
+                            hudVisible = false
+                        }
+                        suppressNextBackKeyUp = true
+                        true
+                    }
+                    (code == KeyEvent.KEYCODE_ESCAPE || code == KeyEvent.KEYCODE_BUTTON_B) -> {
+                        suppressNextBackKeyUp = true
+                        onExit()
+                        true
+                    }
                     !playbackState.isRecordingPlayback && code == KeyEvent.KEYCODE_CHANNEL_UP -> {
                         if (canZap) onZapDelta(1)
                         true
@@ -242,12 +266,10 @@ internal fun TvPlayerScreen(
                         triggerProgressiveSeek(1)
                         true
                     }
-                    !hudVisible && !trackPanelOpen && !playbackState.isRecordingPlayback && code == KeyEvent.KEYCODE_DPAD_UP -> {
-                        if (canZap) onZapDelta(-1)
-                        true
-                    }
-                    !hudVisible && !trackPanelOpen && !playbackState.isRecordingPlayback && code == KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        if (canZap) onZapDelta(1)
+                    !hudVisible && !trackPanelOpen && (
+                        code == KeyEvent.KEYCODE_DPAD_UP ||
+                            code == KeyEvent.KEYCODE_DPAD_DOWN
+                        ) -> {
                         true
                     }
                     !hudVisible && !trackPanelOpen && canSeekTimeline && code == KeyEvent.KEYCODE_DPAD_LEFT -> {
@@ -304,9 +326,9 @@ internal fun TvPlayerScreen(
                 Column(
                     modifier = Modifier
                         .widthIn(min = 360.dp, max = 520.dp)
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(MuxGridShapes.Dialog)
                         .background(MuxGridColors.CardSurfaceElevated)
-                        .border(1.dp, MuxGridColors.CoralLive.copy(alpha = 0.55f), RoundedCornerShape(20.dp))
+                        .border(MuxGridBorders.Hairline, MuxGridColors.CoralLive.copy(alpha = 0.55f), MuxGridShapes.Dialog)
                         .padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -357,9 +379,9 @@ internal fun TvPlayerScreen(
             Row(
                 modifier = Modifier
                     .widthIn(max = 500.dp)
-                    .clip(RoundedCornerShape(18.dp))
+                    .clip(MuxGridShapes.CardLg)
                     .background(MuxGridColors.ScrimSurface)
-                    .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(18.dp))
+                    .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.CardLg)
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -384,7 +406,7 @@ internal fun TvPlayerScreen(
                     }
                     Text(
                         text = primaryTitle,
-                        color = Color.White,
+                        color = MuxGridColors.OnAccent,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
@@ -393,13 +415,15 @@ internal fun TvPlayerScreen(
                     if (playbackState.isRecordingPlayback) {
                         val dur = playbackState.durationMs.coerceAtLeast(1L)
                         val frac = playbackState.positionMs.toFloat() / dur.toFloat()
+                        val stablePosSec = rememberStableDurationSec(playbackState.positionMs, playbackState.dvrEntryId)
+                        val stableDurSec = rememberStableDurationSec(playbackState.durationMs, playbackState.dvrEntryId)
                         Spacer(Modifier.height(4.dp))
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(
-                                text = "${formatDurationMs(playbackState.positionMs)} / ${formatDurationMs(playbackState.durationMs)}",
+                                text = "${formatDurationSec(stablePosSec)} / ${formatDurationSec(stableDurSec)}",
                                 style = MuxGridType.TabularSmall,
                             )
                             if (playbackState.isGrowingRecording) {
@@ -447,14 +471,16 @@ internal fun TvPlayerScreen(
                 modifier = Modifier
                     .widthIn(min = 380.dp, max = 660.dp)
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(MuxGridShapes.Card)
                     .background(MuxGridColors.ScrimSurface)
-                    .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(16.dp))
+                    .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (playbackState.isRecordingPlayback) {
                     val dur = playbackState.durationMs.coerceAtLeast(1L)
+                    val stablePosSec = rememberStableDurationSec(shownPosMs, playbackState.dvrEntryId)
+                    val stableDurSec = rememberStableDurationSec(playbackState.durationMs, playbackState.dvrEntryId)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -466,7 +492,7 @@ internal fun TvPlayerScreen(
                         ) {
                             Text(
                                 text = playbackState.programTitle ?: "Recording",
-                                color = Color.White,
+                                color = MuxGridColors.OnAccent,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                             )
@@ -487,7 +513,7 @@ internal fun TvPlayerScreen(
                                 DvrStateBadge(state = DvrState.RECORDING)
                             }
                             Text(
-                                text = "${formatDurationMs(shownPosMs)} / ${formatDurationMs(playbackState.durationMs)}",
+                                text = "${formatDurationSec(stablePosSec)} / ${formatDurationSec(stableDurSec)}",
                                 style = MuxGridType.TabularNumber,
                             )
                         }
@@ -501,6 +527,8 @@ internal fun TvPlayerScreen(
                     val bufWindow = playbackState.bufferWindowMs.coerceAtLeast(1L)
                     val frac = ((shownPosMs - playbackState.bufferStartMs).toFloat() / bufWindow.toFloat()).coerceIn(0f, 1f)
                     val offsetMs = (playbackState.bufferEndMs - shownPosMs).coerceAtLeast(0L)
+                    val stableOffsetSec = rememberStableDurationSec(offsetMs, playbackState.channelId)
+                    val stableBufSec = rememberStableDurationSec(bufWindow, playbackState.channelId)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -512,7 +540,7 @@ internal fun TvPlayerScreen(
                         ) {
                             Text(
                                 text = playbackState.channelName ?: activeChannel?.name ?: "Live TV",
-                                color = Color.White,
+                                color = MuxGridColors.OnAccent,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                             )
@@ -527,9 +555,9 @@ internal fun TvPlayerScreen(
                         }
                         Text(
                             text = if (offsetMs >= 2_000L) {
-                                "-${formatDurationMs(offsetMs)} · Buffer ${formatDurationMs(bufWindow)}"
+                                "-${formatDurationSec(stableOffsetSec)} · Buffer ${formatDurationSec(stableBufSec)}"
                             } else {
-                                "LIVE · Buffer ${formatDurationMs(bufWindow)}"
+                                "LIVE · Buffer ${formatDurationSec(stableBufSec)}"
                             },
                             style = MuxGridType.TabularNumber,
                             color = if (offsetMs >= 2_000L) MuxGridColors.AccentBlueLight else MuxGridColors.CoralLive,
@@ -623,6 +651,8 @@ internal fun TvPlayerScreen(
 
                     if (playbackState.isRecordingPlayback) {
                         val dur = playbackState.durationMs.coerceAtLeast(1L)
+                        val stablePosSec = rememberStableDurationSec(playbackState.positionMs, playbackState.dvrEntryId)
+                        val stableDurSec = rememberStableDurationSec(playbackState.durationMs, playbackState.dvrEntryId)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             LiveProgressBar(
                                 progress = (playbackState.positionMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f),
@@ -633,13 +663,15 @@ internal fun TvPlayerScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
-                                Text(formatDurationMs(playbackState.positionMs), style = MuxGridType.TabularSmall, color = Color.White)
-                                Text(formatDurationMs(playbackState.durationMs), style = MuxGridType.TabularSmall)
+                                Text(formatDurationSec(stablePosSec), style = MuxGridType.TabularSmall, color = MuxGridColors.OnAccent)
+                                Text(formatDurationSec(stableDurSec), style = MuxGridType.TabularSmall)
                             }
                         }
                     } else if (playbackState.isTimeshiftSeekable) {
                         val bufWindow = playbackState.bufferWindowMs.coerceAtLeast(1L)
                         val frac = ((playbackState.positionMs - playbackState.bufferStartMs).toFloat() / bufWindow.toFloat()).coerceIn(0f, 1f)
+                        val stableOffsetSec = rememberStableDurationSec(playbackState.liveEdgeOffsetMs, playbackState.channelId)
+                        val stableBufSec = rememberStableDurationSec(bufWindow, playbackState.channelId)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             LiveProgressBar(
                                 progress = frac,
@@ -651,7 +683,7 @@ internal fun TvPlayerScreen(
                             ) {
                                 Text(
                                     text = if (playbackState.isBehindLive) {
-                                        "-${formatDurationMs(playbackState.liveEdgeOffsetMs)} behind live"
+                                        "-${formatDurationSec(stableOffsetSec)} behind live"
                                     } else {
                                         "LIVE"
                                     },
@@ -659,7 +691,7 @@ internal fun TvPlayerScreen(
                                     color = if (playbackState.isBehindLive) MuxGridColors.AccentBlueLight else MuxGridColors.CoralLive,
                                 )
                                 Text(
-                                    text = "Timeshift buffer ${formatDurationMs(bufWindow)}",
+                                    text = "Timeshift buffer ${formatDurationSec(stableBufSec)}",
                                     style = MuxGridType.TabularSmall,
                                 )
                             }
@@ -749,7 +781,7 @@ internal fun TvPlayerScreen(
                                         hudVisible = false
                                     },
                                     modifier = Modifier.width(210.dp),
-                                    shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(12.dp)),
+                                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Badge),
                                     colors = ClickableSurfaceDefaults.colors(
                                         containerColor = if (isCurrent) MuxGridColors.AccentBlue.copy(alpha = 0.28f) else MuxGridColors.CardSurface,
                                         contentColor = MuxGridColors.TextPrimary,
@@ -759,14 +791,14 @@ internal fun TvPlayerScreen(
                                     border = ClickableSurfaceDefaults.border(
                                         border = Border(
                                             border = BorderStroke(
-                                                1.dp,
+                                                MuxGridBorders.Hairline,
                                                 if (isCurrent) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
                                             ),
-                                            shape = RoundedCornerShape(12.dp),
+                                            shape = MuxGridShapes.Badge,
                                         ),
                                         focusedBorder = Border(
-                                            border = BorderStroke(2.dp, MuxGridColors.FocusBorder),
-                                            shape = RoundedCornerShape(12.dp),
+                                            border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
+                                            shape = MuxGridShapes.Badge,
                                         ),
                                     ),
                                     scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
@@ -813,7 +845,7 @@ internal fun TvPlayerScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.55f))
+                    .background(MuxGridColors.OverlayBackdrop)
                     .padding(36.dp),
                 contentAlignment = Alignment.Center,
             ) {

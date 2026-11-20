@@ -113,11 +113,14 @@ fun formatEpochDayHm(
     }
 }
 
-fun formatDurationMs(ms: Long): String {
-    val totalSec = (ms / 1000L).coerceAtLeast(0L)
-    val hours = totalSec / 3600L
-    val minutes = (totalSec % 3600L) / 60L
-    val seconds = totalSec % 60L
+fun formatDurationMs(ms: Long): String =
+    formatDurationSec((ms / 1000L).coerceAtLeast(0L))
+
+fun formatDurationSec(totalSec: Long): String {
+    val clamped = totalSec.coerceAtLeast(0L)
+    val hours = clamped / 3600L
+    val minutes = (clamped % 3600L) / 60L
+    val seconds = clamped % 60L
     return if (hours > 0L) {
         String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
     } else {

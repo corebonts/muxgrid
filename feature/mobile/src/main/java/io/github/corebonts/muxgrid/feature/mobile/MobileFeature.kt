@@ -31,7 +31,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -77,7 +76,9 @@ import io.github.corebonts.muxgrid.core.data.TvheadendRepository
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.ConnectionStatusBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
@@ -516,9 +517,9 @@ private fun MobileMainScaffold(
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(50))
+                                    .clip(MuxGridShapes.Pill)
                                     .background(MuxGridColors.CardSurface)
-                                    .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(50))
+                                    .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Pill)
                                     .clickable(onClick = onOpenSettings)
                                     .padding(horizontal = 12.dp, vertical = 6.dp),
                             )
@@ -531,9 +532,9 @@ private fun MobileMainScaffold(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 4.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                            .clip(MuxGridShapes.Row)
                             .background(MuxGridColors.CoralLive.copy(alpha = 0.14f))
-                            .border(1.dp, MuxGridColors.CoralLive.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                            .border(MuxGridBorders.Hairline, MuxGridColors.CoralLive.copy(alpha = 0.4f), MuxGridShapes.Row)
                             .padding(12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
@@ -551,7 +552,7 @@ private fun MobileMainScaffold(
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(MuxGridShapes.Sm)
                                 .clickable {
                                     if (errState.isAuthError) onOpenServerSetup() else onRetryConnect()
                                 }
@@ -594,9 +595,9 @@ private fun MobileMainScaffold(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(24.dp))
+                            .clip(MuxGridShapes.Dock)
                             .hazeBlur(input = HazeInput.Sources(hazeState), style = glassStyle)
-                            .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(24.dp))
+                            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Dock)
                             .padding(6.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -609,7 +610,7 @@ private fun MobileMainScaffold(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(18.dp))
+                                    .clip(MuxGridShapes.CardLg)
                                     .background(if (selected) MuxGridColors.AccentBlue else Color.Transparent)
                                     .clickable { onSelectTab(tab) }
                                     .padding(vertical = 10.dp),
@@ -617,7 +618,7 @@ private fun MobileMainScaffold(
                             ) {
                                 Text(
                                     text = label,
-                                    color = if (selected) Color.White else MuxGridColors.TextSecondary,
+                                    color = if (selected) MuxGridColors.OnAccent else MuxGridColors.TextSecondary,
                                     fontSize = 13.sp,
                                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                                 )
@@ -644,9 +645,9 @@ private fun MobileNavigationRail(
             .width(96.dp)
             .navigationBarsPadding()
             .padding(start = 10.dp, top = 10.dp, bottom = 10.dp)
-            .clip(RoundedCornerShape(22.dp))
+            .clip(MuxGridShapes.Sheet)
             .hazeBlur(input = HazeInput.Sources(hazeState), style = glassStyle)
-            .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(22.dp))
+            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Sheet)
             .padding(8.dp),
         verticalArrangement = Arrangement.SpaceBetween,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -661,7 +662,7 @@ private fun MobileNavigationRail(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(MuxGridShapes.Row)
                         .background(if (selected) MuxGridColors.AccentBlue else Color.Transparent)
                         .clickable { onSelectTab(tab) }
                         .padding(vertical = 12.dp),
@@ -669,7 +670,7 @@ private fun MobileNavigationRail(
                 ) {
                     Text(
                         text = label,
-                        color = if (selected) Color.White else MuxGridColors.TextSecondary,
+                        color = if (selected) MuxGridColors.OnAccent else MuxGridColors.TextSecondary,
                         fontSize = 12.sp,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                     )
@@ -680,9 +681,9 @@ private fun MobileNavigationRail(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
+                .clip(MuxGridShapes.Row)
                 .background(MuxGridColors.CardSurface)
-                .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(14.dp))
+                .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Row)
                 .clickable(onClick = onOpenSettings)
                 .padding(vertical = 10.dp),
             contentAlignment = Alignment.Center,
@@ -720,9 +721,9 @@ private fun MobileMiniPlayerBar(
 
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
+            .clip(MuxGridShapes.CardLg)
             .hazeBlur(input = HazeInput.Sources(hazeState), style = glassStyle)
-            .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(18.dp))
+            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.CardLg)
             .clickable(onClick = onExpand)
             .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -767,11 +768,11 @@ private fun MobileMiniPlayerBar(
         }
         Text(
             text = if (playbackState.isPaused) "Play" else "Pause",
-            color = Color.White,
+            color = MuxGridColors.OnAccent,
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier
-                .clip(RoundedCornerShape(50))
+                .clip(MuxGridShapes.Pill)
                 .background(MuxGridColors.AccentBlue)
                 .clickable(onClick = onTogglePause)
                 .padding(horizontal = 12.dp, vertical = 6.dp),
@@ -782,7 +783,7 @@ private fun MobileMiniPlayerBar(
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier
-                .clip(RoundedCornerShape(50))
+                .clip(MuxGridShapes.Pill)
                 .background(MuxGridColors.CardSurface)
                 .clickable(onClick = onStop)
                 .padding(horizontal = 10.dp, vertical = 3.dp),
@@ -826,12 +827,12 @@ private fun MobileLiveChannelsTab(
                 val selected = filter == activeFilter
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(50))
+                        .clip(MuxGridShapes.Pill)
                         .background(if (selected) MuxGridColors.AccentBlue else MuxGridColors.CardSurface)
                         .border(
-                            1.dp,
+                            MuxGridBorders.Hairline,
                             if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
-                            RoundedCornerShape(50),
+                            MuxGridShapes.Pill,
                         )
                         .clickable { onSelectFilter(filter) }
                         .padding(horizontal = 14.dp, vertical = 7.dp),
@@ -985,13 +986,13 @@ private fun MobileChannelCard(
     onLongClick: () -> Unit,
     onToggleFavorite: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = MuxGridShapes.Card
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(MuxGridColors.CardSurface)
-            .border(1.dp, MuxGridColors.HairlineBorder, shape)
+            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, shape)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick,
@@ -1079,7 +1080,7 @@ private fun MobileChannelCard(
             color = if (isFavorite) MuxGridColors.AmberWarn else MuxGridColors.TextMuted,
             fontSize = 18.sp,
             modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
+                .clip(MuxGridShapes.Sm)
                 .clickable(onClick = onToggleFavorite)
                 .padding(6.dp),
         )
@@ -1121,9 +1122,9 @@ private fun MobileSettingsSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(MuxGridShapes.Row)
                     .background(MuxGridColors.CardSurface)
-                    .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(14.dp))
+                    .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Row)
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -1141,7 +1142,7 @@ private fun MobileSettingsSheet(
                 }
                 Button(
                     onClick = onOpenServerSetup,
-                    colors = ButtonDefaults.buttonColors(containerColor = MuxGridColors.AccentBlue, contentColor = Color.White),
+                    colors = ButtonDefaults.buttonColors(containerColor = MuxGridColors.AccentBlue, contentColor = MuxGridColors.OnAccent),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Edit Server Connection")
@@ -1151,9 +1152,9 @@ private fun MobileSettingsSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(MuxGridShapes.Row)
                     .background(MuxGridColors.CardSurface)
-                    .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(14.dp))
+                    .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Row)
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -1175,9 +1176,9 @@ private fun MobileSettingsSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(MuxGridShapes.Row)
                     .background(MuxGridColors.CardSurface)
-                    .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(14.dp))
+                    .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Row)
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -1190,12 +1191,12 @@ private fun MobileSettingsSheet(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(MuxGridShapes.Control)
                             .background(if (selected) MuxGridColors.AccentBlue.copy(alpha = 0.22f) else MuxGridColors.CardSurfaceElevated)
                             .border(
-                                1.dp,
+                                MuxGridBorders.Hairline,
                                 if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
-                                RoundedCornerShape(10.dp),
+                                MuxGridShapes.Control,
                             )
                             .clickable { onSelectPreset(preset) }
                             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -1214,9 +1215,9 @@ private fun MobileSettingsSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(MuxGridShapes.Row)
                     .background(MuxGridColors.CardSurface)
-                    .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(14.dp))
+                    .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Row)
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -1235,19 +1236,19 @@ private fun MobileSettingsSheet(
                         val selected = option == timeshiftWindow
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(50))
+                                .clip(MuxGridShapes.Pill)
                                 .background(if (selected) MuxGridColors.AccentBlue else MuxGridColors.CardSurfaceElevated)
                                 .border(
-                                    1.dp,
+                                    MuxGridBorders.Hairline,
                                     if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
-                                    RoundedCornerShape(50),
+                                    MuxGridShapes.Pill,
                                 )
                                 .clickable { onSelectTimeshiftWindow(option) }
                                 .padding(horizontal = 12.dp, vertical = 7.dp),
                         ) {
                             Text(
                                 text = option.shortLabel,
-                                color = if (selected) Color.White else MuxGridColors.TextSecondary,
+                                color = if (selected) MuxGridColors.OnAccent else MuxGridColors.TextSecondary,
                                 fontSize = 12.sp,
                                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                             )
@@ -1274,9 +1275,9 @@ private fun SettingToggleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(MuxGridShapes.Control)
             .background(MuxGridColors.CardSurfaceElevated)
-            .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(10.dp))
+            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Control)
             .clickable { onCheckedChange(!checked) }
             .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,

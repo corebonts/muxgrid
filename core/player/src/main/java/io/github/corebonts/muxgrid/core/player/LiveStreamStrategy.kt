@@ -52,3 +52,69 @@ internal class HttpPassStrategy(
         )
     }
 }
+
+/**
+ * Smooths bursty MPEG-TS `demuxer-cache-state` updates by extrapolating the live broadcast edge
+ * at 1x real-time between packet/GOP bursts, preventing 0.5-1s progress-bar and label jitter.
+ */
+internal class TimeshiftRangeSmoother {
+    var isInitialized: Boolean = false
+        private set
+    private var smoothedStartMs: Long = 0L
+    private var smoothedEndMs: Long = 0L
+    private var lastSampleRealtimeMs: Long = 0L
+
+    fun reset() {
+        isInitialized = false
+        smoothedStartMs = 0L
+        smoothedEndMs = 0L
+        lastSampleRealtimeMs = 0L
+    }
+
+    fun update(rawStartMs: Long, rawEndMs: Long, nowRealtimeMs: Long): Pair<Long, Long> {
+        val clampedStart = rawStartMs.coerceAtLeast(0L)
+        val clampedEnd = rawEndMs.coerceAtLeast(clampedStart)
+        if (!isInitialized || clampedEnd + RESET_DROP_THRESHOLD_MS < smoothedEndMs) {
+            isInitialized = true
+            smoothedStartMs = clampedStart
+            smoothedEndMs = clampedEnd
+            lastSampleRealtimeMs = nowRealtimeMs
+            return smoothedStartMs to smoothedEndMs
+        }
+
+        val dt = (nowRealtimeMs - lastSampleRealtimeMs).coerceIn(0L, MAX_EXTRAPOLATION_STEP_MS)
+        val predictedEnd = smoothedEndMs + dt
+        smoothedEndMs = when {
+            clampedEnd - predictedEnd > SNAP_FORWARD_THRESHOLD_MS -> clampedEnd
+            clampedEnd > predictedEnd -> predictedEnd + ((clampedEnd - predictedEnd) * 0.45).toLong()
+            predictedEnd - clampedEnd <= NORMAL_BURST_GAP_MS -> predictedEnd
+            else -> {
+                val excess = (predictedEnd - clampedEnd) - NORMAL_BURST_GAP_MS
+                (predictedEnd - (excess * 0.25).toLong()).coerceAtLeast(clampedEnd)
+            }
+        }
+
+        smoothedStartMs = if (kotlin.math.abs(clampedStart - smoothedStartMs) > SNAP_START_THRESHOLD_MS) {
+            clampedStart
+        } else {
+            smoothedStartMs + ((clampedStart - smoothedStartMs) * 0.35).toLong()
+        }.coerceIn(0L, smoothedEndMs)
+
+        lastSampleRealtimeMs = nowRealtimeMs
+        return smoothedStartMs to smoothedEndMs
+    }
+
+    fun currentEstimatedEndMs(nowRealtimeMs: Long): Long {
+        if (!isInitialized) return 0L
+        val dt = (nowRealtimeMs - lastSampleRealtimeMs).coerceIn(0L, MAX_EXTRAPOLATION_STEP_MS)
+        return smoothedEndMs + dt
+    }
+
+    companion object {
+        private const val MAX_EXTRAPOLATION_STEP_MS = 2_000L
+        private const val NORMAL_BURST_GAP_MS = 1_500L
+        private const val SNAP_FORWARD_THRESHOLD_MS = 2_500L
+        private const val SNAP_START_THRESHOLD_MS = 3_000L
+        private const val RESET_DROP_THRESHOLD_MS = 4_000L
+    }
+}

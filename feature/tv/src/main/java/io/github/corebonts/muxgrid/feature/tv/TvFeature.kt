@@ -25,7 +25,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -69,7 +68,9 @@ import io.github.corebonts.muxgrid.core.data.TvheadendRepository
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.ConnectionStatusBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
@@ -268,9 +269,9 @@ private fun TvMvpContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 8.dp)
-                                .clip(RoundedCornerShape(14.dp))
+                                .clip(MuxGridShapes.Row)
                                 .background(MuxGridColors.CoralLive.copy(alpha = 0.16f))
-                                .border(1.dp, MuxGridColors.CoralLive.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                                .border(MuxGridBorders.Hairline, MuxGridColors.CoralLive.copy(alpha = 0.45f), MuxGridShapes.Row)
                                 .padding(horizontal = 16.dp, vertical = 10.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
@@ -434,9 +435,9 @@ private fun TvNavigationRail(
         modifier = Modifier
             .width(railWidth)
             .fillMaxHeight()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(MuxGridShapes.Dialog)
             .background(MuxGridColors.CardSurface)
-            .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(20.dp))
+            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
             .onFocusChanged { onRailFocusChanged(it.hasFocus) }
             .focusGroup()
             .focusRestorer(activeFocusRequester)
@@ -458,7 +459,7 @@ private fun TvNavigationRail(
                 Box(
                     modifier = Modifier
                         .size(34.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(MuxGridShapes.Control)
                         .background(MuxGridColors.AccentBlue),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -521,24 +522,24 @@ private fun TvRailItem(
     Surface(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
+        shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Row),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = if (selected) MuxGridColors.AccentBlue.copy(alpha = 0.25f) else Color.Transparent,
-            contentColor = if (selected) Color.White else MuxGridColors.TextSecondary,
+            contentColor = if (selected) MuxGridColors.OnAccent else MuxGridColors.TextSecondary,
             focusedContainerColor = MuxGridColors.FocusBorder,
             focusedContentColor = MuxGridColors.CanvasTv,
         ),
         border = ClickableSurfaceDefaults.border(
             border = Border(
                 border = BorderStroke(
-                    1.dp,
+                    MuxGridBorders.Hairline,
                     if (selected) MuxGridColors.AccentBlueLight.copy(alpha = 0.6f) else Color.Transparent,
                 ),
-                shape = RoundedCornerShape(14.dp),
+                shape = MuxGridShapes.Row,
             ),
             focusedBorder = Border(
-                border = BorderStroke(2.dp, MuxGridColors.FocusBorder),
-                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
+                shape = MuxGridShapes.Row,
             ),
         ),
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
@@ -666,7 +667,7 @@ private fun TvChannelCard(
     Surface(
         onClick = onClick,
         onLongClick = onLongClick,
-        shape = ClickableSurfaceDefaults.shape(shape = RoundedCornerShape(18.dp)),
+        shape = ClickableSurfaceDefaults.shape(shape = MuxGridShapes.CardLg),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = MuxGridColors.CardSurface,
             contentColor = MuxGridColors.TextPrimary,
@@ -675,12 +676,12 @@ private fun TvChannelCard(
         ),
         border = ClickableSurfaceDefaults.border(
             border = Border(
-                border = BorderStroke(1.dp, MuxGridColors.HairlineBorder),
-                shape = RoundedCornerShape(18.dp),
+                border = BorderStroke(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder),
+                shape = MuxGridShapes.CardLg,
             ),
             focusedBorder = Border(
-                border = BorderStroke(2.5.dp, MuxGridColors.FocusBorder),
-                shape = RoundedCornerShape(18.dp),
+                border = BorderStroke(MuxGridBorders.FocusedCard, MuxGridColors.FocusBorder),
+                shape = MuxGridShapes.CardLg,
             ),
         ),
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
@@ -784,9 +785,9 @@ private fun TvSettingsDialog(
         Column(
             modifier = Modifier
                 .widthIn(min = 440.dp, max = 640.dp)
-                .clip(RoundedCornerShape(20.dp))
+                .clip(MuxGridShapes.Dialog)
                 .background(MuxGridColors.CardSurfaceElevated)
-                .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(20.dp))
+                .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {

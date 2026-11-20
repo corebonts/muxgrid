@@ -2,6 +2,7 @@ package io.github.corebonts.muxgrid.core.player
 
 import android.content.Context
 import android.os.StatFs
+import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
 import io.github.corebonts.muxgrid.core.model.Channel
@@ -67,6 +68,7 @@ class MpvPlaybackEngine(
         },
     )
     private val liveStrategy: LiveStreamStrategy = HttpPassStrategy(proxy)
+    private val timeshiftSmoother = TimeshiftRangeSmoother()
 
     private val _state = MutableStateFlow(PlaybackState())
     override val state: StateFlow<PlaybackState> = _state.asStateFlow()
@@ -106,6 +108,12 @@ class MpvPlaybackEngine(
 
     @Volatile
     private var lastObservedMpvDurationMs: Long = 0L
+
+    @Volatile
+    private var lastGrowingServerSec: Long = 0L
+
+    @Volatile
+    private var lastGrowingTickElapsedMs: Long = 0L
 
     @Volatile
     private var explicitAudioOnly: Boolean = false
@@ -207,6 +215,9 @@ class MpvPlaybackEngine(
         hadFileLoaded = false
         retriedLiveReconnect = false
         lastObservedMpvDurationMs = 0L
+        lastGrowingServerSec = 0L
+        lastGrowingTickElapsedMs = 0L
+        timeshiftSmoother.reset()
         noticeClearJob?.cancel()
 
         platformLocks.requestFocusForStart(isRadio = channel.isRadio)
@@ -266,6 +277,9 @@ class MpvPlaybackEngine(
         hadFileLoaded = false
         retriedLiveReconnect = false
         lastObservedMpvDurationMs = 0L
+        lastGrowingServerSec = 0L
+        lastGrowingTickElapsedMs = 0L
+        timeshiftSmoother.reset()
         noticeClearJob?.cancel()
 
         platformLocks.requestFocusForStart(isRadio = explicitAudioOnly)
@@ -334,6 +348,9 @@ class MpvPlaybackEngine(
         pendingUrl = null
         activeChannel = null
         activeDvrEntry = null
+        lastGrowingServerSec = 0L
+        lastGrowingTickElapsedMs = 0L
+        timeshiftSmoother.reset()
         cacheMonitorJob?.cancel()
         cacheMonitorJob = null
         noticeClearJob?.cancel()
@@ -653,7 +670,14 @@ class MpvPlaybackEngine(
         val latest = dvrEntryProvider(entry.id) ?: entry
         val stillRecording = latest.state == DvrState.RECORDING
         val effectiveDurMs = if (stillRecording) {
-            val elapsedMs = ((nowEpochSecProvider() - latest.startEpochSec).coerceAtLeast(1L)) * 1000L
+            val serverSec = nowEpochSecProvider()
+            val nowElapsed = SystemClock.elapsedRealtime()
+            if (serverSec != lastGrowingServerSec || lastGrowingTickElapsedMs == 0L) {
+                lastGrowingServerSec = serverSec
+                lastGrowingTickElapsedMs = nowElapsed
+            }
+            val subSecMs = (nowElapsed - lastGrowingTickElapsedMs).coerceIn(0L, 950L)
+            val elapsedMs = ((serverSec - latest.startEpochSec).coerceAtLeast(1L)) * 1000L + subSecMs
             maxOf(lastObservedMpvDurationMs, elapsedMs)
         } else {
             maxOf(lastObservedMpvDurationMs, latest.durationSec * 1000L)
@@ -689,10 +713,15 @@ class MpvPlaybackEngine(
         val seekable = runCatching { instance.getPropertyBoolean("seekable") }.getOrNull()
             ?: currentState.isSeekable
 
+        val (smoothedStartMs, smoothedEndMs) = timeshiftSmoother.update(
+            rawStartMs = (cacheStartSec * 1000.0).toLong(),
+            rawEndMs = (cacheEndSec * 1000.0).toLong(),
+            nowRealtimeMs = SystemClock.elapsedRealtime(),
+        )
         val metrics = liveStrategy.computeTimeshiftMetrics(
             positionMs = (posSec * 1000.0).toLong(),
-            cacheStartMs = (cacheStartSec * 1000.0).toLong(),
-            cacheEndMs = (cacheEndSec * 1000.0).toLong(),
+            cacheStartMs = smoothedStartMs,
+            cacheEndMs = smoothedEndMs,
             timeshiftEnabled = currentTimeshiftWindow != TimeshiftWindow.OFF,
         )
 
@@ -875,7 +904,29 @@ class MpvPlaybackEngine(
 
     override fun eventProperty(property: String, value: Double) {
         when (property) {
-            "time-pos" -> _state.update { it.copy(positionMs = (value * 1000.0).toLong().coerceAtLeast(0L)) }
+            "time-pos" -> {
+                val posMs = (value * 1000.0).toLong().coerceAtLeast(0L)
+                val estEndMs = if (timeshiftSmoother.isInitialized) {
+                    timeshiftSmoother.currentEstimatedEndMs(SystemClock.elapsedRealtime())
+                } else {
+                    0L
+                }
+                _state.update { current ->
+                    if (!current.isRecordingPlayback && current.isTimeshiftSeekable && estEndMs > 0L) {
+                        val nextEndMs = maxOf(current.bufferEndMs, estEndMs)
+                        val nextWindowMs = (nextEndMs - current.bufferStartMs).coerceAtLeast(0L)
+                        val nextOffsetMs = (nextEndMs - posMs).coerceAtLeast(0L)
+                        current.copy(
+                            positionMs = posMs,
+                            bufferEndMs = nextEndMs,
+                            bufferWindowMs = nextWindowMs,
+                            liveEdgeOffsetMs = nextOffsetMs,
+                        )
+                    } else {
+                        current.copy(positionMs = posMs)
+                    }
+                }
+            }
             "duration" -> {
                 val durMs = (value * 1000.0).toLong().coerceAtLeast(0L)
                 if (durMs > 0L) {
@@ -1005,6 +1056,7 @@ class MpvPlaybackEngine(
                         }
                     } else if (hadFileLoaded && !retriedLiveReconnect) {
                         retriedLiveReconnect = true
+                        timeshiftSmoother.reset()
                         postTimeshiftNotice("Live stream reconnected", autoClearMs = 4_000L)
                         val url = liveStrategy.resolveLiveUrl(channel.id)
                         mpvExecutor.execute {
@@ -1094,7 +1146,7 @@ class MpvPlaybackEngine(
 
     companion object {
         private const val TAG = "MuxGridPlayer"
-        private const val CACHE_POLL_INTERVAL_MS = 500L
+        private const val CACHE_POLL_INTERVAL_MS = 200L
         private const val DEFAULT_RAM_CACHE_BYTES = 64L * 1024L * 1024L
         private const val DISK_SAFETY_RESERVE_BYTES = 512L * 1024L * 1024L
         private const val GROWING_WRITE_HEAD_SAFETY_MS = 2_000L
