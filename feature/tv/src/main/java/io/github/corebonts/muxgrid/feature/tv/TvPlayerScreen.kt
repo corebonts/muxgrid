@@ -5,12 +5,14 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,11 +21,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,8 +48,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.tv.material3.Border
 import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
+import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
@@ -53,7 +62,6 @@ import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
-import io.github.corebonts.muxgrid.core.designsystem.PlayerErrorToast
 import io.github.corebonts.muxgrid.core.designsystem.TimeshiftNoticeBanner
 import io.github.corebonts.muxgrid.core.designsystem.TrackAndPresetPanel
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMs
@@ -61,11 +69,16 @@ import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
+import io.github.corebonts.muxgrid.core.model.PlaybackError
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
+import io.github.corebonts.muxgrid.core.model.VideoAspectMode
 import io.github.corebonts.muxgrid.core.player.MuxGridVideoView
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
 import kotlinx.coroutines.delay
+
+private val PROGRESSIVE_SEEK_STEPS_MS = listOf(10_000L, 30_000L, 60_000L, 300_000L)
+private val PROGRESSIVE_SEEK_LABELS = listOf("10s", "30s", "1m", "5m")
 
 @Composable
 internal fun TvPlayerScreen(
@@ -73,12 +86,16 @@ internal fun TvPlayerScreen(
     playbackState: PlaybackState,
     activeChannel: Channel?,
     nowNext: NowNextProgram?,
+    channels: List<Channel>,
+    nowNextMap: Map<Long, NowNextProgram>,
     nowEpochSec: Long,
     hwDecPreset: HwDecPreset,
     imageLoader: ImageLoader,
     canZap: Boolean,
+    onSelectChannel: (Channel) -> Unit,
     onZapDelta: (Int) -> Unit,
     onSelectPreset: (HwDecPreset) -> Unit,
+    onSelectAspectMode: (VideoAspectMode) -> Unit,
     onExit: () -> Unit,
 ) {
     var hudVisible by remember { mutableStateOf(false) }
@@ -87,8 +104,14 @@ internal fun TvPlayerScreen(
     var zapOsdVisible by remember { mutableStateOf(true) }
     var seekOsdTrigger by remember { mutableLongStateOf(0L) }
     var seekOsdVisible by remember { mutableStateOf(false) }
-    var dismissedError by remember(playbackState.error) { mutableStateOf(false) }
     var suppressNextCenterKeyUp by remember { mutableStateOf(false) }
+
+    // Progressive seek state (10s -> 30s -> 1m -> 5m with short settle commit)
+    var pendingSeekTargetMs by remember { mutableStateOf<Long?>(null) }
+    var seekStepIndex by remember { mutableIntStateOf(0) }
+    var lastSeekDirection by remember { mutableIntStateOf(0) }
+    var lastSeekStepLabel by remember { mutableStateOf("") }
+    var lastSeekPressElapsedMs by remember { mutableLongStateOf(0L) }
 
     val playerFocusRequester = remember { FocusRequester() }
     val playPauseFocusRequester = remember { FocusRequester() }
@@ -101,6 +124,8 @@ internal fun TvPlayerScreen(
     }
 
     LaunchedEffect(playbackState.channelId, playbackState.dvrEntryId) {
+        pendingSeekTargetMs = null
+        seekOsdVisible = false
         zapOsdVisible = true
         zapOsdTrigger = System.currentTimeMillis()
     }
@@ -112,10 +137,19 @@ internal fun TvPlayerScreen(
         }
     }
 
-    LaunchedEffect(seekOsdTrigger, seekOsdVisible) {
+    // Settle commit for progressive seeking + OSD timeout
+    LaunchedEffect(seekOsdTrigger) {
+        val target = pendingSeekTargetMs
+        if (target != null) {
+            delay(450L)
+            playbackEngine.seekTo(target)
+            pendingSeekTargetMs = null
+        }
         if (seekOsdVisible) {
-            delay(2_500L)
+            delay(2_200L)
             seekOsdVisible = false
+            lastSeekDirection = 0
+            seekStepIndex = 0
         }
     }
 
@@ -123,12 +157,36 @@ internal fun TvPlayerScreen(
         if (hudVisible) {
             runCatching { playPauseFocusRequester.requestFocus() }
             if (!trackPanelOpen && playbackState.status == PlaybackStatus.PLAYING) {
-                delay(5_000L)
+                delay(6_000L)
                 hudVisible = false
             }
         } else {
             runCatching { playerFocusRequester.requestFocus() }
         }
+    }
+
+    fun triggerProgressiveSeek(direction: Int) {
+        val nowMs = System.currentTimeMillis()
+        if (lastSeekDirection == direction && (nowMs - lastSeekPressElapsedMs) <= 950L) {
+            seekStepIndex = (seekStepIndex + 1).coerceAtMost(PROGRESSIVE_SEEK_STEPS_MS.lastIndex)
+        } else {
+            seekStepIndex = 0
+        }
+        lastSeekDirection = direction
+        lastSeekPressElapsedMs = nowMs
+
+        val stepMs = PROGRESSIVE_SEEK_STEPS_MS[seekStepIndex] * direction
+        lastSeekStepLabel = if (direction < 0) {
+            "-${PROGRESSIVE_SEEK_LABELS[seekStepIndex]}"
+        } else {
+            "+${PROGRESSIVE_SEEK_LABELS[seekStepIndex]}"
+        }
+
+        val baseMs = pendingSeekTargetMs ?: playbackState.positionMs
+        val clamped = clampPreviewPositionMs(playbackState, baseMs + stepMs)
+        pendingSeekTargetMs = clamped
+        seekOsdVisible = true
+        seekOsdTrigger = nowMs
     }
 
     BackHandler {
@@ -177,15 +235,11 @@ internal fun TvPlayerScreen(
                         true
                     }
                     canSeekTimeline && code == KeyEvent.KEYCODE_MEDIA_REWIND -> {
-                        playbackEngine.seekBy(-30_000L)
-                        seekOsdVisible = true
-                        seekOsdTrigger = System.currentTimeMillis()
+                        triggerProgressiveSeek(-1)
                         true
                     }
                     canSeekTimeline && code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-                        playbackEngine.seekBy(30_000L)
-                        seekOsdVisible = true
-                        seekOsdTrigger = System.currentTimeMillis()
+                        triggerProgressiveSeek(1)
                         true
                     }
                     !hudVisible && !trackPanelOpen && !playbackState.isRecordingPlayback && code == KeyEvent.KEYCODE_DPAD_UP -> {
@@ -197,15 +251,11 @@ internal fun TvPlayerScreen(
                         true
                     }
                     !hudVisible && !trackPanelOpen && canSeekTimeline && code == KeyEvent.KEYCODE_DPAD_LEFT -> {
-                        playbackEngine.seekBy(-10_000L)
-                        seekOsdVisible = true
-                        seekOsdTrigger = System.currentTimeMillis()
+                        triggerProgressiveSeek(-1)
                         true
                     }
                     !hudVisible && !trackPanelOpen && canSeekTimeline && code == KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        playbackEngine.seekBy(30_000L)
-                        seekOsdVisible = true
-                        seekOsdTrigger = System.currentTimeMillis()
+                        triggerProgressiveSeek(1)
                         true
                     }
                     !hudVisible && !trackPanelOpen && (
@@ -243,14 +293,56 @@ internal fun TvPlayerScreen(
         }
 
         val err = playbackState.error
-        if (err != null && !dismissedError) {
-            PlayerErrorToast(
-                error = err,
-                onDismiss = { dismissedError = true },
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(28.dp),
-            )
+        if (err != null) {
+            val okFocusRequester = remember { FocusRequester() }
+            LaunchedEffect(err) {
+                hudVisible = false
+                trackPanelOpen = false
+                runCatching { okFocusRequester.requestFocus() }
+            }
+            Dialog(onDismissRequest = onExit) {
+                Column(
+                    modifier = Modifier
+                        .widthIn(min = 360.dp, max = 520.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(MuxGridColors.CardSurfaceElevated)
+                        .border(1.dp, MuxGridColors.CoralLive.copy(alpha = 0.55f), RoundedCornerShape(20.dp))
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = if (err is PlaybackError.TunerBusy) "Tuner Busy" else "Playback Error",
+                        style = MuxGridType.Title,
+                        fontSize = 20.sp,
+                        color = MuxGridColors.TextPrimary,
+                    )
+                    Text(
+                        text = err.message,
+                        style = MuxGridType.CardSubtitle,
+                        fontSize = 15.sp,
+                        color = MuxGridColors.TextSecondary,
+                    )
+                    if (err is PlaybackError.TunerBusy) {
+                        Text(
+                            text = "The single tuner is currently busy recording on another mux.",
+                            style = MuxGridType.TabularSmall,
+                            color = MuxGridColors.TextMuted,
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        Button(
+                            onClick = onExit,
+                            modifier = Modifier.focusRequester(okFocusRequester),
+                            colors = tvPrimaryButtonColors(),
+                        ) {
+                            Text("OK", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
         }
 
         // Minimal 3s zap/start OSD when full HUD is hidden
@@ -341,7 +433,7 @@ internal fun TvPlayerScreen(
             }
         }
 
-        // Minimal seek OSD for D-pad Left/Right on DVR & Live Timeshift
+        // Progressive seek OSD for D-pad Left/Right on DVR & Live Timeshift
         AnimatedVisibility(
             visible = seekOsdVisible && canSeekTimeline && !hudVisible && !trackPanelOpen,
             enter = fadeIn(),
@@ -350,9 +442,10 @@ internal fun TvPlayerScreen(
                 .align(Alignment.BottomCenter)
                 .padding(32.dp),
         ) {
+            val shownPosMs = pendingSeekTargetMs ?: playbackState.positionMs
             Column(
                 modifier = Modifier
-                    .widthIn(min = 380.dp, max = 640.dp)
+                    .widthIn(min = 380.dp, max = 660.dp)
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
                     .background(MuxGridColors.ScrimSurface)
@@ -367,12 +460,25 @@ internal fun TvPlayerScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            text = playbackState.programTitle ?: "Recording",
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = playbackState.programTitle ?: "Recording",
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            if (lastSeekStepLabel.isNotEmpty()) {
+                                Text(
+                                    text = lastSeekStepLabel,
+                                    color = MuxGridColors.AccentBlueLight,
+                                    style = MuxGridType.TabularSmall,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -381,38 +487,52 @@ internal fun TvPlayerScreen(
                                 DvrStateBadge(state = DvrState.RECORDING)
                             }
                             Text(
-                                text = "${formatDurationMs(playbackState.positionMs)} / ${formatDurationMs(playbackState.durationMs)}",
+                                text = "${formatDurationMs(shownPosMs)} / ${formatDurationMs(playbackState.durationMs)}",
                                 style = MuxGridType.TabularNumber,
                             )
                         }
                     }
                     LiveProgressBar(
-                        progress = (playbackState.positionMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f),
+                        progress = (shownPosMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f),
                         fillColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.AccentBlueLight,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
                     val bufWindow = playbackState.bufferWindowMs.coerceAtLeast(1L)
-                    val frac = ((playbackState.positionMs - playbackState.bufferStartMs).toFloat() / bufWindow.toFloat()).coerceIn(0f, 1f)
+                    val frac = ((shownPosMs - playbackState.bufferStartMs).toFloat() / bufWindow.toFloat()).coerceIn(0f, 1f)
+                    val offsetMs = (playbackState.bufferEndMs - shownPosMs).coerceAtLeast(0L)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = playbackState.channelName ?: activeChannel?.name ?: "Live TV",
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            if (lastSeekStepLabel.isNotEmpty()) {
+                                Text(
+                                    text = lastSeekStepLabel,
+                                    color = MuxGridColors.AccentBlueLight,
+                                    style = MuxGridType.TabularSmall,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
                         Text(
-                            text = playbackState.channelName ?: activeChannel?.name ?: "Live TV",
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text = if (playbackState.isBehindLive) {
-                                "-${formatDurationMs(playbackState.liveEdgeOffsetMs)} · Buffer ${formatDurationMs(bufWindow)}"
+                            text = if (offsetMs >= 2_000L) {
+                                "-${formatDurationMs(offsetMs)} · Buffer ${formatDurationMs(bufWindow)}"
                             } else {
                                 "LIVE · Buffer ${formatDurationMs(bufWindow)}"
                             },
                             style = MuxGridType.TabularNumber,
-                            color = if (playbackState.isBehindLive) MuxGridColors.AccentBlueLight else MuxGridColors.CoralLive,
+                            color = if (offsetMs >= 2_000L) MuxGridColors.AccentBlueLight else MuxGridColors.CoralLive,
                         )
                     }
                     LiveProgressBar(
@@ -423,7 +543,7 @@ internal fun TvPlayerScreen(
             }
         }
 
-        // Full TV HUD overlay (toggled with OK/Select)
+        // Full TV HUD overlay (toggled with OK/Select) + Horizontal Quick Channel Strip
         AnimatedVisibility(
             visible = hudVisible,
             enter = fadeIn(),
@@ -440,8 +560,8 @@ internal fun TvPlayerScreen(
                                 listOf(Color.Transparent, MuxGridColors.ScrimSurface),
                             ),
                         )
-                        .padding(horizontal = 36.dp, vertical = 28.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                        .padding(horizontal = 36.dp, vertical = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -613,6 +733,78 @@ internal fun TvPlayerScreen(
                             Text("Stop")
                         }
                     }
+
+                    // Horizontal Quick Channel Strip underneath transport controls
+                    if (!playbackState.isRecordingPlayback && channels.size > 1) {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(vertical = 2.dp),
+                        ) {
+                            items(channels, key = { it.id }) { ch ->
+                                val isCurrent = ch.id == playbackState.channelId
+                                val chNow = nowNextMap[ch.id]
+                                Surface(
+                                    onClick = {
+                                        onSelectChannel(ch)
+                                        hudVisible = false
+                                    },
+                                    modifier = Modifier.width(210.dp),
+                                    shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(12.dp)),
+                                    colors = ClickableSurfaceDefaults.colors(
+                                        containerColor = if (isCurrent) MuxGridColors.AccentBlue.copy(alpha = 0.28f) else MuxGridColors.CardSurface,
+                                        contentColor = MuxGridColors.TextPrimary,
+                                        focusedContainerColor = MuxGridColors.FocusBorder,
+                                        focusedContentColor = MuxGridColors.CanvasTv,
+                                    ),
+                                    border = ClickableSurfaceDefaults.border(
+                                        border = Border(
+                                            border = BorderStroke(
+                                                1.dp,
+                                                if (isCurrent) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
+                                            ),
+                                            shape = RoundedCornerShape(12.dp),
+                                        ),
+                                        focusedBorder = Border(
+                                            border = BorderStroke(2.dp, MuxGridColors.FocusBorder),
+                                            shape = RoundedCornerShape(12.dp),
+                                        ),
+                                    ),
+                                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        ChannelPiconBadge(
+                                            channelNumber = ch.formattedNumber,
+                                            channelName = ch.name,
+                                            piconModel = ch.icon?.let { PiconModel(ch.id, it) },
+                                            imageLoader = imageLoader,
+                                            size = 32.dp,
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = if (ch.number > 0) "${ch.formattedNumber} · ${ch.name}" else ch.name,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            chNow?.now?.title?.let { title ->
+                                                Text(
+                                                    text = title,
+                                                    fontSize = 10.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -631,13 +823,34 @@ internal fun TvPlayerScreen(
                     selectedAudioId = playbackState.selectedAudioId,
                     selectedSubtitleId = playbackState.selectedSubtitleId,
                     hwDecPreset = hwDecPreset,
+                    aspectMode = playbackState.aspectMode,
                     onSelectAudio = { playbackEngine.setAudioTrack(it) },
                     onSelectSubtitle = { playbackEngine.setSubtitleTrack(it) },
                     onSelectPreset = onSelectPreset,
+                    onSelectAspectMode = onSelectAspectMode,
                     onClose = { trackPanelOpen = false },
                     modifier = Modifier.widthIn(max = 560.dp),
                 )
             }
         }
+    }
+}
+
+private fun clampPreviewPositionMs(state: PlaybackState, requestedMs: Long): Long {
+    val nonNeg = requestedMs.coerceAtLeast(0L)
+    return when {
+        state.isGrowingRecording -> {
+            val maxSafe = (state.durationMs - 2_000L).coerceAtLeast(0L)
+            nonNeg.coerceAtMost(maxSafe)
+        }
+        state.isRecordingPlayback && state.durationMs > 0L -> {
+            nonNeg.coerceAtMost(state.durationMs)
+        }
+        !state.isRecordingPlayback && state.isTimeshiftSeekable -> {
+            val minStart = state.bufferStartMs.coerceAtLeast(0L)
+            val maxEnd = (state.bufferEndMs - 1_500L).coerceAtLeast(minStart)
+            nonNeg.coerceIn(minStart, maxEnd)
+        }
+        else -> nonNeg
     }
 }

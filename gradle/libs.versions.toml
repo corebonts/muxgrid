@@ -57,6 +57,7 @@ tink-android = { module = "com.google.crypto.tink:tink-android", version.ref = "
 
 # Blur (non-video screens)
 haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
+haze-blur = { module = "dev.chrisbanes.haze:haze-blur", version.ref = "haze" }
 
 # Testing
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }

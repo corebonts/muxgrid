@@ -18,7 +18,8 @@ Built as a **single unified APK** targeting both modern Android phones/tablets a
 ## Current Implementation Status
 
 - **Completed (M0–M3):** Multi-module Gradle project (`compileSdk 37.2`, `targetSdk 36`, `minSdk 28`), HTSP binary client + atomic shadow-store resync + dedicated HTSP VFS connection (`HtspVfsClient`), DataStore + Tink credential storage, Coil HTSP/HTTP picon fetcher, `LocalMediaProxy` (live streams, completed `/dvrfile` Range relay with ticket auto-refresh, and growing recording HTSP tail-follow mode), `libmpv` playback engine (`mediacodec` on TV, `mediacodec-copy` + `bwdif` on phone, disk-backed live timeshift ring buffer with free-space check & buffer-full auto-resume), onboarding Server Setup, Mobile & TV Live/Guide/Recordings tabs with series grouping, DVR management, resume sync, live timeshift seekbar (`-MM:SS · Back to Live`), and "Watch from Start" chase-play for in-progress recordings.
-- **Planned (M4–M6):** `MediaSessionService` + PiP + mobile gestures + Haze blur + mini-player, dedicated TV Navigation Rail + progressive seek + quick channel strip, and multi-profile switching.
+- **Implemented (M4–M5, awaiting device verification):** Media3 `MediaSessionService` + `SimpleBasePlayer` adapter, explicit `AudioFocusRequest` / `ACTION_AUDIO_BECOMING_NOISY` / `WifiLock` / `PARTIAL_WAKE_LOCK`, `vid=no` audio-only backgrounding, PiP support, mobile gestures (double-tap seek, brightness/volume vertical drag), aspect ratio modes, Quick-Zap channel drawer, Haze 2.1.0 frosted-glass chrome, persistent mini-player, adaptive tablet/landscape navigation rail & grid, TV collapsible Navigation Rail, horizontal timeline EPG with red "Now" hairline, progressive D-pad seeking (`10s → 30s → 1m → 5m`), and TV HUD quick channel strip.
+- **Planned (M6):** Multi-profile switching, automated release signing, and Android 17 `ACCESS_LOCAL_NETWORK` readiness.
 
 ## Build, Test & Sideload
 

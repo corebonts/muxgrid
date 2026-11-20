@@ -9,30 +9,42 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -46,12 +58,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import coil3.ImageLoader
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.blur.HazeColorEffect
+import dev.chrisbanes.haze.blur.hazeBlur
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.data.TvheadendRepository
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
@@ -70,6 +90,8 @@ import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LiveFilter
 import io.github.corebonts.muxgrid.core.model.MainTab
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
+import io.github.corebonts.muxgrid.core.model.PlaybackState
+import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
@@ -87,6 +109,11 @@ private enum class MobileRoute {
 fun MobileMvpRoot(
     repository: TvheadendRepository,
     playbackEngine: PlaybackEngine,
+    isInPictureInPictureMode: Boolean = false,
+    openPlayerSignal: Int = 0,
+    canEnterPip: Boolean = false,
+    onPlayerScreenActiveChanged: (Boolean) -> Unit = {},
+    onEnterPip: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val profile by repository.serverProfile.collectAsState()
@@ -99,6 +126,8 @@ fun MobileMvpRoot(
     val favorites by repository.favoriteChannelIds.collectAsState()
     val hwDecPreset by repository.hwDecPreset.collectAsState()
     val timeshiftWindow by repository.timeshiftWindow.collectAsState()
+    val backgroundPlayEnabled by repository.backgroundPlayEnabled.collectAsState()
+    val pipEnabled by repository.pipEnabled.collectAsState()
     val playbackState by playbackEngine.state.collectAsState()
 
     val currentProfile = profile
@@ -122,12 +151,31 @@ fun MobileMvpRoot(
     var guideChannelId by remember { mutableStateOf<Long?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
 
+    LaunchedEffect(route) {
+        onPlayerScreenActiveChanged(route == MobileRoute.PLAYER)
+    }
+    DisposableEffect(Unit) {
+        onDispose { onPlayerScreenActiveChanged(false) }
+    }
+
+    LaunchedEffect(openPlayerSignal) {
+        if (openPlayerSignal > 0 && playbackState.status != PlaybackStatus.IDLE) {
+            if (!playbackState.isRadio && playbackState.isAudioOnly) {
+                playbackEngine.setAudioOnly(false)
+            }
+            route = MobileRoute.PLAYER
+        }
+    }
+
     val filteredChannels = remember(channels, activeFilter, favorites) {
         filterChannels(channels, activeFilter, favorites)
     }
 
     val offsetMs = (connectionState as? ConnectionState.Connected)?.serverClockOffsetMs ?: 0L
     val nowEpochSec = (System.currentTimeMillis() + offsetMs) / 1000L
+
+    val hasMiniPlayer = playbackState.status != PlaybackStatus.IDLE &&
+        (playbackState.channelId != null || playbackState.dvrEntryId != null)
 
     when (route) {
         MobileRoute.ONBOARDING -> {
@@ -150,80 +198,112 @@ fun MobileMvpRoot(
             BackHandler(enabled = activeTab != MainTab.LIVE) {
                 activeTab = MainTab.LIVE
             }
-            MobileMainScaffold(
-                activeTab = activeTab,
-                connectionState = connectionState,
-                onSelectTab = { activeTab = it },
-                onOpenSettings = { settingsOpen = true },
-                onOpenServerSetup = { route = MobileRoute.ONBOARDING },
-                onRetryConnect = { repository.reconnect() },
-            ) {
-                when (activeTab) {
-                    MainTab.LIVE -> {
-                        MobileLiveChannelsTab(
-                            connectionState = connectionState,
-                            channels = filteredChannels,
-                            filters = remember(tags) { buildLiveFilters(tags) },
-                            activeFilter = activeFilter,
-                            favorites = favorites,
-                            nowNextMap = nowNextMap,
-                            nowEpochSec = nowEpochSec,
-                            imageLoader = repository.imageLoader,
-                            onSelectFilter = { activeFilter = it },
-                            onChannelClick = { channel ->
-                                playbackEngine.playChannel(channel, hwDecPreset)
-                                route = MobileRoute.PLAYER
-                            },
-                            onToggleFavorite = { channel ->
-                                scope.launch { repository.toggleFavorite(channel.id) }
-                            },
-                            onOpenGuideForChannel = { channel ->
-                                guideChannelId = channel.id
-                                activeTab = MainTab.GUIDE
-                            },
-                            onRecordEvent = { eventId -> repository.scheduleRecording(eventId) },
-                        )
-                    }
-                    MainTab.GUIDE -> {
-                        MobileGuideScreen(
-                            channels = channels,
-                            epgByChannel = epgByChannel,
-                            dvrEntries = dvrEntries,
-                            nowEpochSec = nowEpochSec,
-                            imageLoader = repository.imageLoader,
-                            initialSelectedChannelId = guideChannelId,
-                            onWatchChannel = { channel ->
-                                playbackEngine.playChannel(channel, hwDecPreset)
-                                route = MobileRoute.PLAYER
-                            },
-                            onPlayRecording = { entry, channel, startPosSec ->
-                                playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startPosSec)
-                                route = MobileRoute.PLAYER
-                            },
-                            onScheduleRecording = { eventId -> repository.scheduleRecording(eventId) },
-                            onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
-                            onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
-                        )
-                    }
-                    MainTab.RECORDINGS -> {
-                        MobileRecordingsScreen(
-                            dvrEntries = dvrEntries,
-                            channels = channels,
-                            nowEpochSec = nowEpochSec,
-                            imageLoader = repository.imageLoader,
-                            onWatchLiveChannel = { channel ->
-                                playbackEngine.playChannel(channel, hwDecPreset)
-                                route = MobileRoute.PLAYER
-                            },
-                            onPlayRecording = { entry, channel, startPosSec ->
-                                playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startPosSec)
-                                route = MobileRoute.PLAYER
-                            },
-                            onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
-                            onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
-                            onDeleteRecording = { dvrId -> repository.deleteRecording(dvrId) },
-                            onToggleWatched = { dvrId, watched -> repository.markRecordingWatched(dvrId, watched) },
-                        )
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val useRail = maxWidth >= 600.dp
+                val gridColumns = if (useRail) {
+                    (maxWidth / 310.dp).toInt().coerceIn(2, 3)
+                } else {
+                    1
+                }
+                val bottomPad = when {
+                    useRail && hasMiniPlayer -> 92.dp
+                    useRail -> 24.dp
+                    hasMiniPlayer -> 172.dp
+                    else -> 100.dp
+                }
+
+                MobileMainScaffold(
+                    activeTab = activeTab,
+                    useNavigationRail = useRail,
+                    connectionState = connectionState,
+                    playbackState = playbackState,
+                    channels = channels,
+                    nowNextMap = nowNextMap,
+                    imageLoader = repository.imageLoader,
+                    onSelectTab = { activeTab = it },
+                    onOpenSettings = { settingsOpen = true },
+                    onOpenServerSetup = { route = MobileRoute.ONBOARDING },
+                    onRetryConnect = { repository.reconnect() },
+                    onExpandMiniPlayer = {
+                        if (!playbackState.isRadio && playbackState.isAudioOnly) {
+                            playbackEngine.setAudioOnly(false)
+                        }
+                        route = MobileRoute.PLAYER
+                    },
+                    onToggleMiniPlayerPause = { playbackEngine.togglePause() },
+                    onStopMiniPlayer = { playbackEngine.stop() },
+                ) {
+                    when (activeTab) {
+                        MainTab.LIVE -> {
+                            MobileLiveChannelsTab(
+                                connectionState = connectionState,
+                                channels = filteredChannels,
+                                filters = remember(tags) { buildLiveFilters(tags) },
+                                activeFilter = activeFilter,
+                                favorites = favorites,
+                                nowNextMap = nowNextMap,
+                                nowEpochSec = nowEpochSec,
+                                imageLoader = repository.imageLoader,
+                                gridColumns = gridColumns,
+                                bottomContentPadding = bottomPad,
+                                onSelectFilter = { activeFilter = it },
+                                onChannelClick = { channel ->
+                                    playbackEngine.playChannel(channel, hwDecPreset)
+                                    route = MobileRoute.PLAYER
+                                },
+                                onToggleFavorite = { channel ->
+                                    scope.launch { repository.toggleFavorite(channel.id) }
+                                },
+                                onOpenGuideForChannel = { channel ->
+                                    guideChannelId = channel.id
+                                    activeTab = MainTab.GUIDE
+                                },
+                                onRecordEvent = { eventId -> repository.scheduleRecording(eventId) },
+                            )
+                        }
+                        MainTab.GUIDE -> {
+                            MobileGuideScreen(
+                                channels = channels,
+                                epgByChannel = epgByChannel,
+                                dvrEntries = dvrEntries,
+                                nowEpochSec = nowEpochSec,
+                                imageLoader = repository.imageLoader,
+                                initialSelectedChannelId = guideChannelId,
+                                bottomContentPadding = bottomPad,
+                                onWatchChannel = { channel ->
+                                    playbackEngine.playChannel(channel, hwDecPreset)
+                                    route = MobileRoute.PLAYER
+                                },
+                                onPlayRecording = { entry, channel, startPosSec ->
+                                    playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startPosSec)
+                                    route = MobileRoute.PLAYER
+                                },
+                                onScheduleRecording = { eventId -> repository.scheduleRecording(eventId) },
+                                onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
+                                onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
+                            )
+                        }
+                        MainTab.RECORDINGS -> {
+                            MobileRecordingsScreen(
+                                dvrEntries = dvrEntries,
+                                channels = channels,
+                                nowEpochSec = nowEpochSec,
+                                imageLoader = repository.imageLoader,
+                                bottomContentPadding = bottomPad,
+                                onWatchLiveChannel = { channel ->
+                                    playbackEngine.playChannel(channel, hwDecPreset)
+                                    route = MobileRoute.PLAYER
+                                },
+                                onPlayRecording = { entry, channel, startPosSec ->
+                                    playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startPosSec)
+                                    route = MobileRoute.PLAYER
+                                },
+                                onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
+                                onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
+                                onDeleteRecording = { dvrId -> repository.deleteRecording(dvrId) },
+                                onToggleWatched = { dvrId, watched -> repository.markRecordingWatched(dvrId, watched) },
+                            )
+                        }
                     }
                 }
             }
@@ -234,12 +314,20 @@ fun MobileMvpRoot(
                     connectionState = connectionState,
                     hwDecPreset = hwDecPreset,
                     timeshiftWindow = timeshiftWindow,
+                    backgroundPlayEnabled = backgroundPlayEnabled,
+                    pipEnabled = pipEnabled,
                     onSelectPreset = { preset ->
                         scope.launch { repository.setHwDecPreset(preset) }
                         playbackEngine.applyPreset(preset)
                     },
                     onSelectTimeshiftWindow = { window ->
                         scope.launch { repository.setTimeshiftWindow(window) }
+                    },
+                    onToggleBackgroundPlay = { enabled ->
+                        scope.launch { repository.setBackgroundPlayEnabled(enabled) }
+                    },
+                    onTogglePip = { enabled ->
+                        scope.launch { repository.setPipEnabled(enabled) }
                     },
                     onOpenServerSetup = {
                         settingsOpen = false
@@ -252,31 +340,49 @@ fun MobileMvpRoot(
         MobileRoute.PLAYER -> {
             val activeChannel = channels.firstOrNull { it.id == playbackState.channelId }
             val activeNowNext = activeChannel?.let { nowNextMap[it.id] }
-            BackHandler {
-                playbackEngine.stop()
-                route = MobileRoute.MAIN
+            val minimizeOnBack = playbackState.isRadio || playbackState.isAudioOnly || backgroundPlayEnabled
+            BackHandler(enabled = !isInPictureInPictureMode) {
+                if (minimizeOnBack) {
+                    playbackEngine.setAudioOnly(true)
+                    route = MobileRoute.MAIN
+                } else {
+                    playbackEngine.stop()
+                    route = MobileRoute.MAIN
+                }
             }
+            val zapPool = filteredChannels.ifEmpty { channels }
             MobilePlayerScreen(
                 playbackEngine = playbackEngine,
                 playbackState = playbackState,
                 activeChannel = activeChannel,
                 nowNext = activeNowNext,
+                channels = zapPool,
+                nowNextMap = nowNextMap,
+                nowEpochSec = nowEpochSec,
                 hwDecPreset = hwDecPreset,
                 imageLoader = repository.imageLoader,
-                canZap = filteredChannels.size > 1,
+                isInPip = isInPictureInPictureMode,
+                canEnterPip = canEnterPip,
+                canZap = zapPool.size > 1,
+                onEnterPip = onEnterPip,
+                onMinimizeToAudio = {
+                    playbackEngine.setAudioOnly(true)
+                    route = MobileRoute.MAIN
+                },
+                onSelectChannel = { channel ->
+                    playbackEngine.playChannel(channel, hwDecPreset)
+                },
                 onZapPrevious = {
-                    val list = filteredChannels.ifEmpty { channels }
-                    if (list.isNotEmpty()) {
-                        val idx = list.indexOfFirst { it.id == playbackState.channelId }
-                        val prev = if (idx <= 0) list.last() else list[idx - 1]
+                    if (zapPool.isNotEmpty()) {
+                        val idx = zapPool.indexOfFirst { it.id == playbackState.channelId }
+                        val prev = if (idx <= 0) zapPool.last() else zapPool[idx - 1]
                         playbackEngine.playChannel(prev, hwDecPreset)
                     }
                 },
                 onZapNext = {
-                    val list = filteredChannels.ifEmpty { channels }
-                    if (list.isNotEmpty()) {
-                        val idx = list.indexOfFirst { it.id == playbackState.channelId }
-                        val next = if (idx < 0 || idx >= list.lastIndex) list.first() else list[idx + 1]
+                    if (zapPool.isNotEmpty()) {
+                        val idx = zapPool.indexOfFirst { it.id == playbackState.channelId }
+                        val next = if (idx < 0 || idx >= zapPool.lastIndex) zapPool.first() else zapPool[idx + 1]
                         playbackEngine.playChannel(next, hwDecPreset)
                     }
                 },
@@ -284,8 +390,19 @@ fun MobileMvpRoot(
                     scope.launch { repository.setHwDecPreset(preset) }
                     playbackEngine.applyPreset(preset)
                 },
-                onExit = {
+                onSelectAspectMode = { mode ->
+                    playbackEngine.setVideoAspectMode(mode)
+                },
+                onPlaybackCompleted = {
                     playbackEngine.stop()
+                    route = MobileRoute.MAIN
+                },
+                onExit = {
+                    if (minimizeOnBack) {
+                        playbackEngine.setAudioOnly(true)
+                    } else {
+                        playbackEngine.stop()
+                    }
                     route = MobileRoute.MAIN
                 },
             )
@@ -294,17 +411,37 @@ fun MobileMvpRoot(
 }
 
 @Composable
+private fun rememberFrostedGlassStyle(): HazeBlurStyle = remember {
+    HazeBlurStyle {
+        blurRadius(22.dp)
+        backgroundColor(MuxGridColors.CanvasPhone)
+        colorEffects(listOf(HazeColorEffect.tint(MuxGridColors.GlassSurface)))
+        fallbackColorEffect(HazeColorEffect.tint(MuxGridColors.ScrimSurface))
+    }
+}
+
+@Composable
 private fun MobileMainScaffold(
     activeTab: MainTab,
+    useNavigationRail: Boolean,
     connectionState: ConnectionState,
+    playbackState: PlaybackState,
+    channels: List<Channel>,
+    nowNextMap: Map<Long, NowNextProgram>,
+    imageLoader: ImageLoader,
     onSelectTab: (MainTab) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenServerSetup: () -> Unit,
     onRetryConnect: () -> Unit,
+    onExpandMiniPlayer: () -> Unit,
+    onToggleMiniPlayerPause: () -> Unit,
+    onStopMiniPlayer: () -> Unit,
     content: @Composable () -> Unit,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var visibleError by remember { mutableStateOf<ConnectionState.Error?>(null) }
+    val hazeState = rememberHazeState()
+    val glassStyle = rememberFrostedGlassStyle()
 
     LaunchedEffect(connectionState, lifecycleOwner) {
         visibleError = null
@@ -318,128 +455,338 @@ private fun MobileMainScaffold(
         }
     }
 
-    Box(
+    val hasMiniPlayer = playbackState.status != PlaybackStatus.IDLE &&
+        (playbackState.channelId != null || playbackState.dvrEntryId != null)
+    val miniChannel = remember(playbackState.channelId, channels) {
+        channels.firstOrNull { it.id == playbackState.channelId }
+    }
+    val miniNowNext = miniChannel?.let { nowNextMap[it.id] }
+
+    Row(
         modifier = Modifier
             .fillMaxSize()
             .background(MuxGridColors.CanvasPhone)
             .statusBarsPadding(),
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column {
-                    Text("MuxGrid", style = MuxGridType.Title)
-                    Text(
-                        text = when (activeTab) {
-                            MainTab.LIVE -> "Live TV & Radio"
-                            MainTab.GUIDE -> "Program Guide"
-                            MainTab.RECORDINGS -> "DVR Recordings"
-                        },
-                        style = MuxGridType.TabularSmall,
-                    )
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    ConnectionStatusBadge(state = connectionState)
-                    Text(
-                        text = "Settings",
-                        color = MuxGridColors.AccentBlueLight,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(MuxGridColors.CardSurface)
-                            .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(50))
-                            .clickable(onClick = onOpenSettings)
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                }
-            }
+        if (useNavigationRail) {
+            MobileNavigationRail(
+                activeTab = activeTab,
+                hazeState = hazeState,
+                glassStyle = glassStyle,
+                onSelectTab = onSelectTab,
+                onOpenSettings = onOpenSettings,
+            )
+        }
 
-            visibleError?.let { errState ->
+        Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+            // Haze source wraps non-video browsing content
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .hazeSource(state = hazeState),
+            ) {
+                // Header
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(MuxGridColors.CoralLive.copy(alpha = 0.14f))
-                        .border(1.dp, MuxGridColors.CoralLive.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
-                        .padding(12.dp),
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = errState.message,
-                        color = MuxGridColors.TextPrimary,
-                        fontSize = 13.sp,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = if (errState.isAuthError) "Edit" else "Retry",
-                        color = MuxGridColors.AccentBlueLight,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
+                    Column {
+                        Text("MuxGrid", style = MuxGridType.Title)
+                        Text(
+                            text = when (activeTab) {
+                                MainTab.LIVE -> "Live TV & Radio"
+                                MainTab.GUIDE -> "Program Guide"
+                                MainTab.RECORDINGS -> "DVR Recordings"
+                            },
+                            style = MuxGridType.TabularSmall,
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ConnectionStatusBadge(state = connectionState)
+                        if (!useNavigationRail) {
+                            Text(
+                                text = "Settings",
+                                color = MuxGridColors.AccentBlueLight,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(MuxGridColors.CardSurface)
+                                    .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(50))
+                                    .clickable(onClick = onOpenSettings)
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
+                }
+
+                visibleError?.let { errState ->
+                    Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                if (errState.isAuthError) onOpenServerSetup() else onRetryConnect()
-                            }
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                    )
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MuxGridColors.CoralLive.copy(alpha = 0.14f))
+                            .border(1.dp, MuxGridColors.CoralLive.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = errState.message,
+                            color = MuxGridColors.TextPrimary,
+                            fontSize = 13.sp,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = if (errState.isAuthError) "Edit" else "Retry",
+                            color = MuxGridColors.AccentBlueLight,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    if (errState.isAuthError) onOpenServerSetup() else onRetryConnect()
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+
+                Box(modifier = Modifier.weight(1f)) {
+                    content()
                 }
             }
 
-            Box(modifier = Modifier.weight(1f)) {
-                content()
+            // Bottom floating chrome (Mini-player + Portrait Bottom Nav Pill)
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (hasMiniPlayer) {
+                    MobileMiniPlayerBar(
+                        playbackState = playbackState,
+                        channel = miniChannel,
+                        nowNext = miniNowNext,
+                        imageLoader = imageLoader,
+                        hazeState = hazeState,
+                        glassStyle = glassStyle,
+                        onExpand = onExpandMiniPlayer,
+                        onTogglePause = onToggleMiniPlayerPause,
+                        onStop = onStopMiniPlayer,
+                        modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
+                    )
+                }
+
+                if (!useNavigationRail) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(24.dp))
+                            .hazeBlur(input = HazeInput.Sources(hazeState), style = glassStyle)
+                            .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(24.dp))
+                            .padding(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        listOf(
+                            MainTab.LIVE to "Live",
+                            MainTab.GUIDE to "Guide",
+                            MainTab.RECORDINGS to "Recordings",
+                        ).forEach { (tab, label) ->
+                            val selected = tab == activeTab
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(if (selected) MuxGridColors.AccentBlue else Color.Transparent)
+                                    .clickable { onSelectTab(tab) }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (selected) Color.White else MuxGridColors.TextSecondary,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+}
 
-        // Floating translucent bottom navigation pill
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
-                .background(MuxGridColors.ScrimSurface)
-                .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(24.dp))
-                .padding(6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
+@Composable
+private fun MobileNavigationRail(
+    activeTab: MainTab,
+    hazeState: HazeState,
+    glassStyle: HazeBlurStyle,
+    onSelectTab: (MainTab) -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(96.dp)
+            .navigationBarsPadding()
+            .padding(start = 10.dp, top = 10.dp, bottom = 10.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .hazeBlur(input = HazeInput.Sources(hazeState), style = glassStyle)
+            .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(22.dp))
+            .padding(8.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(
                 MainTab.LIVE to "Live",
                 MainTab.GUIDE to "Guide",
-                MainTab.RECORDINGS to "Recordings",
+                MainTab.RECORDINGS to "DVR",
             ).forEach { (tab, label) ->
                 val selected = tab == activeTab
                 Box(
                     modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(18.dp))
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
                         .background(if (selected) MuxGridColors.AccentBlue else Color.Transparent)
                         .clickable { onSelectTab(tab) }
-                        .padding(vertical = 10.dp),
+                        .padding(vertical = 12.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text = label,
                         color = if (selected) Color.White else MuxGridColors.TextSecondary,
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                     )
                 }
             }
         }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(MuxGridColors.CardSurface)
+                .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(14.dp))
+                .clickable(onClick = onOpenSettings)
+                .padding(vertical = 10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "Settings",
+                color = MuxGridColors.AccentBlueLight,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MobileMiniPlayerBar(
+    playbackState: PlaybackState,
+    channel: Channel?,
+    nowNext: NowNextProgram?,
+    imageLoader: ImageLoader,
+    hazeState: HazeState,
+    glassStyle: HazeBlurStyle,
+    onExpand: () -> Unit,
+    onTogglePause: () -> Unit,
+    onStop: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val title = playbackState.channelName ?: channel?.name ?: playbackState.programTitle ?: "Playing"
+    val subtitle = playbackState.programTitle ?: nowNext?.now?.title ?: if (playbackState.isRadio) "Live Radio" else "Live TV"
+    val statusDotColor = when {
+        playbackState.isPaused -> MuxGridColors.AmberWarn
+        playbackState.isRadio -> MuxGridColors.AccentBlueLight
+        else -> MuxGridColors.CoralLive
+    }
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .hazeBlur(input = HazeInput.Sources(hazeState), style = glassStyle)
+            .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(18.dp))
+            .clickable(onClick = onExpand)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (channel != null) {
+            ChannelPiconBadge(
+                channelNumber = channel.formattedNumber,
+                channelName = channel.name,
+                piconModel = channel.icon?.let { PiconModel(channel.id, it) },
+                imageLoader = imageLoader,
+                size = 38.dp,
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(statusDotColor),
+                )
+                Text(
+                    text = title,
+                    color = MuxGridColors.TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = subtitle,
+                color = MuxGridColors.TextSecondary,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            text = if (playbackState.isPaused) "Play" else "Pause",
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(MuxGridColors.AccentBlue)
+                .clickable(onClick = onTogglePause)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+        Text(
+            text = "×",
+            color = MuxGridColors.TextSecondary,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(MuxGridColors.CardSurface)
+                .clickable(onClick = onStop)
+                .padding(horizontal = 10.dp, vertical = 3.dp),
+        )
     }
 }
 
@@ -454,6 +801,8 @@ private fun MobileLiveChannelsTab(
     nowNextMap: Map<Long, NowNextProgram>,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
+    gridColumns: Int,
+    bottomContentPadding: Dp,
     onSelectFilter: (LiveFilter) -> Unit,
     onChannelClick: (Channel) -> Unit,
     onToggleFavorite: (Channel) -> Unit,
@@ -508,10 +857,34 @@ private fun MobileLiveChannelsTab(
                 }
                 Text(emptyText, style = MuxGridType.CardSubtitle)
             }
+        } else if (gridColumns > 1) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(gridColumns),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = bottomContentPadding),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(channels, key = { it.id }) { channel ->
+                    MobileChannelCard(
+                        channel = channel,
+                        nowNext = nowNextMap[channel.id],
+                        nowEpochSec = nowEpochSec,
+                        isFavorite = channel.id in favorites,
+                        imageLoader = imageLoader,
+                        onClick = { onChannelClick(channel) },
+                        onLongClick = {
+                            actionMessage = null
+                            actionChannel = channel
+                        },
+                        onToggleFavorite = { onToggleFavorite(channel) },
+                    )
+                }
+            }
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 100.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = bottomContentPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(channels, key = { it.id }) { channel ->
@@ -720,8 +1093,12 @@ private fun MobileSettingsSheet(
     connectionState: ConnectionState,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
+    backgroundPlayEnabled: Boolean,
+    pipEnabled: Boolean,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
+    onToggleBackgroundPlay: (Boolean) -> Unit,
+    onTogglePip: (Boolean) -> Unit,
     onOpenServerSetup: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -734,6 +1111,7 @@ private fun MobileSettingsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 8.dp)
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -768,6 +1146,30 @@ private fun MobileSettingsSheet(
                 ) {
                     Text("Edit Server Connection")
                 }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MuxGridColors.CardSurface)
+                    .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("Background & Picture-in-Picture", style = MuxGridType.CardTitle)
+                SettingToggleRow(
+                    title = "Auto Picture-in-Picture",
+                    subtitle = "Shrink live TV & recordings into PiP when leaving the app",
+                    checked = pipEnabled,
+                    onCheckedChange = onTogglePip,
+                )
+                SettingToggleRow(
+                    title = "Background Play (Live TV Audio)",
+                    subtitle = "Continue audio playback when backgrounded (Radio is always enabled)",
+                    checked = backgroundPlayEnabled,
+                    onCheckedChange = onToggleBackgroundPlay,
+                )
             }
 
             Column(
@@ -859,5 +1261,38 @@ private fun MobileSettingsSheet(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun SettingToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MuxGridColors.CardSurfaceElevated)
+            .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(10.dp))
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MuxGridColors.TextPrimary)
+            Text(subtitle, fontSize = 11.sp, color = MuxGridColors.TextSecondary)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = MuxGridColors.AccentBlue,
+            ),
+        )
     }
 }

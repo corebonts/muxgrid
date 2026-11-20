@@ -88,6 +88,8 @@ data class PlaybackState(
     val fps: Double = 0.0,
     val hwdecCurrent: String? = null,
     val deinterlaceActive: Boolean = false,
+    val isAudioOnly: Boolean = false,
+    val aspectMode: VideoAspectMode = VideoAspectMode.FIT,
     val error: PlaybackError? = null,
 ) {
     val isRecordingPlayback: Boolean

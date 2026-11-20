@@ -10,6 +10,7 @@ import io.github.corebonts.muxgrid.core.model.FormFactor
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.player.MpvPlaybackEngine
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
+import io.github.corebonts.muxgrid.core.player.PlaybackSessionHost
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -47,12 +48,29 @@ class MuxGridAppContainer(context: Context) {
     private var progressTickJob: Job? = null
 
     init {
+        PlaybackSessionHost.register(
+            playbackEngine = playbackEngine,
+            activityClass = MainActivity::class.java,
+            notificationIconResId = R.drawable.ic_notification,
+            canZap = { repository.channels.value.size > 1 },
+            onZapNext = { zapBy(1) },
+            onZapPrevious = { zapBy(-1) },
+        )
         applicationScope.launch {
             repository.timeshiftWindow.collect { window ->
                 playbackEngine.setTimeshiftWindow(window)
             }
         }
         startDvrProgressTracking()
+    }
+
+    private fun zapBy(delta: Int) {
+        val list = repository.channels.value
+        if (list.isEmpty()) return
+        val currentId = playbackEngine.state.value.channelId
+        val idx = list.indexOfFirst { it.id == currentId }
+        val nextIdx = if (idx < 0) 0 else (idx + delta + list.size) % list.size
+        playbackEngine.playChannel(list[nextIdx], repository.hwDecPreset.value)
     }
 
     private fun startDvrProgressTracking() {

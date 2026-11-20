@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Base64
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -57,6 +58,14 @@ class SettingsRepository(
 
     val timeshiftWindow: Flow<TimeshiftWindow> = context.muxGridDataStore.data.map { prefs ->
         TimeshiftWindow.fromPersisted(prefs[KEY_TIMESHIFT_WINDOW], formFactor)
+    }
+
+    val backgroundPlayEnabled: Flow<Boolean> = context.muxGridDataStore.data.map { prefs ->
+        prefs[KEY_BACKGROUND_PLAY] ?: false
+    }
+
+    val pipEnabled: Flow<Boolean> = context.muxGridDataStore.data.map { prefs ->
+        prefs[KEY_PIP_ENABLED] ?: (formFactor == FormFactor.PHONE)
     }
 
     val localDvrProgress: Flow<Map<Long, LocalDvrProgress>> = context.muxGridDataStore.data.map { prefs ->
@@ -129,6 +138,18 @@ class SettingsRepository(
         }
     }
 
+    suspend fun setBackgroundPlayEnabled(enabled: Boolean) {
+        context.muxGridDataStore.edit { prefs ->
+            prefs[KEY_BACKGROUND_PLAY] = enabled
+        }
+    }
+
+    suspend fun setPipEnabled(enabled: Boolean) {
+        context.muxGridDataStore.edit { prefs ->
+            prefs[KEY_PIP_ENABLED] = enabled
+        }
+    }
+
     private fun createOrRecoverAead(): Aead? = runCatching {
         AeadConfig.register()
         AndroidKeysetManager.Builder()
@@ -168,6 +189,8 @@ class SettingsRepository(
         private val KEY_FAVORITES = stringSetPreferencesKey("favorite_channel_ids")
         private val KEY_HWDEC_PRESET = stringPreferencesKey("hwdec_preset")
         private val KEY_TIMESHIFT_WINDOW = stringPreferencesKey("timeshift_window")
+        private val KEY_BACKGROUND_PLAY = booleanPreferencesKey("background_play_enabled")
+        private val KEY_PIP_ENABLED = booleanPreferencesKey("pip_enabled")
         private val KEY_LOCAL_DVR_PROGRESS = stringSetPreferencesKey("dvr_local_progress")
 
         private const val KEYSET_NAME = "muxgrid_master_keyset"

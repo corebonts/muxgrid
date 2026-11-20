@@ -23,6 +23,7 @@ android {
 dependencies {
     api(project(":core:model"))
     implementation(project(":core:htsp"))
+    implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.mpv.android.lib)
     implementation(libs.androidx.media3.session)

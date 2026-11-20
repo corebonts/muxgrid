@@ -35,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.ImageLoader
@@ -67,6 +68,7 @@ internal fun MobileRecordingsScreen(
     channels: List<Channel>,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
+    bottomContentPadding: Dp = 100.dp,
     onWatchLiveChannel: (Channel) -> Unit,
     onPlayRecording: (DvrEntry, Channel?, Long) -> Unit,
     onStopRecording: suspend (Long) -> Result<Unit>,
@@ -156,7 +158,7 @@ internal fun MobileRecordingsScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 100.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = bottomContentPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (showRecordingNow) {

@@ -190,7 +190,7 @@ flowchart LR
 
 ---
 
-### Milestone 4 — Mobile Experience Polish: Full HUD, Gestures, PiP & Background Audio (`:feature:mobile`)
+### Milestone 4 — Mobile Experience Polish: Full HUD, Gestures, PiP & Background Audio (`:feature:mobile`) (Implemented; Pending Hardware Verification)
 *Goal: Deliver the complete iOS/iPadOS-inspired phone/tablet experience.*
 - **Media3 `MediaSessionService` & Background Audio:**
   - Move `PlaybackEngine` ownership into foreground `MediaSessionService` (`SimpleBasePlayer` adapter).
@@ -208,7 +208,7 @@ flowchart LR
 
 ---
 
-### Milestone 5 — Dedicated 10-Foot Android TV Experience (`:feature:tv`)
+### Milestone 5 — Dedicated 10-Foot Android TV Experience (`:feature:tv`) (Implemented; Pending TCL C635 Verification)
 *Goal: Build a true living-room 10-foot experience designed strictly for a TV remote on TCL C635.*
 - **10-Foot Navigation & Browsing (`androidx.tv:tv-material:1.1.0`):**
   - Collapsible left **Navigation Rail** (`Live`, `Guide`, `Recordings`, `Settings`) with strict D-pad focus rules (crisp focus ring + subtle `1.04x` scale, initial focus restoration, zero focus traps).

@@ -50,6 +50,7 @@ import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LiveFilter
 import io.github.corebonts.muxgrid.core.model.MediaTrack
 import io.github.corebonts.muxgrid.core.model.PlaybackError
+import io.github.corebonts.muxgrid.core.model.VideoAspectMode
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -233,6 +234,8 @@ fun TrackAndPresetPanel(
     onSelectPreset: (HwDecPreset) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    aspectMode: VideoAspectMode? = null,
+    onSelectAspectMode: ((VideoAspectMode) -> Unit)? = null,
 ) {
     val closeFocusRequester = remember { FocusRequester() }
     var closeFocused by remember { mutableStateOf(false) }
@@ -317,6 +320,40 @@ fun TrackAndPresetPanel(
                 selected = hwDecPreset == HwDecPreset.MEDIACODEC_COPY_BWDIF,
                 onClick = { onSelectPreset(HwDecPreset.MEDIACODEC_COPY_BWDIF) },
             )
+        }
+
+        if (aspectMode != null && onSelectAspectMode != null) {
+            Text("Aspect & Zoom", style = MuxGridType.CardSubtitle, fontWeight = FontWeight.SemiBold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                VideoAspectMode.entries.forEach { mode ->
+                    val selected = mode == aspectMode
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (selected) MuxGridColors.AccentBlue else MuxGridColors.CardSurface)
+                            .border(
+                                1.dp,
+                                if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
+                                RoundedCornerShape(10.dp),
+                            )
+                            .clickable { onSelectAspectMode(mode) }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = mode.label,
+                            color = if (selected) Color.White else MuxGridColors.TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
         }
     }
 }

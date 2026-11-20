@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.ImageLoader
@@ -71,6 +72,7 @@ internal fun MobileGuideScreen(
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     initialSelectedChannelId: Long?,
+    bottomContentPadding: Dp = 100.dp,
     onWatchChannel: (Channel) -> Unit,
     onPlayRecording: (DvrEntry, Channel?, Long) -> Unit,
     onScheduleRecording: suspend (Long) -> Result<Long>,
@@ -262,7 +264,7 @@ internal fun MobileGuideScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 100.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = bottomContentPadding),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(agendaItems, key = { it.first.id }) { (event, channel) ->

@@ -16,6 +16,7 @@ import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.model.StreamTicket
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.model.TrackType
+import io.github.corebonts.muxgrid.core.model.VideoAspectMode
 import `is`.xyz.mpv.MPV
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -106,12 +107,47 @@ class MpvPlaybackEngine(
     @Volatile
     private var lastObservedMpvDurationMs: Long = 0L
 
+    @Volatile
+    private var explicitAudioOnly: Boolean = false
+
+    @Volatile
+    private var currentAspectMode: VideoAspectMode = VideoAspectMode.FIT
+
+    private val platformLocks = PlaybackPlatformLocks(
+        context = context,
+        onPauseRequested = { setPaused(true) },
+        onResumeRequested = { setPaused(false) },
+        onDuckChanged = { ducked ->
+            mpvExecutor.execute {
+                val instance = mpv ?: return@execute
+                if (instance.isInitialized) {
+                    instance.setPropertyDouble("volume", if (ducked) 25.0 else 100.0)
+                }
+            }
+        },
+    )
+
     private var cacheMonitorJob: Job? = null
     private var noticeClearJob: Job? = null
 
     init {
         mpvExecutor.execute {
             initMpvLocked()
+        }
+        engineScope.launch {
+            _state.collect { st ->
+                when (st.status) {
+                    PlaybackStatus.IDLE, PlaybackStatus.ERROR -> platformLocks.onPlaybackStopped()
+                    PlaybackStatus.BUFFERING, PlaybackStatus.PLAYING, PlaybackStatus.PAUSED -> {
+                        if (st.status == PlaybackStatus.PLAYING) {
+                            PlaybackSessionHost.ensureServiceStarted(context)
+                        }
+                        val active = !st.isPaused &&
+                            (st.status == PlaybackStatus.PLAYING || st.status == PlaybackStatus.BUFFERING)
+                        platformLocks.onPlaybackActive(isRadio = st.isRadio, isPlayingOrBuffering = active)
+                    }
+                }
+            }
         }
     }
 
@@ -167,10 +203,13 @@ class MpvPlaybackEngine(
         activeDvrEntry = null
         currentPreset = preset
         explicitlyStopped = false
+        explicitAudioOnly = channel.isRadio
         hadFileLoaded = false
         retriedLiveReconnect = false
         lastObservedMpvDurationMs = 0L
         noticeClearJob?.cancel()
+
+        platformLocks.requestFocusForStart(isRadio = channel.isRadio)
 
         _state.update {
             PlaybackState(
@@ -179,6 +218,8 @@ class MpvPlaybackEngine(
                 channelNumber = channel.formattedNumber,
                 channelName = channel.name,
                 isRadio = channel.isRadio,
+                isAudioOnly = explicitAudioOnly,
+                aspectMode = currentAspectMode,
                 isPaused = false,
                 error = null,
             )
@@ -192,9 +233,12 @@ class MpvPlaybackEngine(
             instance.command("stop")
             liveStrategy.stopActive()
             applyPresetOnInstance(instance, preset)
+            applyAspectModeLocked(instance, currentAspectMode)
             configureLiveTimeshiftLocked(instance, requestedWindow)
             instance.setPropertyString("idle", "yes")
             instance.setPropertyString("start", "none")
+            instance.setPropertyDouble("volume", 100.0)
+            instance.setPropertyString("vid", if (explicitAudioOnly) "no" else "auto")
             instance.setPropertyBoolean("pause", false)
             if (hasSurface || channel.isRadio) {
                 pendingUrl = null
@@ -218,10 +262,13 @@ class MpvPlaybackEngine(
         activeDvrEntry = entry
         currentPreset = preset
         explicitlyStopped = false
+        explicitAudioOnly = channel?.isRadio == true
         hadFileLoaded = false
         retriedLiveReconnect = false
         lastObservedMpvDurationMs = 0L
         noticeClearJob?.cancel()
+
+        platformLocks.requestFocusForStart(isRadio = explicitAudioOnly)
 
         val isGrowing = entry.state == DvrState.RECORDING
         val initialDurationMs = if (isGrowing) {
@@ -239,6 +286,8 @@ class MpvPlaybackEngine(
                 channelName = channel?.name,
                 programTitle = entry.title,
                 isRadio = channel?.isRadio ?: false,
+                isAudioOnly = explicitAudioOnly,
+                aspectMode = currentAspectMode,
                 isPaused = false,
                 isSeekable = true,
                 isGrowingRecording = isGrowing,
@@ -259,9 +308,12 @@ class MpvPlaybackEngine(
             instance.command("stop")
             proxy.stopActiveStream()
             applyPresetOnInstance(instance, preset)
+            applyAspectModeLocked(instance, currentAspectMode)
             configureDvrCacheLocked(instance, isGrowing)
             instance.setPropertyString("idle", "yes")
             instance.setPropertyString("start", if (resumeSec > 0L) "+$resumeSec" else "none")
+            instance.setPropertyDouble("volume", 100.0)
+            instance.setPropertyString("vid", if (explicitAudioOnly) "no" else "auto")
             instance.setPropertyBoolean("pause", false)
             if (hasSurface || (channel?.isRadio == true)) {
                 pendingUrl = null
@@ -277,6 +329,7 @@ class MpvPlaybackEngine(
 
     override fun stop() {
         explicitlyStopped = true
+        explicitAudioOnly = false
         hadFileLoaded = false
         pendingUrl = null
         activeChannel = null
@@ -285,6 +338,7 @@ class MpvPlaybackEngine(
         cacheMonitorJob = null
         noticeClearJob?.cancel()
         noticeClearJob = null
+        platformLocks.onPlaybackStopped()
         _state.value = PlaybackState(status = PlaybackStatus.IDLE)
 
         mpvExecutor.execute {
@@ -294,6 +348,7 @@ class MpvPlaybackEngine(
                 instance.command("stop")
                 instance.setPropertyString("start", "none")
                 instance.setPropertyString("force-seekable", "no")
+                instance.setPropertyString("vid", "auto")
             }
         }
     }
@@ -303,12 +358,18 @@ class MpvPlaybackEngine(
             val instance = mpv ?: return@execute
             if (instance.isInitialized) {
                 val paused = instance.getPropertyBoolean("pause") ?: false
+                if (paused) {
+                    platformLocks.requestFocusForStart(isRadio = activeChannel?.isRadio == true)
+                }
                 instance.setPropertyBoolean("pause", !paused)
             }
         }
     }
 
     override fun setPaused(paused: Boolean) {
+        if (!paused) {
+            platformLocks.requestFocusForStart(isRadio = activeChannel?.isRadio == true)
+        }
         mpvExecutor.execute {
             val instance = mpv ?: return@execute
             if (instance.isInitialized) {
@@ -399,14 +460,54 @@ class MpvPlaybackEngine(
         currentTimeshiftWindow = window
     }
 
-    override fun attachSurface(surface: Surface, width: Int, height: Int) {
+    override fun setAudioOnly(audioOnly: Boolean) {
+        val effective = audioOnly || (activeChannel?.isRadio == true)
+        explicitAudioOnly = effective
+        _state.update { it.copy(isAudioOnly = effective) }
         mpvExecutor.execute {
-            hasSurface = true
             val instance = mpv ?: return@execute
             if (!instance.isInitialized) return@execute
+            if (effective) {
+                instance.setPropertyString("vid", "no")
+                instance.setPropertyString("vo", "null")
+                instance.setPropertyString("force-window", "no")
+            } else if (hasSurface) {
+                instance.setPropertyString("vid", "auto")
+                instance.setOptionString("force-window", "yes")
+                instance.setPropertyString("vo", "gpu")
+            }
+        }
+    }
+
+    override fun setVideoAspectMode(mode: VideoAspectMode) {
+        currentAspectMode = mode
+        _state.update { it.copy(aspectMode = mode) }
+        mpvExecutor.execute {
+            val instance = mpv ?: return@execute
+            if (instance.isInitialized) {
+                applyAspectModeLocked(instance, mode)
+            }
+        }
+    }
+
+    override fun attachSurface(surface: Surface, width: Int, height: Int) {
+        mpvExecutor.execute {
+            val instance = mpv ?: return@execute
+            if (!instance.isInitialized) return@execute
+            val audioOnly = explicitAudioOnly || (activeChannel?.isRadio == true)
+            if (audioOnly) {
+                hasSurface = false
+                instance.setPropertyString("vid", "no")
+                instance.setPropertyString("vo", "null")
+                instance.setPropertyString("force-window", "no")
+                return@execute
+            }
+            hasSurface = true
             instance.attachSurface(surface)
+            instance.setPropertyString("vid", "auto")
             instance.setOptionString("force-window", "yes")
             instance.setPropertyString("vo", "gpu")
+            applyAspectModeLocked(instance, currentAspectMode)
             if (width > 0 && height > 0) {
                 instance.setPropertyString("android-surface-size", "${width}x${height}")
             }
@@ -439,9 +540,12 @@ class MpvPlaybackEngine(
 
     override fun detachSurface() {
         mpvExecutor.execute {
+            if (!hasSurface) return@execute
             hasSurface = false
             val instance = mpv ?: return@execute
             if (!instance.isInitialized) return@execute
+            // Disable video decode while backgrounded / audio-only so CPU & battery stay low
+            instance.setPropertyString("vid", "no")
             instance.setPropertyString("vo", "null")
             instance.setPropertyString("force-window", "no")
             instance.detachSurface()
@@ -452,6 +556,7 @@ class MpvPlaybackEngine(
         explicitlyStopped = true
         cacheMonitorJob?.cancel()
         noticeClearJob?.cancel()
+        platformLocks.destroy()
         liveStrategy.stopActive()
         proxy.close()
         engineScope.cancel()
@@ -660,6 +765,36 @@ class MpvPlaybackEngine(
             HwDecPreset.MEDIACODEC_COPY_BWDIF -> {
                 instance.setPropertyString("hwdec", "mediacodec-copy")
                 instance.setPropertyString("deinterlace", "yes")
+            }
+        }
+    }
+
+    private fun applyAspectModeLocked(instance: MPV, mode: VideoAspectMode) {
+        when (mode) {
+            VideoAspectMode.FIT -> {
+                instance.setPropertyString("keepaspect", "yes")
+                instance.setPropertyDouble("panscan", 0.0)
+                instance.setPropertyString("video-aspect-override", "-1")
+            }
+            VideoAspectMode.FILL -> {
+                instance.setPropertyString("keepaspect", "yes")
+                instance.setPropertyDouble("panscan", 1.0)
+                instance.setPropertyString("video-aspect-override", "-1")
+            }
+            VideoAspectMode.RATIO_16_9 -> {
+                instance.setPropertyString("keepaspect", "yes")
+                instance.setPropertyDouble("panscan", 0.0)
+                instance.setPropertyString("video-aspect-override", "16:9")
+            }
+            VideoAspectMode.RATIO_4_3 -> {
+                instance.setPropertyString("keepaspect", "yes")
+                instance.setPropertyDouble("panscan", 0.0)
+                instance.setPropertyString("video-aspect-override", "4:3")
+            }
+            VideoAspectMode.STRETCH -> {
+                instance.setPropertyString("keepaspect", "no")
+                instance.setPropertyDouble("panscan", 0.0)
+                instance.setPropertyString("video-aspect-override", "-1")
             }
         }
     }

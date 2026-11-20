@@ -86,6 +86,12 @@ class TvheadendRepository(
     val timeshiftWindow: StateFlow<TimeshiftWindow> = settings.timeshiftWindow
         .stateIn(scope, SharingStarted.Eagerly, TimeshiftWindow.defaultFor(formFactor))
 
+    val backgroundPlayEnabled: StateFlow<Boolean> = settings.backgroundPlayEnabled
+        .stateIn(scope, SharingStarted.Eagerly, false)
+
+    val pipEnabled: StateFlow<Boolean> = settings.pipEnabled
+        .stateIn(scope, SharingStarted.Eagerly, formFactor == FormFactor.PHONE)
+
     val imageLoader: ImageLoader = PiconFetcher.createImageLoader(
         context = context.applicationContext,
         htspClient = htspClient,
@@ -172,6 +178,14 @@ class TvheadendRepository(
 
     suspend fun setTimeshiftWindow(window: TimeshiftWindow) {
         settings.setTimeshiftWindow(window)
+    }
+
+    suspend fun setBackgroundPlayEnabled(enabled: Boolean) {
+        settings.setBackgroundPlayEnabled(enabled)
+    }
+
+    suspend fun setPipEnabled(enabled: Boolean) {
+        settings.setPipEnabled(enabled)
     }
 
     suspend fun openGrowingDvrFile(dvrId: Long): GrowingDvrFile =

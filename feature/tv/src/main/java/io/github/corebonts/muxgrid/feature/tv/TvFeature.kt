@@ -1,9 +1,11 @@
 package io.github.corebonts.muxgrid.feature.tv
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,10 +13,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -32,8 +36,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -122,7 +131,7 @@ fun TvMvpRoot(
     }
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class)
+@OptIn(ExperimentalTvMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 private fun TvMvpContent(
     repository: TvheadendRepository,
@@ -191,6 +200,9 @@ private fun TvMvpContent(
             }
             val lifecycleOwner = LocalLifecycleOwner.current
             var visibleError by remember { mutableStateOf<ConnectionState.Error?>(null) }
+            var railHasFocus by remember { mutableStateOf(false) }
+            val railFocusRequester = remember { FocusRequester() }
+            val contentFocusRequester = remember { FocusRequester() }
 
             LaunchedEffect(connectionState, lifecycleOwner) {
                 visibleError = null
@@ -205,144 +217,139 @@ private fun TvMvpContent(
                 }
             }
 
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(MuxGridColors.CanvasTv)
-                    .padding(start = 24.dp, end = 24.dp, top = 18.dp),
+                    .padding(start = 16.dp, end = 24.dp, top = 16.dp, bottom = 16.dp),
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Text("MuxGrid", style = MuxGridType.Title, fontSize = 24.sp)
-                        listOf(
-                            MainTab.LIVE to "Live",
-                            MainTab.GUIDE to "Guide",
-                            MainTab.RECORDINGS to "Recordings",
-                        ).forEach { (tab, label) ->
-                            FilterChip(
-                                selected = activeTab == tab,
-                                onClick = { activeTab = tab },
-                                colors = FilterChipDefaults.colors(
-                                    containerColor = MuxGridColors.CardSurface,
-                                    contentColor = MuxGridColors.TextSecondary,
-                                    selectedContainerColor = MuxGridColors.AccentBlue,
-                                    selectedContentColor = Color.White,
-                                    focusedContainerColor = MuxGridColors.FocusBorder,
-                                    focusedContentColor = MuxGridColors.CanvasTv,
-                                    focusedSelectedContainerColor = MuxGridColors.FocusBorder,
-                                    focusedSelectedContentColor = MuxGridColors.CanvasTv,
-                                ),
-                            ) {
-                                Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                    }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        ConnectionStatusBadge(state = connectionState)
-                        Button(
-                            onClick = { settingsOpen = true },
-                            colors = tvSecondaryButtonColors(),
-                        ) {
-                            Text("Settings", fontSize = 13.sp)
-                        }
-                    }
-                }
+                TvNavigationRail(
+                    activeTab = activeTab,
+                    expanded = railHasFocus,
+                    railFocusRequester = railFocusRequester,
+                    onRailFocusChanged = { railHasFocus = it },
+                    onSelectTab = { activeTab = it },
+                    onOpenSettings = { settingsOpen = true },
+                )
 
-                visibleError?.let { errState ->
-                    Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.width(16.dp))
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .focusGroup()
+                        .focusRestorer(contentFocusRequester),
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(MuxGridColors.CoralLive.copy(alpha = 0.16f))
-                            .border(1.dp, MuxGridColors.CoralLive.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(errState.message, color = MuxGridColors.TextPrimary, fontSize = 14.sp)
-                        Button(onClick = if (errState.isAuthError) ({ route = TvRoute.ONBOARDING }) else ({ repository.reconnect() })) {
-                            Text(if (errState.isAuthError) "Edit Server" else "Retry")
+                        Column {
+                            Text(
+                                text = when (activeTab) {
+                                    MainTab.LIVE -> "Live TV & Radio"
+                                    MainTab.GUIDE -> "Program Guide"
+                                    MainTab.RECORDINGS -> "DVR Recordings"
+                                },
+                                style = MuxGridType.Title,
+                                fontSize = 22.sp,
+                            )
+                        }
+                        ConnectionStatusBadge(state = connectionState)
+                    }
+
+                    visibleError?.let { errState ->
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MuxGridColors.CoralLive.copy(alpha = 0.16f))
+                                .border(1.dp, MuxGridColors.CoralLive.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(errState.message, color = MuxGridColors.TextPrimary, fontSize = 14.sp)
+                            Button(
+                                onClick = if (errState.isAuthError) ({ route = TvRoute.ONBOARDING }) else ({ repository.reconnect() }),
+                                colors = tvSecondaryButtonColors(),
+                            ) {
+                                Text(if (errState.isAuthError) "Edit Server" else "Retry")
+                            }
                         }
                     }
-                }
 
-                Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(8.dp))
 
-                Box(modifier = Modifier.weight(1f)) {
-                    when (activeTab) {
-                        MainTab.LIVE -> {
-                            TvLiveChannelsTab(
-                                connectionState = connectionState,
-                                channels = filteredChannels,
-                                filters = remember(tags) { buildLiveFilters(tags) },
-                                activeFilter = activeFilter,
-                                favorites = favorites,
-                                nowNextMap = nowNextMap,
-                                nowEpochSec = nowEpochSec,
-                                imageLoader = repository.imageLoader,
-                                onSelectFilter = { activeFilter = it },
-                                onChannelClick = { channel ->
-                                    playbackEngine.playChannel(channel, hwDecPreset)
-                                    route = TvRoute.PLAYER
-                                },
-                                onToggleFavorite = { channel ->
-                                    scope.launch { repository.toggleFavorite(channel.id) }
-                                },
-                            )
-                        }
-                        MainTab.GUIDE -> {
-                            TvGuideScreen(
-                                channels = channels,
-                                epgByChannel = epgByChannel,
-                                dvrEntries = dvrEntries,
-                                nowEpochSec = nowEpochSec,
-                                imageLoader = repository.imageLoader,
-                                onWatchChannel = { channel ->
-                                    playbackEngine.playChannel(channel, hwDecPreset)
-                                    route = TvRoute.PLAYER
-                                },
-                                onPlayRecording = { entry, channel, startSec ->
-                                    playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startSec)
-                                    route = TvRoute.PLAYER
-                                },
-                                onScheduleRecording = { eventId -> repository.scheduleRecording(eventId) },
-                                onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
-                                onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
-                            )
-                        }
-                        MainTab.RECORDINGS -> {
-                            TvRecordingsScreen(
-                                dvrEntries = dvrEntries,
-                                channels = channels,
-                                nowEpochSec = nowEpochSec,
-                                imageLoader = repository.imageLoader,
-                                onWatchLiveChannel = { channel ->
-                                    playbackEngine.playChannel(channel, hwDecPreset)
-                                    route = TvRoute.PLAYER
-                                },
-                                onPlayRecording = { entry, channel, startSec ->
-                                    playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startSec)
-                                    route = TvRoute.PLAYER
-                                },
-                                onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
-                                onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
-                                onDeleteRecording = { dvrId -> repository.deleteRecording(dvrId) },
-                                onToggleWatched = { dvrId, watched -> repository.markRecordingWatched(dvrId, watched) },
-                            )
+                    Box(modifier = Modifier.weight(1f)) {
+                        when (activeTab) {
+                            MainTab.LIVE -> {
+                                TvLiveChannelsTab(
+                                    connectionState = connectionState,
+                                    channels = filteredChannels,
+                                    filters = remember(tags) { buildLiveFilters(tags) },
+                                    activeFilter = activeFilter,
+                                    favorites = favorites,
+                                    nowNextMap = nowNextMap,
+                                    nowEpochSec = nowEpochSec,
+                                    imageLoader = repository.imageLoader,
+                                    initialContentFocusRequester = contentFocusRequester,
+                                    onSelectFilter = { activeFilter = it },
+                                    onChannelClick = { channel ->
+                                        playbackEngine.playChannel(channel, hwDecPreset)
+                                        route = TvRoute.PLAYER
+                                    },
+                                    onToggleFavorite = { channel ->
+                                        scope.launch { repository.toggleFavorite(channel.id) }
+                                    },
+                                )
+                            }
+                            MainTab.GUIDE -> {
+                                TvGuideScreen(
+                                    channels = channels,
+                                    epgByChannel = epgByChannel,
+                                    dvrEntries = dvrEntries,
+                                    nowEpochSec = nowEpochSec,
+                                    imageLoader = repository.imageLoader,
+                                    onWatchChannel = { channel ->
+                                        playbackEngine.playChannel(channel, hwDecPreset)
+                                        route = TvRoute.PLAYER
+                                    },
+                                    onPlayRecording = { entry, channel, startSec ->
+                                        playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startSec)
+                                        route = TvRoute.PLAYER
+                                    },
+                                    onScheduleRecording = { eventId -> repository.scheduleRecording(eventId) },
+                                    onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
+                                    onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
+                                )
+                            }
+                            MainTab.RECORDINGS -> {
+                                TvRecordingsScreen(
+                                    dvrEntries = dvrEntries,
+                                    channels = channels,
+                                    nowEpochSec = nowEpochSec,
+                                    imageLoader = repository.imageLoader,
+                                    onWatchLiveChannel = { channel ->
+                                        playbackEngine.playChannel(channel, hwDecPreset)
+                                        route = TvRoute.PLAYER
+                                    },
+                                    onPlayRecording = { entry, channel, startSec ->
+                                        playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startSec)
+                                        route = TvRoute.PLAYER
+                                    },
+                                    onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
+                                    onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
+                                    onDeleteRecording = { dvrId -> repository.deleteRecording(dvrId) },
+                                    onToggleWatched = { dvrId, watched -> repository.markRecordingWatched(dvrId, watched) },
+                                )
+                            }
                         }
                     }
                 }
@@ -378,10 +385,15 @@ private fun TvMvpContent(
                 playbackState = playbackState,
                 activeChannel = activeChannel,
                 nowNext = activeNowNext,
+                channels = zapList,
+                nowNextMap = nowNextMap,
                 nowEpochSec = nowEpochSec,
                 hwDecPreset = hwDecPreset,
                 imageLoader = repository.imageLoader,
                 canZap = zapList.size > 1,
+                onSelectChannel = { channel ->
+                    playbackEngine.playChannel(channel, hwDecPreset)
+                },
                 onZapDelta = { delta ->
                     if (zapList.isNotEmpty()) {
                         val idx = zapList.indexOfFirst { it.id == playbackState.channelId }
@@ -393,11 +405,167 @@ private fun TvMvpContent(
                     scope.launch { repository.setHwDecPreset(preset) }
                     playbackEngine.applyPreset(preset)
                 },
+                onSelectAspectMode = { mode ->
+                    playbackEngine.setVideoAspectMode(mode)
+                },
                 onExit = {
                     playbackEngine.stop()
                     route = TvRoute.MAIN
                 },
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun TvNavigationRail(
+    activeTab: MainTab,
+    expanded: Boolean,
+    railFocusRequester: FocusRequester,
+    onRailFocusChanged: (Boolean) -> Unit,
+    onSelectTab: (MainTab) -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    val railWidth by animateDpAsState(targetValue = if (expanded) 190.dp else 72.dp, label = "tvRailWidth")
+    val activeFocusRequester = remember { FocusRequester() }
+
+    Column(
+        modifier = Modifier
+            .width(railWidth)
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(20.dp))
+            .background(MuxGridColors.CardSurface)
+            .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(20.dp))
+            .onFocusChanged { onRailFocusChanged(it.hasFocus) }
+            .focusGroup()
+            .focusRestorer(activeFocusRequester)
+            .padding(vertical = 16.dp, horizontal = 10.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MuxGridColors.AccentBlue),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("M", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+                if (expanded) {
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = "MuxGrid",
+                        style = MuxGridType.Title,
+                        fontSize = 17.sp,
+                        maxLines = 1,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            listOf(
+                Triple(MainTab.LIVE, "TV", "Live"),
+                Triple(MainTab.GUIDE, "EP", "Guide"),
+                Triple(MainTab.RECORDINGS, "DR", "Recordings"),
+            ).forEach { (tab, badge, label) ->
+                val selected = tab == activeTab
+                val itemModifier = when {
+                    selected && tab == MainTab.LIVE -> Modifier.focusRequester(railFocusRequester).focusRequester(activeFocusRequester)
+                    selected -> Modifier.focusRequester(activeFocusRequester)
+                    else -> Modifier
+                }
+                TvRailItem(
+                    badge = badge,
+                    label = label,
+                    expanded = expanded,
+                    selected = selected,
+                    onClick = { onSelectTab(tab) },
+                    modifier = itemModifier,
+                )
+            }
+        }
+
+        TvRailItem(
+            badge = "ST",
+            label = "Settings",
+            expanded = expanded,
+            selected = false,
+            onClick = onOpenSettings,
+        )
+    }
+}
+
+@Composable
+private fun TvRailItem(
+    badge: String,
+    label: String,
+    expanded: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = if (selected) MuxGridColors.AccentBlue.copy(alpha = 0.25f) else Color.Transparent,
+            contentColor = if (selected) Color.White else MuxGridColors.TextSecondary,
+            focusedContainerColor = MuxGridColors.FocusBorder,
+            focusedContentColor = MuxGridColors.CanvasTv,
+        ),
+        border = ClickableSurfaceDefaults.border(
+            border = Border(
+                border = BorderStroke(
+                    1.dp,
+                    if (selected) MuxGridColors.AccentBlueLight.copy(alpha = 0.6f) else Color.Transparent,
+                ),
+                shape = RoundedCornerShape(14.dp),
+            ),
+            focusedBorder = Border(
+                border = BorderStroke(2.dp, MuxGridColors.FocusBorder),
+                shape = RoundedCornerShape(14.dp),
+            ),
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.Center,
+        ) {
+            Text(
+                text = badge,
+                style = MuxGridType.TabularNumber,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            if (expanded) {
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = label,
+                    fontSize = 14.sp,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -413,6 +581,7 @@ private fun TvLiveChannelsTab(
     nowNextMap: Map<Long, NowNextProgram>,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
+    initialContentFocusRequester: FocusRequester,
     onSelectFilter: (LiveFilter) -> Unit,
     onChannelClick: (Channel) -> Unit,
     onToggleFavorite: (Channel) -> Unit,
@@ -422,14 +591,15 @@ private fun TvLiveChannelsTab(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            filters.forEach { filter ->
+            filters.forEachIndexed { idx, filter ->
                 val selected = filter == activeFilter
                 FilterChip(
                     selected = selected,
                     onClick = { onSelectFilter(filter) },
+                    modifier = if (idx == 0) Modifier.focusRequester(initialContentFocusRequester) else Modifier,
                     colors = FilterChipDefaults.colors(
                         containerColor = MuxGridColors.CardSurface,
                         contentColor = MuxGridColors.TextPrimary,
@@ -463,9 +633,9 @@ private fun TvLiveChannelsTab(
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 28.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 10.dp, bottom = 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 items(channels, key = { it.id }) { channel ->
                     TvChannelCard(

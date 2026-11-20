@@ -18,6 +18,14 @@ enum class HwDecPreset {
     }
 }
 
+enum class VideoAspectMode(val label: String) {
+    FIT("Fit"),
+    FILL("Fill"),
+    RATIO_16_9("16:9"),
+    RATIO_4_3("4:3"),
+    STRETCH("Stretch"),
+}
+
 enum class TimeshiftWindow(
     val maxTotalBytes: Long,
     val maxBytesPerDirection: Long,
