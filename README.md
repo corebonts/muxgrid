@@ -73,6 +73,23 @@ Built as a **single unified APK** targeting both modern Android phones/tablets a
         Tvheadend 4.3+ Server (e.g. tv-server / 192.168.1.5)
 ```
 
-## Licensing Note
+## Acknowledgments & Attribution
 
-Bundling prebuilt `libmpv` AAR binaries (`FFmpeg` + `libmpv`) subjects distributed APKs to **GPL-3.0-or-later** terms. Keep the playback engine behind a clean `PlaybackEngine` interface (`:core:player`) so the rest of the codebase stays modular and decoupled.
+### Third-Party Projects & Libraries
+- **[Tvheadend](https://tvheadend.org/)** — For the TV streaming server and the HTSP (Home TV Streaming Protocol) specification implemented by `:core:htsp`.
+- **[mpv](https://mpv.io/)**, **[FFmpeg](https://ffmpeg.org/)**, and **[mpv-android-lib](https://github.com/abdallahmehiz/mpv-android-lib)** (by [Abdallah Mehiz](https://github.com/abdallahmehiz)) — For the native Android `libmpv` playback engine, hardware decoding bridge, and `bwdif` deinterlacing filter.
+- **[Haze](https://github.com/chrisbanes/haze)** (by [Chris Banes](https://github.com/chrisbanes)) — For real-time frosted-glass backdrop blur across mobile and tablet chrome.
+- **[Coil 3](https://coil-kt.github.io/coil/)** — For asynchronous channel picon loading and caching.
+- **[Google Tink](https://developers.google.com/tink)** — For Android Keystore-backed AEAD credential encryption.
+- **[Google Material Symbols](https://fonts.google.com/icons)** — For the Rounded icon vector paths embedded in `:core:designsystem` (`MuxGridIcons.kt`).
+- **[Android Jetpack](https://developer.android.com/jetpack)** & **[Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines)** — Compose, Compose for TV (`androidx.tv`), Media3 (`MediaSessionService`), Navigation, and DataStore.
+
+See [NOTICE](./NOTICE) for full third-party copyright and license notices.
+
+### AI Assistance
+Architected, researched, designed, and implemented with the assistance of **Google Antigravity** (powered by **Gemini**), including the clean-room HTSP protocol implementation, interactive HTML design prototype, SVG iconography, and multi-module Kotlin/Compose codebase.
+
+## License
+
+- **Source Code ([LICENSE](./LICENSE)):** The original Kotlin source code, documentation, and assets in this repository are licensed under the **[Apache License, Version 2.0](./LICENSE)** (permissive, and one-way compatible with GPLv3).
+- **Compiled Binaries / APKs:** Because compiled builds link and bundle prebuilt `libmpv` and `FFmpeg` native libraries (`io.github.abdallahmehiz:mpv-android-lib`, built with `--enable-gpl --enable-version3`), any distributed APKs are governed by the **GNU General Public License v3.0 or later (GPL-3.0-or-later)**. The playback engine is isolated behind the `PlaybackEngine` interface in `:core:player` so the rest of the codebase remains modular and reusable under Apache-2.0.

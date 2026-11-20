@@ -1,0 +1,48 @@
+MuxGrid — Tvheadend Android Client (Phone + Android TV)
+Copyright 2026 corebonts
+
+This product's source code is licensed under the Apache License, Version 2.0.
+Compiled APKs that bundle prebuilt libmpv and FFmpeg native binaries
+(via mpv-android-lib) are subject to the GNU General Public License v3.0
+or later (GPL-3.0-or-later).
+
+=========================================================================
+Third-Party Software & Attributions
+=========================================================================
+
+1. Tvheadend (HTSP Protocol Specification)
+   - Project: https://tvheadend.org/ | https://github.com/tvheadend/tvheadend
+   - Note: MuxGrid contains a clean-room Kotlin implementation of the
+     HTSP (Home TV Streaming Protocol) binary client and VFS RPC subset.
+
+2. mpv, FFmpeg & mpv-android-lib
+   - mpv: https://mpv.io/ (GPL-2.0-or-later / LGPL-2.1-or-later)
+   - FFmpeg: https://ffmpeg.org/ (GPL-3.0-or-later / LGPL-2.1-or-later)
+   - mpv-android-lib: https://github.com/abdallahmehiz/mpv-android-lib
+     Copyright (c) Abdallah Mehiz (MIT wrapper bundling GPLv3 libmpv/FFmpeg)
+
+3. Google Material Symbols (Rounded)
+   - Project: https://github.com/google/material-design-icons
+   - Copyright (c) Google LLC
+   - License: Apache License, Version 2.0
+   - Note: Vector glyph path data embedded in MuxGridIcons.kt.
+
+4. Haze
+   - Project: https://github.com/chrisbanes/haze
+   - Copyright (c) Chris Banes
+   - License: Apache License, Version 2.0
+
+5. Coil (Coroutine Image Loader)
+   - Project: https://github.com/coil-kt/coil
+   - Copyright (c) Coil Contributors
+   - License: Apache License, Version 2.0
+
+6. Google Tink
+   - Project: https://github.com/tink-crypto/tink-java
+   - Copyright (c) Google LLC
+   - License: Apache License, Version 2.0
+
+7. Android Jetpack (Compose, Compose for TV, Media3, DataStore, Lifecycle, Navigation) & Kotlin Coroutines
+   - Projects: https://developer.android.com/jetpack | https://github.com/Kotlin/kotlinx.coroutines
+   - Copyright (c) The Android Open Source Project / JetBrains s.r.o.
+   - License: Apache License, Version 2.0
