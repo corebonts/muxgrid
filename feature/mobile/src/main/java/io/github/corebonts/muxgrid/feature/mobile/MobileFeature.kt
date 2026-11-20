@@ -36,6 +36,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
@@ -78,6 +79,7 @@ import io.github.corebonts.muxgrid.core.designsystem.ConnectionStatusBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
@@ -511,18 +513,22 @@ private fun MobileMainScaffold(
                     ) {
                         ConnectionStatusBadge(state = connectionState)
                         if (!useNavigationRail) {
-                            Text(
-                                text = "Settings",
-                                color = MuxGridColors.AccentBlueLight,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
+                            Box(
                                 modifier = Modifier
-                                    .clip(MuxGridShapes.Pill)
+                                    .size(36.dp)
+                                    .clip(CircleShape)
                                     .background(MuxGridColors.CardSurface)
-                                    .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Pill)
-                                    .clickable(onClick = onOpenSettings)
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                            )
+                                    .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, CircleShape)
+                                    .clickable(onClick = onOpenSettings),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = MuxGridIcons.Settings,
+                                    contentDescription = "Settings",
+                                    tint = MuxGridColors.TextPrimary,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -546,18 +552,29 @@ private fun MobileMainScaffold(
                             modifier = Modifier.weight(1f),
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = if (errState.isAuthError) "Edit" else "Retry",
-                            color = MuxGridColors.AccentBlueLight,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier
                                 .clip(MuxGridShapes.Sm)
                                 .clickable {
                                     if (errState.isAuthError) onOpenServerSetup() else onRetryConnect()
                                 }
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
+                        ) {
+                            Icon(
+                                imageVector = if (errState.isAuthError) MuxGridIcons.Edit else MuxGridIcons.Refresh,
+                                contentDescription = null,
+                                tint = MuxGridColors.AccentBlueLight,
+                                modifier = Modifier.size(15.dp),
+                            )
+                            Text(
+                                text = if (errState.isAuthError) "Edit" else "Retry",
+                                color = MuxGridColors.AccentBlueLight,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
                     }
                 }
 
@@ -602,24 +619,32 @@ private fun MobileMainScaffold(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         listOf(
-                            MainTab.LIVE to "Live",
-                            MainTab.GUIDE to "Guide",
-                            MainTab.RECORDINGS to "Recordings",
-                        ).forEach { (tab, label) ->
+                            Triple(MainTab.LIVE, "Live", MuxGridIcons.Live to MuxGridIcons.LiveFilled),
+                            Triple(MainTab.GUIDE, "Guide", MuxGridIcons.Guide to MuxGridIcons.GuideFilled),
+                            Triple(MainTab.RECORDINGS, "Recordings", MuxGridIcons.Recordings to MuxGridIcons.RecordingsFilled),
+                        ).forEach { (tab, label, icons) ->
                             val selected = tab == activeTab
-                            Box(
+                            val contentColor = if (selected) MuxGridColors.OnAccent else MuxGridColors.TextSecondary
+                            Column(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(MuxGridShapes.CardLg)
                                     .background(if (selected) MuxGridColors.AccentBlue else Color.Transparent)
                                     .clickable { onSelectTab(tab) }
-                                    .padding(vertical = 10.dp),
-                                contentAlignment = Alignment.Center,
+                                    .padding(vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
                             ) {
+                                Icon(
+                                    imageVector = if (selected) icons.second else icons.first,
+                                    contentDescription = label,
+                                    tint = contentColor,
+                                    modifier = Modifier.size(20.dp),
+                                )
                                 Text(
                                     text = label,
-                                    color = if (selected) MuxGridColors.OnAccent else MuxGridColors.TextSecondary,
-                                    fontSize = 13.sp,
+                                    color = contentColor,
+                                    fontSize = 11.sp,
                                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                                 )
                             }
@@ -654,31 +679,39 @@ private fun MobileNavigationRail(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(
-                MainTab.LIVE to "Live",
-                MainTab.GUIDE to "Guide",
-                MainTab.RECORDINGS to "DVR",
-            ).forEach { (tab, label) ->
+                Triple(MainTab.LIVE, "Live", MuxGridIcons.Live to MuxGridIcons.LiveFilled),
+                Triple(MainTab.GUIDE, "Guide", MuxGridIcons.Guide to MuxGridIcons.GuideFilled),
+                Triple(MainTab.RECORDINGS, "DVR", MuxGridIcons.Recordings to MuxGridIcons.RecordingsFilled),
+            ).forEach { (tab, label, icons) ->
                 val selected = tab == activeTab
-                Box(
+                val contentColor = if (selected) MuxGridColors.OnAccent else MuxGridColors.TextSecondary
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(MuxGridShapes.Row)
                         .background(if (selected) MuxGridColors.AccentBlue else Color.Transparent)
                         .clickable { onSelectTab(tab) }
-                        .padding(vertical = 12.dp),
-                    contentAlignment = Alignment.Center,
+                        .padding(vertical = 10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
+                    Icon(
+                        imageVector = if (selected) icons.second else icons.first,
+                        contentDescription = label,
+                        tint = contentColor,
+                        modifier = Modifier.size(20.dp),
+                    )
                     Text(
                         text = label,
-                        color = if (selected) MuxGridColors.OnAccent else MuxGridColors.TextSecondary,
-                        fontSize = 12.sp,
+                        color = contentColor,
+                        fontSize = 11.sp,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                     )
                 }
             }
         }
 
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(MuxGridShapes.Row)
@@ -686,8 +719,15 @@ private fun MobileNavigationRail(
                 .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Row)
                 .clickable(onClick = onOpenSettings)
                 .padding(vertical = 10.dp),
-            contentAlignment = Alignment.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            Icon(
+                imageVector = MuxGridIcons.Settings,
+                contentDescription = "Settings",
+                tint = MuxGridColors.AccentBlueLight,
+                modifier = Modifier.size(18.dp),
+            )
             Text(
                 text = "Settings",
                 color = MuxGridColors.AccentBlueLight,
@@ -766,28 +806,37 @@ private fun MobileMiniPlayerBar(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Text(
-            text = if (playbackState.isPaused) "Play" else "Pause",
-            color = MuxGridColors.OnAccent,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
+        Box(
             modifier = Modifier
-                .clip(MuxGridShapes.Pill)
+                .size(36.dp)
+                .clip(CircleShape)
                 .background(MuxGridColors.AccentBlue)
-                .clickable(onClick = onTogglePause)
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-        )
-        Text(
-            text = "×",
-            color = MuxGridColors.TextSecondary,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
+                .clickable(onClick = onTogglePause),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (playbackState.isPaused) MuxGridIcons.Play else MuxGridIcons.Pause,
+                contentDescription = if (playbackState.isPaused) "Play" else "Pause",
+                tint = MuxGridColors.OnAccent,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Box(
             modifier = Modifier
-                .clip(MuxGridShapes.Pill)
+                .size(36.dp)
+                .clip(CircleShape)
                 .background(MuxGridColors.CardSurface)
-                .clickable(onClick = onStop)
-                .padding(horizontal = 10.dp, vertical = 3.dp),
-        )
+                .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, CircleShape)
+                .clickable(onClick = onStop),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = MuxGridIcons.Stop,
+                contentDescription = "Stop",
+                tint = MuxGridColors.TextSecondary,
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }
 
@@ -825,7 +874,13 @@ private fun MobileLiveChannelsTab(
         ) {
             filters.forEach { filter ->
                 val selected = filter == activeFilter
-                Box(
+                val filterIcon = when (filter) {
+                    LiveFilter.Tv -> MuxGridIcons.Tv
+                    LiveFilter.Radio -> MuxGridIcons.Radio
+                    LiveFilter.Favorites -> MuxGridIcons.StarFilled
+                    else -> null
+                }
+                Row(
                     modifier = Modifier
                         .clip(MuxGridShapes.Pill)
                         .background(if (selected) MuxGridColors.AccentBlue else MuxGridColors.CardSurface)
@@ -836,7 +891,17 @@ private fun MobileLiveChannelsTab(
                         )
                         .clickable { onSelectFilter(filter) }
                         .padding(horizontal = 14.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
+                    if (filterIcon != null) {
+                        Icon(
+                            imageVector = filterIcon,
+                            contentDescription = null,
+                            tint = if (selected) Color.White else MuxGridColors.TextSecondary,
+                            modifier = Modifier.size(15.dp),
+                        )
+                    }
                     Text(
                         text = filter.label(),
                         color = if (selected) Color.White else MuxGridColors.TextSecondary,
@@ -935,6 +1000,8 @@ private fun MobileLiveChannelsTab(
                     colors = ButtonDefaults.buttonColors(containerColor = MuxGridColors.AccentBlue, contentColor = Color.White),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
+                    Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
                     Text("Watch Live")
                 }
                 OutlinedButton(
@@ -944,6 +1011,13 @@ private fun MobileLiveChannelsTab(
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
+                    Icon(
+                        imageVector = if (isFav) MuxGridIcons.StarFilled else MuxGridIcons.Star,
+                        contentDescription = null,
+                        tint = if (isFav) MuxGridColors.AmberWarn else MuxGridColors.TextPrimary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
                     Text(if (isFav) "Remove from Favorites" else "Add to Favorites", color = MuxGridColors.TextPrimary)
                 }
                 OutlinedButton(
@@ -953,6 +1027,8 @@ private fun MobileLiveChannelsTab(
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
+                    Icon(MuxGridIcons.Guide, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
                     Text("View EPG Guide", color = MuxGridColors.TextPrimary)
                 }
                 if (nowEvent != null && nowEvent.dvrId == null) {
@@ -966,6 +1042,8 @@ private fun MobileLiveChannelsTab(
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
+                        Icon(MuxGridIcons.Record, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
                         Text("Record Current Show", color = MuxGridColors.CoralLive)
                     }
                 }
@@ -1075,15 +1153,20 @@ private fun MobileChannelCard(
             }
         }
         Spacer(Modifier.width(8.dp))
-        Text(
-            text = if (isFavorite) "★" else "☆",
-            color = if (isFavorite) MuxGridColors.AmberWarn else MuxGridColors.TextMuted,
-            fontSize = 18.sp,
+        Box(
             modifier = Modifier
                 .clip(MuxGridShapes.Sm)
                 .clickable(onClick = onToggleFavorite)
                 .padding(6.dp),
-        )
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (isFavorite) MuxGridIcons.StarFilled else MuxGridIcons.Star,
+                contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                tint = if (isFavorite) MuxGridColors.AmberWarn else MuxGridColors.TextMuted,
+                modifier = Modifier.size(22.dp),
+            )
+        }
     }
 }
 
@@ -1117,7 +1200,18 @@ private fun MobileSettingsSheet(
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Settings", style = MuxGridType.Title, fontSize = 19.sp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = MuxGridIcons.Settings,
+                    contentDescription = null,
+                    tint = MuxGridColors.AccentBlueLight,
+                    modifier = Modifier.size(22.dp),
+                )
+                Text("Settings", style = MuxGridType.Title, fontSize = 19.sp)
+            }
 
             Column(
                 modifier = Modifier
@@ -1145,6 +1239,8 @@ private fun MobileSettingsSheet(
                     colors = ButtonDefaults.buttonColors(containerColor = MuxGridColors.AccentBlue, contentColor = MuxGridColors.OnAccent),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
+                    Icon(MuxGridIcons.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
                     Text("Edit Server Connection")
                 }
             }
@@ -1206,7 +1302,12 @@ private fun MobileSettingsSheet(
                         Text(label, fontSize = 13.sp, color = MuxGridColors.TextPrimary, modifier = Modifier.weight(1f))
                         if (selected) {
                             Spacer(Modifier.width(8.dp))
-                            Text("Active", color = MuxGridColors.AccentBlueLight, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Icon(
+                                imageVector = MuxGridIcons.Check,
+                                contentDescription = "Active",
+                                tint = MuxGridColors.AccentBlueLight,
+                                modifier = Modifier.size(18.dp),
+                            )
                         }
                     }
                 }

@@ -43,6 +43,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -83,6 +84,7 @@ import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.TimeshiftNoticeBanner
@@ -377,15 +379,25 @@ internal fun MobilePlayerScreen(
         // Double-tap seek feedback pill
         seekFeedback?.let { fb ->
             val isForward = fb.deltaSec > 0
-            Box(
+            Row(
                 modifier = Modifier
                     .align(if (isForward) Alignment.CenterEnd else Alignment.CenterStart)
                     .padding(horizontal = 36.dp)
                     .clip(MuxGridShapes.Pill)
                     .background(MuxGridColors.ScrimSurface)
                     .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, MuxGridShapes.Pill)
-                    .padding(horizontal = 18.dp, vertical = 10.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                if (!isForward) {
+                    Icon(
+                        imageVector = MuxGridIcons.FastRewind,
+                        contentDescription = null,
+                        tint = MuxGridColors.OnAccent,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
                 Text(
                     text = if (isForward) "+${fb.deltaSec}s" else "${fb.deltaSec}s",
                     style = MuxGridType.TabularNumber,
@@ -393,22 +405,37 @@ internal fun MobilePlayerScreen(
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                 )
+                if (isForward) {
+                    Icon(
+                        imageVector = MuxGridIcons.FastForward,
+                        contentDescription = null,
+                        tint = MuxGridColors.OnAccent,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             }
         }
 
         // Brightness / Volume vertical drag pill
         dragFeedback?.let { fb ->
-            Box(
+            Row(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .clip(MuxGridShapes.Pill)
                     .background(MuxGridColors.ScrimSurface)
                     .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, MuxGridShapes.Pill)
-                    .padding(horizontal = 18.dp, vertical = 10.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                val prefix = if (fb.kind == DragFeedbackKind.BRIGHTNESS) "Brightness" else "Volume"
+                Icon(
+                    imageVector = if (fb.kind == DragFeedbackKind.BRIGHTNESS) MuxGridIcons.Brightness else MuxGridIcons.VolumeUp,
+                    contentDescription = null,
+                    tint = MuxGridColors.OnAccent,
+                    modifier = Modifier.size(18.dp),
+                )
                 Text(
-                    text = "$prefix ${fb.percent}%",
+                    text = "${fb.percent}%",
                     style = MuxGridType.TabularNumber,
                     color = MuxGridColors.OnAccent,
                     fontSize = 14.sp,
@@ -484,13 +511,21 @@ internal fun MobilePlayerScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f),
                     ) {
-                        OutlinedButton(
-                            onClick = onExit,
-                            colors = scrimBtnColors,
-                            border = scrimBtnBorder,
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(MuxGridColors.ScrimSurface)
+                                .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, CircleShape)
+                                .clickable(onClick = onExit),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Text("Back", color = Color.White, fontSize = 12.sp)
+                            Icon(
+                                imageVector = MuxGridIcons.ArrowBack,
+                                contentDescription = "Back",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp),
+                            )
                         }
                         Spacer(Modifier.width(8.dp))
                         if (activeChannel != null) {
@@ -538,27 +573,42 @@ internal fun MobilePlayerScreen(
                     }
 
                     Spacer(Modifier.width(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         if (canEnterPip && !isAudioStage) {
-                            OutlinedButton(
-                                onClick = onEnterPip,
-                                colors = scrimBtnColors,
-                                border = scrimBtnBorder,
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(MuxGridColors.ScrimSurface)
+                                    .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, CircleShape)
+                                    .clickable(onClick = onEnterPip),
+                                contentAlignment = Alignment.Center,
                             ) {
-                                Text("PiP", color = Color.White, fontSize = 12.sp)
+                                Icon(
+                                    imageVector = MuxGridIcons.Pip,
+                                    contentDescription = "Picture-in-Picture",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp),
+                                )
                             }
                         }
-                        OutlinedButton(
-                            onClick = onMinimizeToAudio,
-                            colors = scrimBtnColors,
-                            border = scrimBtnBorder,
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(MuxGridColors.ScrimSurface)
+                                .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, CircleShape)
+                                .clickable(onClick = onMinimizeToAudio),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Text(
-                                text = if (playbackState.isRadio) "Mini" else "Bg Audio",
-                                color = Color.White,
-                                fontSize = 12.sp,
+                            Icon(
+                                imageVector = MuxGridIcons.Headphones,
+                                contentDescription = if (playbackState.isRadio) "Mini Player" else "Background Audio",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp),
                             )
                         }
                         OutlinedButton(
@@ -567,6 +617,13 @@ internal fun MobilePlayerScreen(
                             border = scrimBtnBorder,
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                         ) {
+                            Icon(
+                                imageVector = MuxGridIcons.Tracks,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(5.dp))
                             Text("Tracks", color = Color.White, fontSize = 12.sp)
                         }
                     }
@@ -660,7 +717,12 @@ internal fun MobilePlayerScreen(
                                 border = scrimBtnBorder,
                                 modifier = Modifier.weight(1f),
                             ) {
-                                Text("-10s", color = Color.White, fontSize = 13.sp)
+                                Icon(
+                                    imageVector = MuxGridIcons.Replay10,
+                                    contentDescription = "Seek back 10 seconds",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp),
+                                )
                             }
                             Button(
                                 onClick = { playbackEngine.togglePause() },
@@ -670,6 +732,12 @@ internal fun MobilePlayerScreen(
                                 ),
                                 modifier = Modifier.weight(1.2f),
                             ) {
+                                Icon(
+                                    imageVector = if (playbackState.isPaused) MuxGridIcons.Play else MuxGridIcons.Pause,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
                                 Text(
                                     text = if (playbackState.isPaused) "Play" else "Pause",
                                     fontWeight = FontWeight.SemiBold,
@@ -681,7 +749,12 @@ internal fun MobilePlayerScreen(
                                 border = scrimBtnBorder,
                                 modifier = Modifier.weight(1f),
                             ) {
-                                Text("+30s", color = Color.White, fontSize = 13.sp)
+                                Icon(
+                                    imageVector = MuxGridIcons.Forward30,
+                                    contentDescription = "Seek forward 30 seconds",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp),
+                                )
                             }
                         }
                     } else {
@@ -711,6 +784,12 @@ internal fun MobilePlayerScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     ) {
+                                        Icon(
+                                            imageVector = MuxGridIcons.Sensors,
+                                            contentDescription = null,
+                                            tint = MuxGridColors.OnAccent,
+                                            modifier = Modifier.size(15.dp),
+                                        )
                                         Text(
                                             text = "-${formatDurationSec(stableLiveOffsetSec)} · Back to Live",
                                             style = MuxGridType.TabularSmall,
@@ -754,17 +833,27 @@ internal fun MobilePlayerScreen(
                                         onClick = onZapPrevious,
                                         colors = scrimBtnColors,
                                         border = scrimBtnBorder,
-                                        contentPadding = PaddingValues(horizontal = 9.dp, vertical = 4.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                     ) {
-                                        Text("Prev", color = Color.White, fontSize = 12.sp)
+                                        Icon(
+                                            imageVector = MuxGridIcons.SkipPrevious,
+                                            contentDescription = "Previous channel",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp),
+                                        )
                                     }
                                     OutlinedButton(
                                         onClick = onZapNext,
                                         colors = scrimBtnColors,
                                         border = scrimBtnBorder,
-                                        contentPadding = PaddingValues(horizontal = 9.dp, vertical = 4.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                     ) {
-                                        Text("Next", color = Color.White, fontSize = 12.sp)
+                                        Icon(
+                                            imageVector = MuxGridIcons.SkipNext,
+                                            contentDescription = "Next channel",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp),
+                                        )
                                     }
                                     OutlinedButton(
                                         onClick = { quickZapOpen = true },
@@ -772,6 +861,13 @@ internal fun MobilePlayerScreen(
                                         border = scrimBtnBorder,
                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                     ) {
+                                        Icon(
+                                            imageVector = MuxGridIcons.ChannelsList,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                        Spacer(Modifier.width(4.dp))
                                         Text("Channels", color = Color.White, fontSize = 12.sp)
                                     }
                                 }
@@ -846,7 +942,12 @@ internal fun MobilePlayerScreen(
                                     border = scrimBtnBorder,
                                     modifier = Modifier.weight(1f),
                                 ) {
-                                    Text("-10s", color = Color.White, fontSize = 13.sp)
+                                    Icon(
+                                        imageVector = MuxGridIcons.Replay10,
+                                        contentDescription = "Seek back 10 seconds",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(22.dp),
+                                    )
                                 }
                             }
                             Button(
@@ -857,6 +958,12 @@ internal fun MobilePlayerScreen(
                                 ),
                                 modifier = Modifier.weight(1.2f),
                             ) {
+                                Icon(
+                                    imageVector = if (playbackState.isPaused) MuxGridIcons.Play else MuxGridIcons.Pause,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
                                 Text(
                                     text = if (playbackState.isPaused) "Play" else "Pause",
                                     fontWeight = FontWeight.SemiBold,
@@ -869,7 +976,12 @@ internal fun MobilePlayerScreen(
                                     border = scrimBtnBorder,
                                     modifier = Modifier.weight(1f),
                                 ) {
-                                    Text("+30s", color = Color.White, fontSize = 13.sp)
+                                    Icon(
+                                        imageVector = MuxGridIcons.Forward30,
+                                        contentDescription = "Seek forward 30 seconds",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(22.dp),
+                                    )
                                 }
                             }
                         }
@@ -917,16 +1029,20 @@ internal fun MobilePlayerScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text("Quick Zap", style = MuxGridType.Title, fontSize = 17.sp)
-                        Text(
-                            text = "Close",
-                            color = MuxGridColors.AccentBlueLight,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
+                        Box(
                             modifier = Modifier
                                 .clip(MuxGridShapes.Sm)
                                 .clickable { quickZapOpen = false }
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
+                                .padding(4.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = MuxGridIcons.Close,
+                                contentDescription = "Close",
+                                tint = MuxGridColors.AccentBlueLight,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
                     }
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),

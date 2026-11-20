@@ -35,4 +35,11 @@ dependencies {
     api(libs.androidx.compose.ui.tooling.preview)
     api(libs.coil.compose)
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.platform.launcher)
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
 }

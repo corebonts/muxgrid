@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,6 +23,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -50,6 +52,7 @@ import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.buildUpcomingDays
@@ -144,6 +147,13 @@ internal fun MobileGuideScreen(
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(
+                imageVector = MuxGridIcons.Search,
+                contentDescription = null,
+                tint = MuxGridColors.TextMuted,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(8.dp))
             Box(modifier = Modifier.weight(1f)) {
                 if (searchQuery.isEmpty()) {
                     Text(
@@ -163,16 +173,20 @@ internal fun MobileGuideScreen(
             }
             if (searchQuery.isNotEmpty()) {
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    text = "Clear",
-                    color = MuxGridColors.AccentBlueLight,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
+                Box(
                     modifier = Modifier
                         .clip(MuxGridShapes.Xs)
                         .clickable { searchQuery = "" }
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
+                        .padding(4.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = MuxGridIcons.Close,
+                        contentDescription = "Clear search",
+                        tint = MuxGridColors.AccentBlueLight,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
             }
         }
 
@@ -458,6 +472,8 @@ internal fun MobileGuideScreen(
                             ),
                             modifier = Modifier.weight(1f),
                         ) {
+                            Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
                             Text(if (isLiveNow) "Watch Live" else "Watch Channel")
                         }
                     }
@@ -473,6 +489,8 @@ internal fun MobileGuideScreen(
                                 },
                                 modifier = Modifier.weight(1f),
                             ) {
+                                Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.AccentBlueLight, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
                                 Text("Watch from Start", color = MuxGridColors.AccentBlueLight)
                             }
                             OutlinedButton(
@@ -489,6 +507,8 @@ internal fun MobileGuideScreen(
                                 },
                                 modifier = Modifier.weight(1f),
                             ) {
+                                Icon(MuxGridIcons.Stop, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
                                 Text("Stop & Save", color = MuxGridColors.TextPrimary)
                             }
                         }
@@ -507,6 +527,8 @@ internal fun MobileGuideScreen(
                                 },
                                 modifier = Modifier.weight(1f),
                             ) {
+                                Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
                                 Text("Cancel Timer", color = MuxGridColors.CoralLive)
                             }
                         }
@@ -525,6 +547,8 @@ internal fun MobileGuideScreen(
                                 },
                                 modifier = Modifier.weight(1f),
                             ) {
+                                Icon(MuxGridIcons.Record, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
                                 Text(
                                     text = if (isLiveNow) "Record Now" else "Record",
                                     color = MuxGridColors.CoralLive,

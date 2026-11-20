@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -37,6 +38,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.tv.material3.Border
 import androidx.tv.material3.Button
 import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.Icon
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import coil3.ImageLoader
@@ -46,6 +48,7 @@ import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
@@ -238,6 +241,12 @@ internal fun TvRecordingsScreen(
                                 modifier = Modifier.focusRequester(primaryFocusRequester),
                                 colors = tvPrimaryButtonColors(),
                             ) {
+                                Icon(
+                                    imageVector = if (entry.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(4.dp))
                                 Text(if (entry.hasResumePosition) "Resume" else "Watch from Start")
                             }
                             if (ch != null) {
@@ -248,6 +257,8 @@ internal fun TvRecordingsScreen(
                                     },
                                     colors = tvSecondaryButtonColors(),
                                 ) {
+                                    Icon(MuxGridIcons.Live, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
                                     Text("Watch Live")
                                 }
                             }
@@ -265,6 +276,8 @@ internal fun TvRecordingsScreen(
                                 },
                                 colors = tvSecondaryButtonColors(),
                             ) {
+                                Icon(MuxGridIcons.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
                                 Text("Stop & Save")
                             }
                             Button(
@@ -281,6 +294,8 @@ internal fun TvRecordingsScreen(
                                 },
                                 colors = tvSecondaryButtonColors(),
                             ) {
+                                Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
                                 Text("Abort")
                             }
                         }
@@ -295,6 +310,8 @@ internal fun TvRecordingsScreen(
                                     modifier = Modifier.focusRequester(primaryFocusRequester),
                                     colors = tvPrimaryButtonColors(),
                                 ) {
+                                    Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
                                     Text(if (entry.hasResumePosition) "Resume" else "Play")
                                 }
                                 if (entry.hasResumePosition) {
@@ -305,6 +322,8 @@ internal fun TvRecordingsScreen(
                                         },
                                         colors = tvSecondaryButtonColors(),
                                     ) {
+                                        Icon(MuxGridIcons.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
                                         Text("Start Over")
                                     }
                                 }
@@ -321,6 +340,8 @@ internal fun TvRecordingsScreen(
                                     },
                                     colors = tvSecondaryButtonColors(),
                                 ) {
+                                    Icon(MuxGridIcons.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
                                     Text(if (entry.isWatched) "Unwatched" else "Watched")
                                 }
                             }
@@ -338,6 +359,8 @@ internal fun TvRecordingsScreen(
                                 modifier = if (entry.isFileMissing) Modifier.focusRequester(primaryFocusRequester) else Modifier,
                                 colors = tvSecondaryButtonColors(),
                             ) {
+                                Icon(MuxGridIcons.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
                                 Text("Delete")
                             }
                         }
@@ -356,6 +379,8 @@ internal fun TvRecordingsScreen(
                                 modifier = Modifier.focusRequester(primaryFocusRequester),
                                 colors = tvSecondaryButtonColors(),
                             ) {
+                                Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
                                 Text("Cancel Timer")
                             }
                         }
@@ -374,6 +399,8 @@ internal fun TvRecordingsScreen(
                                 modifier = Modifier.focusRequester(primaryFocusRequester),
                                 colors = tvSecondaryButtonColors(),
                             ) {
+                                Icon(MuxGridIcons.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
                                 Text("Remove")
                             }
                         }
@@ -383,6 +410,8 @@ internal fun TvRecordingsScreen(
                         onClick = { selectedEntry = null },
                         colors = tvSecondaryButtonColors(),
                     ) {
+                        Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
                         Text("Close")
                     }
                 }

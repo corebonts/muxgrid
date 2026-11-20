@@ -13,12 +13,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,6 +47,7 @@ import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
@@ -396,20 +399,32 @@ private fun RecordingNowCard(
                     colors = ButtonDefaults.buttonColors(containerColor = MuxGridColors.AccentBlue, contentColor = Color.White),
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text(if (entry.hasResumePosition) "Resume" else "Watch from Start", fontSize = 12.sp)
+                    Icon(
+                        imageVector = if (entry.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (entry.hasResumePosition) "Resume" else "Watch from Start", fontSize = 12.sp, maxLines = 1)
                 }
                 if (channel != null) {
                     OutlinedButton(onClick = onWatchLive, modifier = Modifier.weight(1f)) {
-                        Text("Watch Live", color = MuxGridColors.TextPrimary, fontSize = 12.sp)
+                        Icon(MuxGridIcons.Live, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Watch Live", color = MuxGridColors.TextPrimary, fontSize = 12.sp, maxLines = 1)
                     }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) {
-                    Text("Stop & Save", color = MuxGridColors.TextPrimary, fontSize = 12.sp)
+                    Icon(MuxGridIcons.Stop, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Stop & Save", color = MuxGridColors.TextPrimary, fontSize = 12.sp, maxLines = 1)
                 }
                 OutlinedButton(onClick = onAbort) {
-                    Text("Abort", color = MuxGridColors.CoralLive, fontSize = 12.sp)
+                    Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Abort", color = MuxGridColors.CoralLive, fontSize = 12.sp, maxLines = 1)
                 }
             }
         }
@@ -518,6 +533,8 @@ private fun CompletedRecordingCard(
                     colors = ButtonDefaults.buttonColors(containerColor = MuxGridColors.AccentBlue, contentColor = Color.White),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 ) {
+                    Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
                     Text(if (entry.hasResumePosition) "Resume" else "Play", fontSize = 12.sp)
                 }
                 if (entry.hasResumePosition) {
@@ -525,6 +542,8 @@ private fun CompletedRecordingCard(
                         onClick = onPlayFromStart,
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                     ) {
+                        Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
                         Text("Start Over", color = MuxGridColors.TextPrimary, fontSize = 12.sp)
                     }
                 }
@@ -532,6 +551,8 @@ private fun CompletedRecordingCard(
                     onClick = onToggleWatched,
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                 ) {
+                    Icon(MuxGridIcons.CheckCircle, contentDescription = null, tint = MuxGridColors.TextSecondary, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
                     Text(
                         text = if (entry.isWatched) "Unwatched" else "Watched",
                         color = MuxGridColors.TextSecondary,
@@ -551,7 +572,7 @@ private fun CompletedRecordingCard(
                 onClick = onRequestDelete,
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
             ) {
-                Text("Delete", color = MuxGridColors.CoralLive, fontSize = 12.sp)
+                Icon(MuxGridIcons.Delete, contentDescription = "Delete", tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
             }
         }
     }
@@ -619,11 +640,11 @@ private fun SeriesGroupCard(
                 )
                 Spacer(Modifier.width(8.dp))
             }
-            Text(
-                text = if (expanded) "Hide" else "Show",
-                color = MuxGridColors.TextSecondary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
+            Icon(
+                imageVector = if (expanded) MuxGridIcons.ExpandLess else MuxGridIcons.ExpandMore,
+                contentDescription = if (expanded) "Collapse" else "Expand",
+                tint = MuxGridColors.TextSecondary,
+                modifier = Modifier.size(20.dp),
             )
         }
 
@@ -687,6 +708,8 @@ private fun ScheduledTimerCard(
             onClick = onCancel,
             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
         ) {
+            Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.width(4.dp))
             Text("Cancel", color = MuxGridColors.CoralLive, fontSize = 12.sp)
         }
     }
@@ -749,7 +772,7 @@ private fun FailedRecordingCard(
             onClick = onDelete,
             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
         ) {
-            Text("Remove", color = MuxGridColors.CoralLive, fontSize = 12.sp)
+            Icon(MuxGridIcons.Delete, contentDescription = "Remove", tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
         }
     }
 }

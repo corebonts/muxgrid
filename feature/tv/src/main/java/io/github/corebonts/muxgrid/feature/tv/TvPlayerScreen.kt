@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
@@ -52,6 +53,7 @@ import androidx.tv.material3.Border
 import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.Icon
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import coil3.ImageLoader
@@ -61,6 +63,7 @@ import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.TimeshiftNoticeBanner
@@ -497,12 +500,23 @@ internal fun TvPlayerScreen(
                                 fontWeight = FontWeight.SemiBold,
                             )
                             if (lastSeekStepLabel.isNotEmpty()) {
-                                Text(
-                                    text = lastSeekStepLabel,
-                                    color = MuxGridColors.AccentBlueLight,
-                                    style = MuxGridType.TabularSmall,
-                                    fontWeight = FontWeight.Bold,
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = if (lastSeekDirection < 0) MuxGridIcons.FastRewind else MuxGridIcons.FastForward,
+                                        contentDescription = null,
+                                        tint = MuxGridColors.AccentBlueLight,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                    Text(
+                                        text = lastSeekStepLabel,
+                                        color = MuxGridColors.AccentBlueLight,
+                                        style = MuxGridType.TabularSmall,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
                             }
                         }
                         Row(
@@ -545,12 +559,23 @@ internal fun TvPlayerScreen(
                                 fontWeight = FontWeight.SemiBold,
                             )
                             if (lastSeekStepLabel.isNotEmpty()) {
-                                Text(
-                                    text = lastSeekStepLabel,
-                                    color = MuxGridColors.AccentBlueLight,
-                                    style = MuxGridType.TabularSmall,
-                                    fontWeight = FontWeight.Bold,
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = if (lastSeekDirection < 0) MuxGridIcons.FastRewind else MuxGridIcons.FastForward,
+                                        contentDescription = null,
+                                        tint = MuxGridColors.AccentBlueLight,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                    Text(
+                                        text = lastSeekStepLabel,
+                                        color = MuxGridColors.AccentBlueLight,
+                                        style = MuxGridType.TabularSmall,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
                             }
                         }
                         Text(
@@ -699,7 +724,7 @@ internal fun TvPlayerScreen(
                     }
 
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (canSeekTimeline) {
@@ -707,7 +732,11 @@ internal fun TvPlayerScreen(
                                 onClick = { playbackEngine.seekBy(-30_000L) },
                                 colors = tvSecondaryButtonColors(),
                             ) {
-                                Text("-30s")
+                                Icon(
+                                    imageVector = MuxGridIcons.Replay30,
+                                    contentDescription = "Seek back 30 seconds",
+                                    modifier = Modifier.size(20.dp),
+                                )
                             }
                         }
                         Button(
@@ -720,6 +749,12 @@ internal fun TvPlayerScreen(
                                 focusedContentColor = MuxGridColors.CanvasTv,
                             ),
                         ) {
+                            Icon(
+                                imageVector = if (playbackState.isPaused) MuxGridIcons.Play else MuxGridIcons.Pause,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
                             Text(if (playbackState.isPaused) "Play" else "Pause")
                         }
                         if (canSeekTimeline) {
@@ -727,7 +762,11 @@ internal fun TvPlayerScreen(
                                 onClick = { playbackEngine.seekBy(30_000L) },
                                 colors = tvSecondaryButtonColors(),
                             ) {
-                                Text("+30s")
+                                Icon(
+                                    imageVector = MuxGridIcons.Forward30,
+                                    contentDescription = "Seek forward 30 seconds",
+                                    modifier = Modifier.size(20.dp),
+                                )
                             }
                         }
                         if (playbackState.isBehindLive) {
@@ -735,6 +774,12 @@ internal fun TvPlayerScreen(
                                 onClick = { playbackEngine.seekToLiveEdge() },
                                 colors = tvPrimaryButtonColors(),
                             ) {
+                                Icon(
+                                    imageVector = MuxGridIcons.Sensors,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
                                 Text("Back to Live")
                             }
                         }
@@ -743,6 +788,12 @@ internal fun TvPlayerScreen(
                                 onClick = { onZapDelta(-1) },
                                 colors = tvSecondaryButtonColors(),
                             ) {
+                                Icon(
+                                    imageVector = MuxGridIcons.SkipPrevious,
+                                    contentDescription = "Previous channel",
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(4.dp))
                                 Text("Ch -")
                             }
                             Button(
@@ -750,18 +801,36 @@ internal fun TvPlayerScreen(
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Text("Ch +")
+                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = MuxGridIcons.SkipNext,
+                                    contentDescription = "Next channel",
+                                    modifier = Modifier.size(18.dp),
+                                )
                             }
                         }
                         Button(
                             onClick = { trackPanelOpen = !trackPanelOpen },
                             colors = tvSecondaryButtonColors(),
                         ) {
-                            Text("Tracks & Decoder")
+                            Icon(
+                                imageVector = MuxGridIcons.Tracks,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Tracks")
                         }
                         Button(
                             onClick = onExit,
                             colors = tvSecondaryButtonColors(),
                         ) {
+                            Icon(
+                                imageVector = MuxGridIcons.Stop,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
                             Text("Stop")
                         }
                     }

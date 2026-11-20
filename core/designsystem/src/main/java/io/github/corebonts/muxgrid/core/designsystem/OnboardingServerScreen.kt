@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -20,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -155,11 +158,22 @@ fun OnboardingServerScreen(
                 .padding(if (isTv) 20.dp else 24.dp),
             verticalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 14.dp),
         ) {
-            Text(
-                text = "Connect to Tvheadend",
-                style = MuxGridType.Title,
-                fontSize = if (isTv) 20.sp else 22.sp,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    imageVector = MuxGridIcons.Dns,
+                    contentDescription = null,
+                    tint = MuxGridColors.AccentBlueLight,
+                    modifier = Modifier.size(24.dp),
+                )
+                Text(
+                    text = "Connect to Tvheadend",
+                    style = MuxGridType.Title,
+                    fontSize = if (isTv) 20.sp else 22.sp,
+                )
+            }
             Text(
                 text = "Uses HTSP (control, EPG, auth) and HTTP pass-through for instant broadcast playback.",
                 style = MuxGridType.CardSubtitle,
@@ -341,6 +355,13 @@ fun OnboardingServerScreen(
                             .weight(1f)
                             .onFocusChanged { cancelFocused = it.isFocused },
                     ) {
+                        Icon(
+                            imageVector = MuxGridIcons.Close,
+                            contentDescription = null,
+                            tint = if (cancelFocused) MuxGridColors.CanvasTv else MuxGridColors.TextSecondary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
                         Text(
                             text = "Cancel",
                             color = if (cancelFocused) MuxGridColors.CanvasTv else MuxGridColors.TextSecondary,
@@ -370,6 +391,13 @@ fun OnboardingServerScreen(
                         .weight(1f)
                         .onFocusChanged { testFocused = it.isFocused },
                 ) {
+                    Icon(
+                        imageVector = MuxGridIcons.Refresh,
+                        contentDescription = null,
+                        tint = if (testFocused) MuxGridColors.CanvasTv else MuxGridColors.TextPrimary,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
                     Text(
                         text = if (testing) "Testing…" else "Test",
                         color = if (testFocused) MuxGridColors.CanvasTv else MuxGridColors.TextPrimary,
@@ -394,6 +422,12 @@ fun OnboardingServerScreen(
                         .weight(1.3f)
                         .onFocusChanged { saveFocused = it.isFocused },
                 ) {
+                    Icon(
+                        imageVector = MuxGridIcons.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
                     Text(if (saving) "Saving…" else "Save & Connect", fontWeight = FontWeight.SemiBold)
                 }
             }

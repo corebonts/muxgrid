@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -48,6 +49,7 @@ import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.FilterChip
 import androidx.tv.material3.FilterChipDefaults
+import androidx.tv.material3.Icon
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import coil3.ImageLoader
@@ -56,6 +58,7 @@ import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.buildUpcomingDays
@@ -141,19 +144,25 @@ internal fun TvGuideScreen(
                 onClick = { windowStartEpochSec = (windowStartEpochSec - TIMELINE_STEP_SEC).coerceAtLeast(floorToHalfHour(nowEpochSec) - 3600L) },
                 colors = tvSecondaryButtonColors(),
             ) {
-                Text("< -2h", fontSize = 12.sp)
+                Icon(MuxGridIcons.ChevronLeft, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(2.dp))
+                Text("-2h", fontSize = 12.sp)
             }
             Button(
                 onClick = { windowStartEpochSec = floorToHalfHour(nowEpochSec) },
                 colors = tvPrimaryButtonColors(),
             ) {
+                Icon(MuxGridIcons.Schedule, contentDescription = null, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
                 Text("Now", fontSize = 12.sp)
             }
             Button(
                 onClick = { windowStartEpochSec += TIMELINE_STEP_SEC },
                 colors = tvSecondaryButtonColors(),
             ) {
-                Text("+2h >", fontSize = 12.sp)
+                Text("+2h", fontSize = 12.sp)
+                Spacer(Modifier.width(2.dp))
+                Icon(MuxGridIcons.ChevronRight, contentDescription = null, modifier = Modifier.size(16.dp))
             }
             Spacer(Modifier.width(8.dp))
             val activeZone = ZoneId.systemDefault()
@@ -581,6 +590,8 @@ internal fun TvGuideScreen(
                             modifier = Modifier.focusRequester(primaryFocusRequester),
                             colors = tvPrimaryButtonColors(),
                         ) {
+                            Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
                             Text(if (isLiveNow) "Watch Live" else "Watch Channel")
                         }
                     }
@@ -603,6 +614,8 @@ internal fun TvGuideScreen(
                                 modifier = recordButtonModifier,
                                 colors = tvSecondaryButtonColors(),
                             ) {
+                                Icon(MuxGridIcons.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
                                 Text("Watch from Start")
                             }
                             Button(
@@ -619,6 +632,8 @@ internal fun TvGuideScreen(
                                 },
                                 colors = tvSecondaryButtonColors(),
                             ) {
+                                Icon(MuxGridIcons.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
                                 Text("Stop & Save")
                             }
                         }
@@ -638,6 +653,8 @@ internal fun TvGuideScreen(
                                 modifier = recordButtonModifier,
                                 colors = tvSecondaryButtonColors(),
                             ) {
+                                Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
                                 Text("Cancel Timer")
                             }
                         }
@@ -657,6 +674,8 @@ internal fun TvGuideScreen(
                                 modifier = recordButtonModifier,
                                 colors = tvSecondaryButtonColors(),
                             ) {
+                                Icon(MuxGridIcons.Record, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(6.dp))
                                 Text(if (isLiveNow) "Record Now" else "Record")
                             }
                         }
@@ -667,6 +686,8 @@ internal fun TvGuideScreen(
                         onClick = { actionEvent = null },
                         colors = tvSecondaryButtonColors(),
                     ) {
+                        Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
                         Text("Close")
                     }
                 }

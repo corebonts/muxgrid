@@ -43,6 +43,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -58,6 +59,7 @@ import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.FilterChip
 import androidx.tv.material3.FilterChipDefaults
+import androidx.tv.material3.Icon
 import androidx.tv.material3.MaterialTheme as TvMaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
@@ -70,6 +72,7 @@ import io.github.corebonts.muxgrid.core.designsystem.ConnectionStatusBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
@@ -479,10 +482,10 @@ private fun TvNavigationRail(
             Spacer(Modifier.height(6.dp))
 
             listOf(
-                Triple(MainTab.LIVE, "TV", "Live"),
-                Triple(MainTab.GUIDE, "EP", "Guide"),
-                Triple(MainTab.RECORDINGS, "DR", "Recordings"),
-            ).forEach { (tab, badge, label) ->
+                Triple(MainTab.LIVE, MuxGridIcons.Live to MuxGridIcons.LiveFilled, "Live"),
+                Triple(MainTab.GUIDE, MuxGridIcons.Guide to MuxGridIcons.GuideFilled, "Guide"),
+                Triple(MainTab.RECORDINGS, MuxGridIcons.Recordings to MuxGridIcons.RecordingsFilled, "Recordings"),
+            ).forEach { (tab, icons, label) ->
                 val selected = tab == activeTab
                 val itemModifier = when {
                     selected && tab == MainTab.LIVE -> Modifier.focusRequester(railFocusRequester).focusRequester(activeFocusRequester)
@@ -490,7 +493,7 @@ private fun TvNavigationRail(
                     else -> Modifier
                 }
                 TvRailItem(
-                    badge = badge,
+                    icon = if (selected) icons.second else icons.first,
                     label = label,
                     expanded = expanded,
                     selected = selected,
@@ -501,7 +504,7 @@ private fun TvNavigationRail(
         }
 
         TvRailItem(
-            badge = "ST",
+            icon = MuxGridIcons.Settings,
             label = "Settings",
             expanded = expanded,
             selected = false,
@@ -512,7 +515,7 @@ private fun TvNavigationRail(
 
 @Composable
 private fun TvRailItem(
-    badge: String,
+    icon: ImageVector,
     label: String,
     expanded: Boolean,
     selected: Boolean,
@@ -551,11 +554,10 @@ private fun TvRailItem(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.Center,
         ) {
-            Text(
-                text = badge,
-                style = MuxGridType.TabularNumber,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                modifier = Modifier.size(22.dp),
             )
             if (expanded) {
                 Spacer(Modifier.width(12.dp))
@@ -597,10 +599,25 @@ private fun TvLiveChannelsTab(
         ) {
             filters.forEachIndexed { idx, filter ->
                 val selected = filter == activeFilter
+                val filterIcon = when (filter) {
+                    LiveFilter.Tv -> MuxGridIcons.Tv
+                    LiveFilter.Radio -> MuxGridIcons.Radio
+                    LiveFilter.Favorites -> MuxGridIcons.StarFilled
+                    else -> null
+                }
                 FilterChip(
                     selected = selected,
                     onClick = { onSelectFilter(filter) },
                     modifier = if (idx == 0) Modifier.focusRequester(initialContentFocusRequester) else Modifier,
+                    leadingIcon = filterIcon?.let { icon ->
+                        {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    },
                     colors = FilterChipDefaults.colors(
                         containerColor = MuxGridColors.CardSurface,
                         contentColor = MuxGridColors.TextPrimary,
@@ -716,7 +733,12 @@ private fun TvChannelCard(
                             )
                         }
                         if (isFavorite) {
-                            Text("★", color = MuxGridColors.AmberWarn, fontSize = 13.sp)
+                            Icon(
+                                imageVector = MuxGridIcons.StarFilled,
+                                contentDescription = "Favorite",
+                                tint = MuxGridColors.AmberWarn,
+                                modifier = Modifier.size(15.dp),
+                            )
                         }
                     }
                     Text(
@@ -791,7 +813,18 @@ private fun TvSettingsDialog(
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("Settings", style = MuxGridType.Title, fontSize = 20.sp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    imageVector = MuxGridIcons.Settings,
+                    contentDescription = null,
+                    tint = MuxGridColors.AccentBlueLight,
+                    modifier = Modifier.size(22.dp),
+                )
+                Text("Settings", style = MuxGridType.Title, fontSize = 20.sp)
+            }
 
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Video Decoder & Deinterlacer", style = MuxGridType.CardSubtitle, fontWeight = FontWeight.SemiBold)
@@ -862,12 +895,16 @@ private fun TvSettingsDialog(
                         onClick = onOpenServerSetup,
                         colors = tvPrimaryButtonColors(),
                     ) {
+                        Icon(MuxGridIcons.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
                         Text("Edit Server Connection")
                     }
                     Button(
                         onClick = onDismiss,
                         colors = tvSecondaryButtonColors(),
                     ) {
+                        Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
                         Text("Close")
                     }
                 }
