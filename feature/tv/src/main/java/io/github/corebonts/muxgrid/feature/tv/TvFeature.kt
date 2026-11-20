@@ -557,7 +557,7 @@ private fun TvRailItem(
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(24.dp),
             )
             if (expanded) {
                 Spacer(Modifier.width(12.dp))

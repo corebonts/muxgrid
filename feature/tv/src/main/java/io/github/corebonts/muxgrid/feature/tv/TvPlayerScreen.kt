@@ -815,11 +815,9 @@ internal fun TvPlayerScreen(
                         ) {
                             Icon(
                                 imageVector = MuxGridIcons.Tracks,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
+                                contentDescription = "Tracks",
+                                modifier = Modifier.size(20.dp),
                             )
-                            Spacer(Modifier.width(6.dp))
-                            Text("Tracks")
                         }
                         Button(
                             onClick = onExit,

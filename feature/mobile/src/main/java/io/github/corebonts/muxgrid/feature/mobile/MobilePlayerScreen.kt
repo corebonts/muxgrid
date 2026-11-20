@@ -40,7 +40,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -64,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -151,6 +151,7 @@ internal fun MobilePlayerScreen(
     }
 
     var hudVisible by remember { mutableStateOf(true) }
+    var hudInteractionNonce by remember { mutableIntStateOf(0) }
     var trackPanelOpen by remember { mutableStateOf(false) }
     var quickZapOpen by remember { mutableStateOf(false) }
     var isScrubbing by remember { mutableStateOf(false) }
@@ -195,7 +196,7 @@ internal fun MobilePlayerScreen(
         }
     }
 
-    LaunchedEffect(hudVisible, trackPanelOpen, quickZapOpen, playbackState.status, isScrubbing, isInPip) {
+    LaunchedEffect(hudVisible, hudInteractionNonce, trackPanelOpen, quickZapOpen, playbackState.status, isScrubbing, isInPip) {
         if (hudVisible && !trackPanelOpen && !quickZapOpen && !isScrubbing && !isInPip &&
             playbackState.status == PlaybackStatus.PLAYING && !isAudioStage
         ) {
@@ -322,7 +323,9 @@ internal fun MobilePlayerScreen(
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.padding(32.dp),
+                    modifier = Modifier
+                        .padding(horizontal = 32.dp)
+                        .padding(bottom = if (hudVisible && !isInPip) 170.dp else 32.dp, top = 32.dp),
                 ) {
                     if (activeChannel != null) {
                         ChannelPiconBadge(
@@ -365,7 +368,7 @@ internal fun MobilePlayerScreen(
             }
         }
 
-        if (playbackState.status == PlaybackStatus.BUFFERING) {
+        if (playbackState.status == PlaybackStatus.BUFFERING && (!hudVisible || isInPip)) {
             CircularProgressIndicator(
                 color = MuxGridColors.AccentBlueLight,
                 modifier = Modifier.align(Alignment.Center),
@@ -421,6 +424,7 @@ internal fun MobilePlayerScreen(
             Row(
                 modifier = Modifier
                     .align(Alignment.Center)
+                    .padding(bottom = if (hudVisible) 150.dp else 0.dp)
                     .clip(MuxGridShapes.Pill)
                     .background(MuxGridColors.ScrimSurface)
                     .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, MuxGridShapes.Pill)
@@ -611,22 +615,105 @@ internal fun MobilePlayerScreen(
                                 modifier = Modifier.size(18.dp),
                             )
                         }
-                        OutlinedButton(
-                            onClick = { trackPanelOpen = !trackPanelOpen },
-                            colors = scrimBtnColors,
-                            border = scrimBtnBorder,
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(MuxGridColors.ScrimSurface)
+                                .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, CircleShape)
+                                .clickable { trackPanelOpen = !trackPanelOpen },
+                            contentAlignment = Alignment.Center,
                         ) {
                             Icon(
                                 imageVector = MuxGridIcons.Tracks,
-                                contentDescription = null,
+                                contentDescription = "Tracks",
                                 tint = Color.White,
-                                modifier = Modifier.size(16.dp),
+                                modifier = Modifier.size(18.dp),
                             )
-                            Spacer(Modifier.width(5.dp))
-                            Text("Tracks", color = Color.White, fontSize = 12.sp)
                         }
                     }
+                }
+
+                // Centered transport controls (Prev, -10s, Play/Pause, +30s, Next)
+                val canZapChannels = !playbackState.isRecordingPlayback && canZap
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    CenterTransportButton(
+                        icon = MuxGridIcons.SkipPrevious,
+                        contentDescription = "Previous channel",
+                        enabled = canZapChannels,
+                        size = 44.dp,
+                        iconSize = 22.dp,
+                        onClick = {
+                            hudInteractionNonce++
+                            onZapPrevious()
+                        },
+                    )
+                    CenterTransportButton(
+                        icon = MuxGridIcons.Replay10,
+                        contentDescription = "Seek back 10 seconds",
+                        enabled = canSeekTimeline,
+                        size = 46.dp,
+                        iconSize = 24.dp,
+                        onClick = {
+                            hudInteractionNonce++
+                            playbackEngine.seekBy(-10_000L)
+                        },
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.56f))
+                            .border(MuxGridBorders.Hairline, Color.White.copy(alpha = 0.18f), CircleShape)
+                            .clickable {
+                                hudInteractionNonce++
+                                playbackEngine.togglePause()
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (playbackState.status == PlaybackStatus.BUFFERING) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 2.5.dp,
+                                modifier = Modifier.size(28.dp),
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (playbackState.isPaused) MuxGridIcons.Play else MuxGridIcons.Pause,
+                                contentDescription = if (playbackState.isPaused) "Play" else "Pause",
+                                tint = Color.White,
+                                modifier = Modifier.size(34.dp),
+                            )
+                        }
+                    }
+                    CenterTransportButton(
+                        icon = MuxGridIcons.Forward30,
+                        contentDescription = "Seek forward 30 seconds",
+                        enabled = canSeekTimeline,
+                        size = 46.dp,
+                        iconSize = 24.dp,
+                        onClick = {
+                            hudInteractionNonce++
+                            playbackEngine.seekBy(30_000L)
+                        },
+                    )
+                    CenterTransportButton(
+                        icon = MuxGridIcons.SkipNext,
+                        contentDescription = "Next channel",
+                        enabled = canZapChannels,
+                        size = 44.dp,
+                        iconSize = 22.dp,
+                        onClick = {
+                            hudInteractionNonce++
+                            onZapNext()
+                        },
+                    )
                 }
 
                 // Bottom dark gradient scrim
@@ -705,58 +792,6 @@ internal fun MobilePlayerScreen(
                                 )
                             }
                         }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            OutlinedButton(
-                                onClick = { playbackEngine.seekBy(-10_000L) },
-                                colors = scrimBtnColors,
-                                border = scrimBtnBorder,
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Icon(
-                                    imageVector = MuxGridIcons.Replay10,
-                                    contentDescription = "Seek back 10 seconds",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp),
-                                )
-                            }
-                            Button(
-                                onClick = { playbackEngine.togglePause() },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MuxGridColors.AccentBlue,
-                                    contentColor = Color.White,
-                                ),
-                                modifier = Modifier.weight(1.2f),
-                            ) {
-                                Icon(
-                                    imageVector = if (playbackState.isPaused) MuxGridIcons.Play else MuxGridIcons.Pause,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp),
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = if (playbackState.isPaused) "Play" else "Pause",
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                            }
-                            OutlinedButton(
-                                onClick = { playbackEngine.seekBy(30_000L) },
-                                colors = scrimBtnColors,
-                                border = scrimBtnBorder,
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Icon(
-                                    imageVector = MuxGridIcons.Forward30,
-                                    contentDescription = "Seek forward 30 seconds",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp),
-                                )
-                            }
-                        }
                     } else {
                         // Live status + Back to Live pill + Channels drawer & Quick Zap buttons
                         Row(
@@ -828,48 +863,20 @@ internal fun MobilePlayerScreen(
                             }
 
                             if (canZap) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    OutlinedButton(
-                                        onClick = onZapPrevious,
-                                        colors = scrimBtnColors,
-                                        border = scrimBtnBorder,
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                    ) {
-                                        Icon(
-                                            imageVector = MuxGridIcons.SkipPrevious,
-                                            contentDescription = "Previous channel",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
-                                    OutlinedButton(
-                                        onClick = onZapNext,
-                                        colors = scrimBtnColors,
-                                        border = scrimBtnBorder,
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                    ) {
-                                        Icon(
-                                            imageVector = MuxGridIcons.SkipNext,
-                                            contentDescription = "Next channel",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
-                                    OutlinedButton(
-                                        onClick = { quickZapOpen = true },
-                                        colors = scrimBtnColors,
-                                        border = scrimBtnBorder,
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                    ) {
-                                        Icon(
-                                            imageVector = MuxGridIcons.ChannelsList,
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(16.dp),
-                                        )
-                                        Spacer(Modifier.width(4.dp))
-                                        Text("Channels", color = Color.White, fontSize = 12.sp)
-                                    }
+                                OutlinedButton(
+                                    onClick = { quickZapOpen = true },
+                                    colors = scrimBtnColors,
+                                    border = scrimBtnBorder,
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = MuxGridIcons.ChannelsList,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Channels", color = Color.White, fontSize = 12.sp)
                                 }
                             }
                         }
@@ -925,62 +932,6 @@ internal fun MobilePlayerScreen(
                                         text = "Buffer ${formatDurationSec(stableBufSec)}",
                                         style = MuxGridType.TabularSmall,
                                         color = MuxGridColors.OnAccent.copy(alpha = 0.78f),
-                                    )
-                                }
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (playbackState.isTimeshiftSeekable) {
-                                OutlinedButton(
-                                    onClick = { playbackEngine.seekBy(-10_000L) },
-                                    colors = scrimBtnColors,
-                                    border = scrimBtnBorder,
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Icon(
-                                        imageVector = MuxGridIcons.Replay10,
-                                        contentDescription = "Seek back 10 seconds",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(22.dp),
-                                    )
-                                }
-                            }
-                            Button(
-                                onClick = { playbackEngine.togglePause() },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MuxGridColors.AccentBlue,
-                                    contentColor = Color.White,
-                                ),
-                                modifier = Modifier.weight(1.2f),
-                            ) {
-                                Icon(
-                                    imageVector = if (playbackState.isPaused) MuxGridIcons.Play else MuxGridIcons.Pause,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp),
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = if (playbackState.isPaused) "Play" else "Pause",
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                            }
-                            if (playbackState.isTimeshiftSeekable) {
-                                OutlinedButton(
-                                    onClick = { playbackEngine.seekBy(30_000L) },
-                                    colors = scrimBtnColors,
-                                    border = scrimBtnBorder,
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Icon(
-                                        imageVector = MuxGridIcons.Forward30,
-                                        contentDescription = "Seek forward 30 seconds",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(22.dp),
                                     )
                                 }
                             }
@@ -1135,6 +1086,32 @@ internal fun MobilePlayerScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun CenterTransportButton(
+    icon: ImageVector,
+    contentDescription: String,
+    enabled: Boolean,
+    size: androidx.compose.ui.unit.Dp,
+    iconSize: androidx.compose.ui.unit.Dp,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = if (enabled) 0.48f else 0.28f))
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = Color.White.copy(alpha = if (enabled) 1f else 0.36f),
+            modifier = Modifier.size(iconSize),
+        )
     }
 }
 

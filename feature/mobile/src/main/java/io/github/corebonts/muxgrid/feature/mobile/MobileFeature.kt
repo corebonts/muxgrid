@@ -625,27 +625,20 @@ private fun MobileMainScaffold(
                         ).forEach { (tab, label, icons) ->
                             val selected = tab == activeTab
                             val contentColor = if (selected) MuxGridColors.OnAccent else MuxGridColors.TextSecondary
-                            Column(
+                            Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(MuxGridShapes.CardLg)
                                     .background(if (selected) MuxGridColors.AccentBlue else Color.Transparent)
                                     .clickable { onSelectTab(tab) }
-                                    .padding(vertical = 8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
                                     imageVector = if (selected) icons.second else icons.first,
                                     contentDescription = label,
                                     tint = contentColor,
-                                    modifier = Modifier.size(20.dp),
-                                )
-                                Text(
-                                    text = label,
-                                    color = contentColor,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                    modifier = Modifier.size(26.dp),
                                 )
                             }
                         }
@@ -667,7 +660,7 @@ private fun MobileNavigationRail(
     Column(
         modifier = Modifier
             .fillMaxHeight()
-            .width(96.dp)
+            .width(76.dp)
             .navigationBarsPadding()
             .padding(start = 10.dp, top = 10.dp, bottom = 10.dp)
             .clip(MuxGridShapes.Sheet)
@@ -681,58 +674,44 @@ private fun MobileNavigationRail(
             listOf(
                 Triple(MainTab.LIVE, "Live", MuxGridIcons.Live to MuxGridIcons.LiveFilled),
                 Triple(MainTab.GUIDE, "Guide", MuxGridIcons.Guide to MuxGridIcons.GuideFilled),
-                Triple(MainTab.RECORDINGS, "DVR", MuxGridIcons.Recordings to MuxGridIcons.RecordingsFilled),
+                Triple(MainTab.RECORDINGS, "Recordings", MuxGridIcons.Recordings to MuxGridIcons.RecordingsFilled),
             ).forEach { (tab, label, icons) ->
                 val selected = tab == activeTab
                 val contentColor = if (selected) MuxGridColors.OnAccent else MuxGridColors.TextSecondary
-                Column(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(MuxGridShapes.Row)
                         .background(if (selected) MuxGridColors.AccentBlue else Color.Transparent)
                         .clickable { onSelectTab(tab) }
-                        .padding(vertical = 10.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = if (selected) icons.second else icons.first,
                         contentDescription = label,
                         tint = contentColor,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Text(
-                        text = label,
-                        color = contentColor,
-                        fontSize = 11.sp,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                        modifier = Modifier.size(26.dp),
                     )
                 }
             }
         }
 
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(MuxGridShapes.Row)
                 .background(MuxGridColors.CardSurface)
                 .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Row)
                 .clickable(onClick = onOpenSettings)
-                .padding(vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+                .padding(vertical = 12.dp),
+            contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = MuxGridIcons.Settings,
                 contentDescription = "Settings",
                 tint = MuxGridColors.AccentBlueLight,
-                modifier = Modifier.size(18.dp),
-            )
-            Text(
-                text = "Settings",
-                color = MuxGridColors.AccentBlueLight,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.size(22.dp),
             )
         }
     }
