@@ -17,7 +17,6 @@ internal interface LiveStreamStrategy {
     fun stopActive()
     fun computeTimeshiftMetrics(
         positionMs: Long,
-        seekable: Boolean,
         cacheStartMs: Long,
         cacheEndMs: Long,
         timeshiftEnabled: Boolean,
@@ -35,7 +34,6 @@ internal class HttpPassStrategy(
 
     override fun computeTimeshiftMetrics(
         positionMs: Long,
-        seekable: Boolean,
         cacheStartMs: Long,
         cacheEndMs: Long,
         timeshiftEnabled: Boolean,
@@ -44,7 +42,7 @@ internal class HttpPassStrategy(
         val end = cacheEndMs.coerceAtLeast(start)
         val window = (end - start).coerceAtLeast(0L)
         val offset = (end - positionMs.coerceAtLeast(0L)).coerceAtLeast(0L)
-        val isTimeshiftSeekable = timeshiftEnabled && seekable && window >= 2_000L
+        val isTimeshiftSeekable = timeshiftEnabled && window >= 2_000L
         return LiveTimeshiftMetrics(
             bufferStartMs = start,
             bufferEndMs = end,

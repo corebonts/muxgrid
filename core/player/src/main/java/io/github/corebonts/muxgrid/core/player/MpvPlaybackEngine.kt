@@ -351,8 +351,8 @@ class MpvPlaybackEngine(
             val (_, endSec) = readSeekableCacheRangeSecLocked(instance)
             val fallbackEnd = runCatching { instance.getPropertyDouble("demuxer-cache-time") }.getOrNull()
             val liveSec = endSec ?: fallbackEnd
-            if (liveSec != null && liveSec > 0.5) {
-                val target = (liveSec - 0.5).coerceAtLeast(0.0)
+            if (liveSec != null && liveSec > 1.5) {
+                val target = (liveSec - 1.5).coerceAtLeast(0.0)
                 val secStr = String.format(Locale.US, "%.3f", target)
                 instance.command("seek", secStr, "absolute")
             }
@@ -586,7 +586,6 @@ class MpvPlaybackEngine(
 
         val metrics = liveStrategy.computeTimeshiftMetrics(
             positionMs = (posSec * 1000.0).toLong(),
-            seekable = seekable,
             cacheStartMs = (cacheStartSec * 1000.0).toLong(),
             cacheEndMs = (cacheEndSec * 1000.0).toLong(),
             timeshiftEnabled = currentTimeshiftWindow != TimeshiftWindow.OFF,
@@ -614,7 +613,7 @@ class MpvPlaybackEngine(
                 current
             } else {
                 current.copy(
-                    isSeekable = seekable,
+                    isSeekable = seekable || metrics.isTimeshiftSeekable,
                     bufferStartMs = metrics.bufferStartMs,
                     bufferEndMs = metrics.bufferEndMs,
                     bufferWindowMs = metrics.bufferWindowMs,
@@ -964,6 +963,6 @@ class MpvPlaybackEngine(
         private const val DEFAULT_RAM_CACHE_BYTES = 64L * 1024L * 1024L
         private const val DISK_SAFETY_RESERVE_BYTES = 512L * 1024L * 1024L
         private const val GROWING_WRITE_HEAD_SAFETY_MS = 2_000L
-        private const val LIVE_EDGE_SAFETY_MS = 500L
+        private const val LIVE_EDGE_SAFETY_MS = 1_500L
     }
 }

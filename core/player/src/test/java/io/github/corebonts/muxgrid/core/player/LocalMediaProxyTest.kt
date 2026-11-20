@@ -388,9 +388,9 @@ class LocalMediaProxyTest {
         )
         try {
             val strategy = HttpPassStrategy(proxy)
+            // Live HTTP MPEG-TS streams report seekable=false in libmpv even when seekable-ranges are cached
             val live = strategy.computeTimeshiftMetrics(
                 positionMs = 120_000L,
-                seekable = true,
                 cacheStartMs = 10_000L,
                 cacheEndMs = 150_000L,
                 timeshiftEnabled = true,
@@ -403,7 +403,6 @@ class LocalMediaProxyTest {
 
             val disabled = strategy.computeTimeshiftMetrics(
                 positionMs = 120_000L,
-                seekable = true,
                 cacheStartMs = 10_000L,
                 cacheEndMs = 150_000L,
                 timeshiftEnabled = false,
