@@ -16,6 +16,7 @@ import com.google.crypto.tink.aead.AeadConfig
 import com.google.crypto.tink.integration.android.AndroidKeysetManager
 import io.github.corebonts.muxgrid.core.model.FormFactor
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
+import io.github.corebonts.muxgrid.core.model.LocalDvrProgress
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -51,6 +52,41 @@ class SettingsRepository(
         val raw = prefs[KEY_HWDEC_PRESET]
         raw?.let { runCatching { HwDecPreset.valueOf(it) }.getOrNull() }
             ?: HwDecPreset.defaultFor(formFactor)
+    }
+
+    val localDvrProgress: Flow<Map<Long, LocalDvrProgress>> = context.muxGridDataStore.data.map { prefs ->
+        val entries = prefs[KEY_LOCAL_DVR_PROGRESS].orEmpty()
+        buildMap {
+            for (raw in entries) {
+                val parts = raw.split(':')
+                if (parts.size == 3) {
+                    val id = parts[0].toLongOrNull() ?: continue
+                    val pos = parts[1].toLongOrNull() ?: continue
+                    val count = parts[2].toIntOrNull() ?: continue
+                    put(id, LocalDvrProgress(playPositionSec = pos, playCount = count))
+                }
+            }
+        }
+    }
+
+    suspend fun saveLocalDvrProgress(dvrId: Long, playPositionSec: Long, playCount: Int) {
+        context.muxGridDataStore.edit { prefs ->
+            val current = prefs[KEY_LOCAL_DVR_PROGRESS].orEmpty()
+                .filterNot { it.startsWith("$dvrId:") }
+                .toMutableSet()
+            current.add("$dvrId:${playPositionSec.coerceAtLeast(0L)}:${playCount.coerceAtLeast(0)}")
+            prefs[KEY_LOCAL_DVR_PROGRESS] = current
+        }
+    }
+
+    suspend fun removeLocalDvrProgress(dvrId: Long) {
+        context.muxGridDataStore.edit { prefs ->
+            val current = prefs[KEY_LOCAL_DVR_PROGRESS] ?: return@edit
+            val filtered = current.filterNot { it.startsWith("$dvrId:") }.toSet()
+            if (filtered.size != current.size) {
+                prefs[KEY_LOCAL_DVR_PROGRESS] = filtered
+            }
+        }
     }
 
     suspend fun saveServerProfile(profile: ServerProfile) {
@@ -120,6 +156,7 @@ class SettingsRepository(
         private val KEY_PASSWORD_ENC = stringPreferencesKey("server_password_enc")
         private val KEY_FAVORITES = stringSetPreferencesKey("favorite_channel_ids")
         private val KEY_HWDEC_PRESET = stringPreferencesKey("hwdec_preset")
+        private val KEY_LOCAL_DVR_PROGRESS = stringSetPreferencesKey("dvr_local_progress")
 
         private const val KEYSET_NAME = "muxgrid_master_keyset"
         private const val KEYSET_PREF_FILE = "muxgrid_tink_prefs"

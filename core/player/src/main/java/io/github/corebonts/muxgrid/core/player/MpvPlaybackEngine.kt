@@ -23,12 +23,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.Locale
 import java.util.concurrent.Executors
 
 class MpvPlaybackEngine(
     private val context: Context,
     serverBaseUrlProvider: () -> String?,
     ticketProvider: suspend (channelId: Long) -> StreamTicket,
+    dvrTicketProvider: suspend (dvrId: Long) -> StreamTicket = {
+        throw UnsupportedOperationException("DVR ticket provider is not configured")
+    },
     private val conflictFinder: (channelId: Long) -> Pair<DvrEntry, String?>?,
 ) : PlaybackEngine, MPV.EventObserver {
 
@@ -40,6 +44,7 @@ class MpvPlaybackEngine(
     private val proxy = LocalMediaProxy(
         serverBaseUrlProvider = serverBaseUrlProvider,
         ticketProvider = ticketProvider,
+        dvrTicketProvider = dvrTicketProvider,
         onLiveOpenFailed = { channelId, reason, isEmptyReply ->
             handleProxyFailure(channelId, reason, isEmptyReply)
         },
@@ -60,6 +65,9 @@ class MpvPlaybackEngine(
 
     @Volatile
     private var activeChannel: Channel? = null
+
+    @Volatile
+    private var activeDvrEntry: DvrEntry? = null
 
     @Volatile
     private var explicitlyStopped: Boolean = true
@@ -97,7 +105,9 @@ class MpvPlaybackEngine(
 
             observeProperty("pause", MPV.mpvFormat.MPV_FORMAT_FLAG)
             observeProperty("core-idle", MPV.mpvFormat.MPV_FORMAT_FLAG)
+            observeProperty("seekable", MPV.mpvFormat.MPV_FORMAT_FLAG)
             observeProperty("time-pos", MPV.mpvFormat.MPV_FORMAT_DOUBLE)
+            observeProperty("duration", MPV.mpvFormat.MPV_FORMAT_DOUBLE)
             observeProperty("hwdec-current", MPV.mpvFormat.MPV_FORMAT_STRING)
             observeProperty("deinterlace", MPV.mpvFormat.MPV_FORMAT_STRING)
             observeProperty("video-params/w", MPV.mpvFormat.MPV_FORMAT_INT64)
@@ -113,6 +123,7 @@ class MpvPlaybackEngine(
 
     override fun playChannel(channel: Channel, preset: HwDecPreset) {
         activeChannel = channel
+        activeDvrEntry = null
         currentPreset = preset
         explicitlyStopped = false
 
@@ -136,6 +147,7 @@ class MpvPlaybackEngine(
             liveStrategy.stopActive()
             applyPresetOnInstance(instance, preset)
             instance.setPropertyString("idle", "yes")
+            instance.setPropertyString("start", "none")
             instance.setPropertyBoolean("pause", false)
             if (hasSurface || channel.isRadio) {
                 pendingUrl = null
@@ -148,10 +160,61 @@ class MpvPlaybackEngine(
         }
     }
 
+    override fun playDvrEntry(
+        entry: DvrEntry,
+        channel: Channel?,
+        preset: HwDecPreset,
+        startPositionSec: Long,
+    ) {
+        activeChannel = channel
+        activeDvrEntry = entry
+        currentPreset = preset
+        explicitlyStopped = false
+
+        val resumeSec = startPositionSec.coerceAtLeast(0L)
+        _state.update {
+            PlaybackState(
+                status = PlaybackStatus.BUFFERING,
+                channelId = channel?.id ?: entry.channelId,
+                dvrEntryId = entry.id,
+                channelNumber = channel?.formattedNumber,
+                channelName = channel?.name,
+                programTitle = entry.title,
+                isRadio = channel?.isRadio ?: false,
+                isPaused = false,
+                isSeekable = true,
+                positionMs = resumeSec * 1000L,
+                durationMs = entry.durationSec * 1000L,
+                error = null,
+            )
+        }
+
+        val url = proxy.dvrStreamUrl(entry.id)
+        Log.i(TAG, "playDvrEntry id=${entry.id} (${entry.title}) start=${resumeSec}s url=$url")
+        mpvExecutor.execute {
+            val instance = ensureMpvLocked() ?: return@execute
+            instance.command("stop")
+            proxy.stopActiveStream()
+            applyPresetOnInstance(instance, preset)
+            instance.setPropertyString("idle", "yes")
+            instance.setPropertyString("start", if (resumeSec > 0L) "+$resumeSec" else "none")
+            instance.setPropertyBoolean("pause", false)
+            if (hasSurface) {
+                pendingUrl = null
+                val rc = instance.command("loadfile", url)
+                Log.i(TAG, "loadfile DVR immediate id=${entry.id} rc=$rc")
+            } else {
+                pendingUrl = url
+                Log.i(TAG, "loadfile DVR deferred until surfaceCreated id=${entry.id}")
+            }
+        }
+    }
+
     override fun stop() {
         explicitlyStopped = true
         pendingUrl = null
         activeChannel = null
+        activeDvrEntry = null
         _state.value = PlaybackState(status = PlaybackStatus.IDLE)
 
         mpvExecutor.execute {
@@ -159,6 +222,7 @@ class MpvPlaybackEngine(
             val instance = mpv ?: return@execute
             if (instance.isInitialized) {
                 instance.command("stop")
+                instance.setPropertyString("start", "none")
             }
         }
     }
@@ -178,6 +242,27 @@ class MpvPlaybackEngine(
             val instance = mpv ?: return@execute
             if (instance.isInitialized) {
                 instance.setPropertyBoolean("pause", paused)
+            }
+        }
+    }
+
+    override fun seekTo(positionMs: Long) {
+        val clampedMs = positionMs.coerceAtLeast(0L)
+        mpvExecutor.execute {
+            val instance = mpv ?: return@execute
+            if (instance.isInitialized) {
+                val secStr = String.format(Locale.US, "%.3f", clampedMs / 1000.0)
+                instance.command("seek", secStr, "absolute")
+            }
+        }
+    }
+
+    override fun seekBy(deltaMs: Long) {
+        mpvExecutor.execute {
+            val instance = mpv ?: return@execute
+            if (instance.isInitialized) {
+                val secStr = String.format(Locale.US, "%.3f", deltaMs / 1000.0)
+                instance.command("seek", secStr, "relative")
             }
         }
     }
@@ -352,6 +437,7 @@ class MpvPlaybackEngine(
                     current
                 }
             }
+            "seekable" -> _state.update { it.copy(isSeekable = value) }
         }
     }
 
@@ -370,6 +456,12 @@ class MpvPlaybackEngine(
     override fun eventProperty(property: String, value: Double) {
         when (property) {
             "time-pos" -> _state.update { it.copy(positionMs = (value * 1000.0).toLong().coerceAtLeast(0L)) }
+            "duration" -> {
+                val durMs = (value * 1000.0).toLong().coerceAtLeast(0L)
+                if (durMs > 0L) {
+                    _state.update { it.copy(durationMs = durMs) }
+                }
+            }
             "estimated-vf-fps" -> _state.update { it.copy(fps = value) }
         }
     }
@@ -421,8 +513,49 @@ class MpvPlaybackEngine(
                 }
             }
             MPV.mpvEvent.MPV_EVENT_END_FILE -> {
-                val channelId = activeChannel?.id ?: return
                 if (explicitlyStopped) return
+                val dvrEntry = activeDvrEntry
+                if (dvrEntry != null) {
+                    val map = runCatching { data.asMap() }.getOrNull()
+                    val reasonNode = map?.get("reason")
+                    val reasonStr = runCatching { reasonNode?.asString() }.getOrNull()
+                    val reasonInt = runCatching { reasonNode?.asInt()?.toInt() }.getOrNull()
+                    val isErrorReason = reasonStr.equals("error", ignoreCase = true) || reasonInt == 4
+                    val isStoppedReason = reasonStr.equals("stop", ignoreCase = true) || reasonInt == 2
+                    if (isErrorReason) {
+                        val fileErr = runCatching { map?.get("file_error")?.asString() }.getOrNull()
+                        val msg = if (!fileErr.isNullOrBlank()) {
+                            "Recording playback error: $fileErr"
+                        } else {
+                            "Unable to open recording"
+                        }
+                        _state.update { current ->
+                            if (current.dvrEntryId == dvrEntry.id && current.error == null) {
+                                current.copy(
+                                    status = PlaybackStatus.ERROR,
+                                    error = PlaybackError.PlaybackFailed(msg),
+                                )
+                            } else {
+                                current
+                            }
+                        }
+                    } else if (!isStoppedReason) {
+                        activeDvrEntry = null
+                        _state.update { current ->
+                            if (current.dvrEntryId == dvrEntry.id) {
+                                current.copy(
+                                    status = PlaybackStatus.IDLE,
+                                    isCompleted = true,
+                                )
+                            } else {
+                                current
+                            }
+                        }
+                    }
+                    return
+                }
+
+                val channelId = activeChannel?.id ?: return
                 val currentError = _state.value.error
                 if (currentError == null) {
                     val conflict = conflictFinder(channelId)

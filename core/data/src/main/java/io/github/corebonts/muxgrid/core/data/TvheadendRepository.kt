@@ -3,21 +3,25 @@ package io.github.corebonts.muxgrid.core.data
 import android.content.Context
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.htsp.HtspClient
+import io.github.corebonts.muxgrid.core.htsp.HtspNoAccessException
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ChannelTag
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.ConnectionTestResult
 import io.github.corebonts.muxgrid.core.model.DvrEntry
+import io.github.corebonts.muxgrid.core.model.EpgEvent
 import io.github.corebonts.muxgrid.core.model.FormFactor
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import io.github.corebonts.muxgrid.core.model.StreamTicket
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
@@ -43,7 +47,27 @@ class TvheadendRepository(
     val channels: StateFlow<List<Channel>> = store.channels
     val tags: StateFlow<List<ChannelTag>> = store.tags
     val nowNextByChannel: StateFlow<Map<Long, NowNextProgram>> = store.nowNextByChannel
-    val dvrEntries: StateFlow<Map<Long, DvrEntry>> = store.dvrEntries
+    val epgByChannel: StateFlow<Map<Long, List<EpgEvent>>> = store.epgByChannel
+    val dvrEntries: StateFlow<Map<Long, DvrEntry>> = combine(
+        store.dvrEntries,
+        settings.localDvrProgress,
+    ) { serverMap, localFallback ->
+        if (localFallback.isEmpty()) {
+            serverMap
+        } else {
+            serverMap.mapValues { (id, entry) ->
+                val local = localFallback[id]
+                if (local != null && entry.playPositionSec == 0L && entry.playCount == 0) {
+                    entry.copy(
+                        playPositionSec = local.playPositionSec,
+                        playCount = local.playCount,
+                    )
+                } else {
+                    entry
+                }
+            }
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
     val serverProfile: StateFlow<ServerProfile?> = settings.serverProfile
         .stateIn(scope, SharingStarted.Eagerly, null)
@@ -138,6 +162,96 @@ class TvheadendRepository(
 
     suspend fun getLiveTicket(channelId: Long): StreamTicket =
         htspClient.getTicket(channelId)
+
+    suspend fun getDvrTicket(dvrId: Long): StreamTicket =
+        htspClient.getDvrTicket(dvrId)
+
+    suspend fun scheduleRecording(eventId: Long): Result<Long> = runCatchingSuspend {
+        htspClient.addDvrEntry(eventId)
+    }
+
+    suspend fun scheduleManualRecording(
+        channelId: Long,
+        startEpochSec: Long,
+        stopEpochSec: Long,
+        title: String,
+        description: String? = null,
+    ): Result<Long> = runCatchingSuspend {
+        htspClient.addManualDvrEntry(channelId, startEpochSec, stopEpochSec, title, description)
+    }
+
+    suspend fun stopRecording(dvrId: Long): Result<Unit> = runCatchingSuspend {
+        htspClient.stopDvrEntry(dvrId)
+    }
+
+    suspend fun cancelRecording(dvrId: Long): Result<Unit> = runCatchingSuspend {
+        htspClient.cancelDvrEntry(dvrId)
+        settings.removeLocalDvrProgress(dvrId)
+    }
+
+    suspend fun deleteRecording(dvrId: Long): Result<Unit> = runCatchingSuspend {
+        htspClient.deleteDvrEntry(dvrId)
+        settings.removeLocalDvrProgress(dvrId)
+    }
+
+    suspend fun markRecordingWatched(dvrId: Long, watched: Boolean): Result<Unit> = runCatchingSuspend {
+        val existing = store.getDvrEntry(dvrId)
+        val newCount = if (watched) maxOf(1, (existing?.playCount ?: 0) + 1) else 0
+        try {
+            htspClient.updateDvrEntry(id = dvrId, playPositionSec = 0L, playCount = newCount)
+            settings.removeLocalDvrProgress(dvrId)
+        } catch (e: HtspNoAccessException) {
+            settings.saveLocalDvrProgress(dvrId, playPositionSec = 0L, playCount = newCount)
+        }
+    }
+
+    suspend fun reportDvrPlaybackProgress(
+        dvrId: Long,
+        positionSec: Long,
+        durationSec: Long,
+        markCompleted: Boolean = false,
+    ) {
+        val entry = dvrEntries.value[dvrId] ?: store.getDvrEntry(dvrId)
+        val effectiveDur = if (durationSec > 0L) durationSec else (entry?.durationSec ?: 0L)
+        val watchedNow = markCompleted ||
+            (effectiveDur > 0L && positionSec.toFloat() / effectiveDur.toFloat() >= WATCHED_THRESHOLD_FRACTION)
+
+        val targetPos = if (watchedNow) 0L else positionSec.coerceAtLeast(0L)
+        val existingCount = entry?.playCount ?: 0
+        val targetCount = if (watchedNow) maxOf(1, existingCount) else null
+
+        if (!watchedNow && targetPos < 5L) return
+
+        try {
+            htspClient.updateDvrEntry(
+                id = dvrId,
+                playPositionSec = targetPos,
+                playCount = targetCount,
+            )
+            settings.removeLocalDvrProgress(dvrId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Fallback for read-only users without ACCESS_HTSP_RECORDER or HTSP < v26
+            settings.saveLocalDvrProgress(
+                dvrId = dvrId,
+                playPositionSec = targetPos,
+                playCount = targetCount ?: existingCount,
+            )
+        }
+    }
+
+    private inline fun <T> runCatchingSuspend(block: () -> T): Result<T> = try {
+        Result.success(block())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    companion object {
+        private const val WATCHED_THRESHOLD_FRACTION = 0.92f
+    }
 
     fun currentServerHttpBaseUrl(): String? {
         val profile = serverProfile.value ?: return null

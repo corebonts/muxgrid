@@ -1,0 +1,524 @@
+package io.github.corebonts.muxgrid.feature.mobile
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil3.ImageLoader
+import io.github.corebonts.muxgrid.core.data.PiconModel
+import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
+import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
+import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
+import io.github.corebonts.muxgrid.core.designsystem.buildUpcomingDays
+import io.github.corebonts.muxgrid.core.designsystem.filterEpgEventsForDay
+import io.github.corebonts.muxgrid.core.designsystem.findMatchingDvrEntry
+import io.github.corebonts.muxgrid.core.designsystem.formatDayLabel
+import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
+import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
+import io.github.corebonts.muxgrid.core.model.Channel
+import io.github.corebonts.muxgrid.core.model.DvrEntry
+import io.github.corebonts.muxgrid.core.model.DvrState
+import io.github.corebonts.muxgrid.core.model.EpgEvent
+import kotlinx.coroutines.launch
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun MobileGuideScreen(
+    channels: List<Channel>,
+    epgByChannel: Map<Long, List<EpgEvent>>,
+    dvrEntries: Map<Long, DvrEntry>,
+    nowEpochSec: Long,
+    imageLoader: ImageLoader,
+    initialSelectedChannelId: Long?,
+    onWatchChannel: (Channel) -> Unit,
+    onScheduleRecording: suspend (Long) -> Result<Long>,
+    onStopRecording: suspend (Long) -> Result<Unit>,
+    onCancelRecording: suspend (Long) -> Result<Unit>,
+) {
+    val scope = rememberCoroutineScope()
+    val days = remember(nowEpochSec / 3600L) { buildUpcomingDays(nowEpochSec, count = 7) }
+    var selectedDayIndex by remember { mutableStateOf(0) }
+    var selectedChannelId by remember(initialSelectedChannelId) {
+        mutableStateOf(initialSelectedChannelId ?: channels.firstOrNull()?.id)
+    }
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedEvent by remember { mutableStateOf<EpgEvent?>(null) }
+    var actionBusy by remember { mutableStateOf(false) }
+    var actionError by remember { mutableStateOf<String?>(null) }
+
+    val activeDay = days.getOrElse(selectedDayIndex) { days.first() }
+    val channelById = remember(channels) { channels.associateBy { it.id } }
+
+    // Ensure selectedChannelId stays valid if channel list loads after initial render
+    val effectiveChannelId = when {
+        selectedChannelId != null && channelById.containsKey(selectedChannelId) -> selectedChannelId
+        else -> channels.firstOrNull()?.id
+    }
+
+    val trimmedQuery = searchQuery.trim()
+    val agendaItems: List<Pair<EpgEvent, Channel?>> = remember(
+        trimmedQuery,
+        effectiveChannelId,
+        activeDay,
+        epgByChannel,
+        channels,
+        nowEpochSec / 60L,
+    ) {
+        if (trimmedQuery.isNotEmpty()) {
+            val results = ArrayList<Pair<EpgEvent, Channel?>>()
+            for (ch in channels) {
+                val list = epgByChannel[ch.id].orEmpty()
+                for (ev in list) {
+                    if (ev.stopEpochSec >= nowEpochSec - 900L && (
+                            ev.title.contains(trimmedQuery, ignoreCase = true) ||
+                                (ev.subtitle?.contains(trimmedQuery, ignoreCase = true) == true) ||
+                                (ev.description?.contains(trimmedQuery, ignoreCase = true) == true)
+                            )
+                    ) {
+                        results.add(ev to ch)
+                    }
+                }
+            }
+            results.sortedBy { it.first.startEpochSec }.take(120)
+        } else {
+            val ch = effectiveChannelId?.let { channelById[it] }
+            val events = effectiveChannelId?.let { epgByChannel[it] }.orEmpty()
+            filterEpgEventsForDay(events, activeDay, nowEpochSec).map { it to ch }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Search box
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(MuxGridColors.CardSurface)
+                .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(14.dp))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                if (searchQuery.isEmpty()) {
+                    Text(
+                        text = "Search upcoming programs across all channels…",
+                        color = MuxGridColors.TextMuted,
+                        fontSize = 14.sp,
+                    )
+                }
+                BasicTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    singleLine = true,
+                    textStyle = TextStyle(color = MuxGridColors.TextPrimary, fontSize = 14.sp),
+                    cursorBrush = SolidColor(MuxGridColors.AccentBlueLight),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (searchQuery.isNotEmpty()) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Clear",
+                    color = MuxGridColors.AccentBlueLight,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { searchQuery = "" }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+        }
+
+        if (trimmedQuery.isEmpty()) {
+            // Day selector
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                days.forEachIndexed { idx, day ->
+                    val selected = idx == selectedDayIndex
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(if (selected) MuxGridColors.AccentBlue else MuxGridColors.CardSurface)
+                            .border(
+                                1.dp,
+                                if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
+                                RoundedCornerShape(50),
+                            )
+                            .clickable { selectedDayIndex = idx }
+                            .padding(horizontal = 13.dp, vertical = 6.dp),
+                    ) {
+                        Text(
+                            text = formatDayLabel(day, nowEpochSec),
+                            color = if (selected) Color.White else MuxGridColors.TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                        )
+                    }
+                }
+            }
+
+            // Channel selector strip
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                channels.forEach { ch ->
+                    val selected = ch.id == effectiveChannelId
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (selected) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface)
+                            .border(
+                                1.dp,
+                                if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
+                                RoundedCornerShape(12.dp),
+                            )
+                            .clickable { selectedChannelId = ch.id }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ChannelPiconBadge(
+                            channelNumber = ch.formattedNumber,
+                            channelName = ch.name,
+                            piconModel = ch.icon?.let { PiconModel(ch.id, it) },
+                            imageLoader = imageLoader,
+                            size = 24.dp,
+                        )
+                        Text(
+                            text = ch.name,
+                            color = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+
+        if (agendaItems.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = if (trimmedQuery.isNotEmpty()) "No programs match \"$trimmedQuery\"" else "No EPG data for this day",
+                    style = MuxGridType.CardSubtitle,
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 100.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(agendaItems, key = { it.first.id }) { (event, channel) ->
+                    val linkedDvr = findMatchingDvrEntry(event, dvrEntries)
+                    val isLiveNow = nowEpochSec in event.startEpochSec until event.stopEpochSec
+                    val shape = RoundedCornerShape(14.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(shape)
+                            .background(if (isLiveNow) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface)
+                            .border(
+                                1.dp,
+                                if (isLiveNow) MuxGridColors.AccentBlue.copy(alpha = 0.45f) else MuxGridColors.HairlineBorder,
+                                shape,
+                            )
+                            .clickable {
+                                actionError = null
+                                selectedEvent = event
+                            }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.width(64.dp)) {
+                            Text(
+                                text = formatEpochHm(event.startEpochSec),
+                                style = MuxGridType.TabularNumber,
+                                color = if (isLiveNow) MuxGridColors.AccentBlueLight else MuxGridColors.TextPrimary,
+                            )
+                            Text(
+                                text = formatEpochHm(event.stopEpochSec),
+                                style = MuxGridType.TabularSmall,
+                            )
+                            Text(
+                                text = formatDurationMinutes(event.startEpochSec, event.stopEpochSec),
+                                style = MuxGridType.TabularSmall,
+                                color = MuxGridColors.TextMuted,
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = event.title,
+                                    style = MuxGridType.CardTitle,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (linkedDvr != null) {
+                                    Spacer(Modifier.width(8.dp))
+                                    DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
+                                } else if (isLiveNow) {
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = "ON NOW",
+                                        color = MuxGridColors.CoralLive,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                            }
+                            if (trimmedQuery.isNotEmpty() && channel != null) {
+                                Text(
+                                    text = "${channel.name} · ${formatDayLabel(buildUpcomingDays(event.startEpochSec, 1).first(), nowEpochSec)}",
+                                    style = MuxGridType.TabularSmall,
+                                    color = MuxGridColors.AccentBlueLight,
+                                )
+                            } else if (!event.subtitle.isNullOrBlank()) {
+                                Text(
+                                    text = event.subtitle!!,
+                                    style = MuxGridType.CardSubtitle,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            } else if (!event.summary.isNullOrBlank()) {
+                                Text(
+                                    text = event.summary!!,
+                                    style = MuxGridType.CardSubtitle,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (isLiveNow) {
+                                Spacer(Modifier.height(6.dp))
+                                val dur = (event.stopEpochSec - event.startEpochSec).coerceAtLeast(1L)
+                                val frac = (nowEpochSec - event.startEpochSec).toFloat() / dur.toFloat()
+                                LiveProgressBar(progress = frac, modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    val detailEvent = selectedEvent
+    if (detailEvent != null) {
+        val detailChannel = channelById[detailEvent.channelId]
+        val linkedDvr = findMatchingDvrEntry(detailEvent, dvrEntries)
+        val isLiveNow = nowEpochSec in detailEvent.startEpochSec until detailEvent.stopEpochSec
+
+        ModalBottomSheet(
+            onDismissRequest = { if (!actionBusy) selectedEvent = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = MuxGridColors.CardSurfaceElevated,
+            contentColor = MuxGridColors.TextPrimary,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (detailChannel != null) {
+                        ChannelPiconBadge(
+                            channelNumber = detailChannel.formattedNumber,
+                            channelName = detailChannel.name,
+                            piconModel = detailChannel.icon?.let { PiconModel(detailChannel.id, it) },
+                            imageLoader = imageLoader,
+                            size = 44.dp,
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = detailEvent.title,
+                            style = MuxGridType.Title,
+                            fontSize = 18.sp,
+                        )
+                        val meta = buildString {
+                            if (detailChannel != null) append("${detailChannel.name} · ")
+                            append("${formatEpochHm(detailEvent.startEpochSec)}–${formatEpochHm(detailEvent.stopEpochSec)}")
+                            append(" (${formatDurationMinutes(detailEvent.startEpochSec, detailEvent.stopEpochSec)})")
+                        }
+                        Text(text = meta, style = MuxGridType.TabularSmall)
+                    }
+                    if (linkedDvr != null) {
+                        DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
+                    }
+                }
+
+                if (!detailEvent.subtitle.isNullOrBlank()) {
+                    Text(
+                        text = detailEvent.subtitle!!,
+                        style = MuxGridType.CardTitle,
+                        color = MuxGridColors.AccentBlueLight,
+                    )
+                }
+
+                val body = detailEvent.description ?: detailEvent.summary
+                if (!body.isNullOrBlank()) {
+                    Text(
+                        text = body,
+                        style = MuxGridType.CardSubtitle,
+                        color = MuxGridColors.TextPrimary.copy(alpha = 0.88f),
+                        lineHeight = 19.sp,
+                    )
+                }
+
+                actionError?.let { err ->
+                    Text(
+                        text = err,
+                        color = MuxGridColors.CoralLive,
+                        fontSize = 13.sp,
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (detailChannel != null) {
+                        Button(
+                            onClick = {
+                                selectedEvent = null
+                                onWatchChannel(detailChannel)
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MuxGridColors.AccentBlue,
+                                contentColor = Color.White,
+                            ),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(if (isLiveNow) "Watch Live" else "Watch Channel")
+                        }
+                    }
+
+                    when (linkedDvr?.state) {
+                        DvrState.RECORDING -> {
+                            OutlinedButton(
+                                enabled = !actionBusy,
+                                onClick = {
+                                    scope.launch {
+                                        actionBusy = true
+                                        actionError = null
+                                        onStopRecording(linkedDvr.id)
+                                            .onSuccess { selectedEvent = null }
+                                            .onFailure { actionError = it.message ?: "Failed to stop recording" }
+                                        actionBusy = false
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Stop & Save", color = MuxGridColors.TextPrimary)
+                            }
+                        }
+                        DvrState.SCHEDULED -> {
+                            OutlinedButton(
+                                enabled = !actionBusy,
+                                onClick = {
+                                    scope.launch {
+                                        actionBusy = true
+                                        actionError = null
+                                        onCancelRecording(linkedDvr.id)
+                                            .onSuccess { selectedEvent = null }
+                                            .onFailure { actionError = it.message ?: "Failed to cancel timer" }
+                                        actionBusy = false
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Cancel Timer", color = MuxGridColors.CoralLive)
+                            }
+                        }
+                        else -> {
+                            OutlinedButton(
+                                enabled = !actionBusy,
+                                onClick = {
+                                    scope.launch {
+                                        actionBusy = true
+                                        actionError = null
+                                        onScheduleRecording(detailEvent.id)
+                                            .onSuccess { selectedEvent = null }
+                                            .onFailure { actionError = it.message ?: "Failed to schedule recording" }
+                                        actionBusy = false
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(
+                                    text = if (isLiveNow) "Record Now" else "Record",
+                                    color = MuxGridColors.CoralLive,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

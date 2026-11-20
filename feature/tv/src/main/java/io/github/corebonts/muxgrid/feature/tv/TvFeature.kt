@@ -1,14 +1,9 @@
 package io.github.corebonts.muxgrid.feature.tv
 
-import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -32,7 +26,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -40,18 +33,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -75,8 +61,6 @@ import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
-import io.github.corebonts.muxgrid.core.designsystem.PlayerErrorToast
-import io.github.corebonts.muxgrid.core.designsystem.TrackAndPresetPanel
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
 import io.github.corebonts.muxgrid.core.designsystem.filterChannels
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
@@ -85,19 +69,33 @@ import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LiveFilter
+import io.github.corebonts.muxgrid.core.model.MainTab
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
-import io.github.corebonts.muxgrid.core.model.PlaybackState
-import io.github.corebonts.muxgrid.core.model.PlaybackStatus
-import io.github.corebonts.muxgrid.core.player.MuxGridVideoView
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private enum class TvRoute {
     ONBOARDING,
-    LIVE,
+    MAIN,
     PLAYER,
 }
+
+@Composable
+internal fun tvPrimaryButtonColors() = ButtonDefaults.colors(
+    containerColor = MuxGridColors.AccentBlue,
+    contentColor = Color.White,
+    focusedContainerColor = MuxGridColors.FocusBorder,
+    focusedContentColor = MuxGridColors.CanvasTv,
+)
+
+@Composable
+internal fun tvSecondaryButtonColors() = ButtonDefaults.colors(
+    containerColor = MuxGridColors.CardSurface,
+    contentColor = MuxGridColors.TextPrimary,
+    focusedContainerColor = MuxGridColors.FocusBorder,
+    focusedContentColor = MuxGridColors.CanvasTv,
+)
 
 @Composable
 fun TvMvpRoot(
@@ -120,6 +118,7 @@ fun TvMvpRoot(
     }
 }
 
+@OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 private fun TvMvpContent(
     repository: TvheadendRepository,
@@ -131,6 +130,8 @@ private fun TvMvpContent(
     val channels by repository.channels.collectAsState()
     val tags by repository.tags.collectAsState()
     val nowNextMap by repository.nowNextByChannel.collectAsState()
+    val epgByChannel by repository.epgByChannel.collectAsState()
+    val dvrEntries by repository.dvrEntries.collectAsState()
     val favorites by repository.favoriteChannelIds.collectAsState()
     val hwDecPreset by repository.hwDecPreset.collectAsState()
     val playbackState by playbackEngine.state.collectAsState()
@@ -149,18 +150,22 @@ private fun TvMvpContent(
     }
 
     var route by remember(currentProfile.isConfigured) {
-        mutableStateOf(if (currentProfile.isConfigured) TvRoute.LIVE else TvRoute.ONBOARDING)
+        mutableStateOf(if (currentProfile.isConfigured) TvRoute.MAIN else TvRoute.ONBOARDING)
     }
+    var activeTab by remember { mutableStateOf(MainTab.LIVE) }
     var activeFilter by remember { mutableStateOf<LiveFilter>(LiveFilter.All) }
 
     val filteredChannels = remember(channels, activeFilter, favorites) {
         filterChannels(channels, activeFilter, favorites)
     }
 
+    val offsetMs = (connectionState as? ConnectionState.Connected)?.serverClockOffsetMs ?: 0L
+    val nowEpochSec = (System.currentTimeMillis() + offsetMs) / 1000L
+
     when (route) {
         TvRoute.ONBOARDING -> {
             BackHandler(enabled = currentProfile.isConfigured) {
-                route = TvRoute.LIVE
+                route = TvRoute.MAIN
             }
             OnboardingServerScreen(
                 initialProfile = currentProfile,
@@ -169,52 +174,196 @@ private fun TvMvpContent(
                 onTestConnection = { repository.testConnection(it) },
                 onSaveAndConnect = { updated ->
                     repository.saveAndConnect(updated)
-                    route = TvRoute.LIVE
+                    route = TvRoute.MAIN
                 },
-                onCancel = { route = TvRoute.LIVE },
+                onCancel = { route = TvRoute.MAIN },
             )
         }
-        TvRoute.LIVE -> {
-            val offsetMs = (connectionState as? ConnectionState.Connected)?.serverClockOffsetMs ?: 0L
-            val nowEpochSec = (System.currentTimeMillis() + offsetMs) / 1000L
-            TvLiveChannelsScreen(
-                connectionState = connectionState,
-                channels = filteredChannels,
-                filters = remember(tags) { buildLiveFilters(tags) },
-                activeFilter = activeFilter,
-                favorites = favorites,
-                nowNextMap = nowNextMap,
-                nowEpochSec = nowEpochSec,
-                hwDecPreset = hwDecPreset,
-                imageLoader = repository.imageLoader,
-                onSelectFilter = { activeFilter = it },
-                onChannelClick = { channel ->
-                    playbackEngine.playChannel(channel, hwDecPreset)
-                    route = TvRoute.PLAYER
-                },
-                onToggleFavorite = { channel ->
-                    scope.launch { repository.toggleFavorite(channel.id) }
-                },
-                onTogglePreset = {
-                    val next = if (hwDecPreset == HwDecPreset.MEDIACODEC_ZERO_COPY) {
-                        HwDecPreset.MEDIACODEC_COPY_BWDIF
-                    } else {
-                        HwDecPreset.MEDIACODEC_ZERO_COPY
+        TvRoute.MAIN -> {
+            BackHandler(enabled = activeTab != MainTab.LIVE) {
+                activeTab = MainTab.LIVE
+            }
+            val lifecycleOwner = LocalLifecycleOwner.current
+            var visibleError by remember { mutableStateOf<ConnectionState.Error?>(null) }
+
+            LaunchedEffect(connectionState, lifecycleOwner) {
+                visibleError = null
+                val connErr = connectionState as? ConnectionState.Error
+                if (connErr != null) {
+                    lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                        if (!connErr.isAuthError) {
+                            delay(1_200L)
+                        }
+                        visibleError = connErr
                     }
-                    scope.launch { repository.setHwDecPreset(next) }
-                },
-                onOpenServerSetup = { route = TvRoute.ONBOARDING },
-                onRetryConnect = { repository.reconnect() },
-            )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MuxGridColors.CanvasTv)
+                    .padding(start = 24.dp, end = 24.dp, top = 18.dp),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text("MuxGrid", style = MuxGridType.Title, fontSize = 24.sp)
+                        listOf(
+                            MainTab.LIVE to "Live",
+                            MainTab.GUIDE to "Guide",
+                            MainTab.RECORDINGS to "Recordings",
+                        ).forEach { (tab, label) ->
+                            FilterChip(
+                                selected = activeTab == tab,
+                                onClick = { activeTab = tab },
+                                colors = FilterChipDefaults.colors(
+                                    containerColor = MuxGridColors.CardSurface,
+                                    contentColor = MuxGridColors.TextSecondary,
+                                    selectedContainerColor = MuxGridColors.AccentBlue,
+                                    selectedContentColor = Color.White,
+                                    focusedContainerColor = MuxGridColors.FocusBorder,
+                                    focusedContentColor = MuxGridColors.CanvasTv,
+                                    focusedSelectedContainerColor = MuxGridColors.FocusBorder,
+                                    focusedSelectedContentColor = MuxGridColors.CanvasTv,
+                                ),
+                            ) {
+                                Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ConnectionStatusBadge(state = connectionState)
+                        Button(
+                            onClick = {
+                                val next = if (hwDecPreset == HwDecPreset.MEDIACODEC_ZERO_COPY) {
+                                    HwDecPreset.MEDIACODEC_COPY_BWDIF
+                                } else {
+                                    HwDecPreset.MEDIACODEC_ZERO_COPY
+                                }
+                                scope.launch { repository.setHwDecPreset(next) }
+                            },
+                            colors = tvSecondaryButtonColors(),
+                        ) {
+                            Text(
+                                text = if (hwDecPreset == HwDecPreset.MEDIACODEC_ZERO_COPY) {
+                                    "HwDec: mediacodec"
+                                } else {
+                                    "HwDec: copy + bwdif"
+                                },
+                                fontSize = 13.sp,
+                            )
+                        }
+                        Button(
+                            onClick = { route = TvRoute.ONBOARDING },
+                            colors = tvSecondaryButtonColors(),
+                        ) {
+                            Text("Server", fontSize = 13.sp)
+                        }
+                    }
+                }
+
+                visibleError?.let { errState ->
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MuxGridColors.CoralLive.copy(alpha = 0.16f))
+                            .border(1.dp, MuxGridColors.CoralLive.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(errState.message, color = MuxGridColors.TextPrimary, fontSize = 14.sp)
+                        Button(onClick = if (errState.isAuthError) ({ route = TvRoute.ONBOARDING }) else ({ repository.reconnect() })) {
+                            Text(if (errState.isAuthError) "Edit Server" else "Retry")
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                Box(modifier = Modifier.weight(1f)) {
+                    when (activeTab) {
+                        MainTab.LIVE -> {
+                            TvLiveChannelsTab(
+                                connectionState = connectionState,
+                                channels = filteredChannels,
+                                filters = remember(tags) { buildLiveFilters(tags) },
+                                activeFilter = activeFilter,
+                                favorites = favorites,
+                                nowNextMap = nowNextMap,
+                                nowEpochSec = nowEpochSec,
+                                imageLoader = repository.imageLoader,
+                                onSelectFilter = { activeFilter = it },
+                                onChannelClick = { channel ->
+                                    playbackEngine.playChannel(channel, hwDecPreset)
+                                    route = TvRoute.PLAYER
+                                },
+                                onToggleFavorite = { channel ->
+                                    scope.launch { repository.toggleFavorite(channel.id) }
+                                },
+                            )
+                        }
+                        MainTab.GUIDE -> {
+                            TvGuideScreen(
+                                channels = channels,
+                                epgByChannel = epgByChannel,
+                                dvrEntries = dvrEntries,
+                                nowEpochSec = nowEpochSec,
+                                imageLoader = repository.imageLoader,
+                                onWatchChannel = { channel ->
+                                    playbackEngine.playChannel(channel, hwDecPreset)
+                                    route = TvRoute.PLAYER
+                                },
+                                onScheduleRecording = { eventId -> repository.scheduleRecording(eventId) },
+                                onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
+                                onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
+                            )
+                        }
+                        MainTab.RECORDINGS -> {
+                            TvRecordingsScreen(
+                                dvrEntries = dvrEntries,
+                                channels = channels,
+                                nowEpochSec = nowEpochSec,
+                                imageLoader = repository.imageLoader,
+                                onWatchLiveChannel = { channel ->
+                                    playbackEngine.playChannel(channel, hwDecPreset)
+                                    route = TvRoute.PLAYER
+                                },
+                                onPlayRecording = { entry, channel, startSec ->
+                                    playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startSec)
+                                    route = TvRoute.PLAYER
+                                },
+                                onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
+                                onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
+                                onDeleteRecording = { dvrId -> repository.deleteRecording(dvrId) },
+                                onToggleWatched = { dvrId, watched -> repository.markRecordingWatched(dvrId, watched) },
+                            )
+                        }
+                    }
+                }
+            }
         }
         TvRoute.PLAYER -> {
             val zapList = filteredChannels.ifEmpty { channels }
             val activeChannel = channels.firstOrNull { it.id == playbackState.channelId }
             val activeNowNext = activeChannel?.let { nowNextMap[it.id] }
-            val offsetMs = (connectionState as? ConnectionState.Connected)?.serverClockOffsetMs ?: 0L
-            val nowEpochSec = (System.currentTimeMillis() + offsetMs) / 1000L
 
-            TvLivePlayerScreen(
+            TvPlayerScreen(
                 playbackEngine = playbackEngine,
                 playbackState = playbackState,
                 activeChannel = activeChannel,
@@ -236,7 +385,7 @@ private fun TvMvpContent(
                 },
                 onExit = {
                     playbackEngine.stop()
-                    route = TvRoute.LIVE
+                    route = TvRoute.MAIN
                 },
             )
         }
@@ -245,7 +394,7 @@ private fun TvMvpContent(
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-private fun TvLiveChannelsScreen(
+private fun TvLiveChannelsTab(
     connectionState: ConnectionState,
     channels: List<Channel>,
     filters: List<LiveFilter>,
@@ -253,108 +402,12 @@ private fun TvLiveChannelsScreen(
     favorites: Set<Long>,
     nowNextMap: Map<Long, NowNextProgram>,
     nowEpochSec: Long,
-    hwDecPreset: HwDecPreset,
     imageLoader: ImageLoader,
     onSelectFilter: (LiveFilter) -> Unit,
     onChannelClick: (Channel) -> Unit,
     onToggleFavorite: (Channel) -> Unit,
-    onTogglePreset: () -> Unit,
-    onOpenServerSetup: () -> Unit,
-    onRetryConnect: () -> Unit,
 ) {
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var visibleError by remember { mutableStateOf<ConnectionState.Error?>(null) }
-
-    LaunchedEffect(connectionState, lifecycleOwner) {
-        visibleError = null
-        if (connectionState is ConnectionState.Error) {
-            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                if (!connectionState.isAuthError) {
-                    delay(1_200L)
-                }
-                visibleError = connectionState
-            }
-        }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MuxGridColors.CanvasTv)
-            .padding(start = 24.dp, end = 24.dp, top = 20.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                Text("MuxGrid", style = MuxGridType.Title, fontSize = 26.sp)
-                ConnectionStatusBadge(state = connectionState)
-            }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Button(
-                    onClick = onTogglePreset,
-                    colors = ButtonDefaults.colors(
-                        containerColor = MuxGridColors.CardSurface,
-                        contentColor = MuxGridColors.TextPrimary,
-                        focusedContainerColor = MuxGridColors.FocusBorder,
-                        focusedContentColor = MuxGridColors.CanvasTv,
-                    ),
-                ) {
-                    Text(
-                        text = if (hwDecPreset == HwDecPreset.MEDIACODEC_ZERO_COPY) {
-                            "HwDec: mediacodec"
-                        } else {
-                            "HwDec: copy + bwdif"
-                        },
-                        fontSize = 13.sp,
-                    )
-                }
-                Button(
-                    onClick = onOpenServerSetup,
-                    colors = ButtonDefaults.colors(
-                        containerColor = MuxGridColors.CardSurface,
-                        contentColor = MuxGridColors.TextPrimary,
-                        focusedContainerColor = MuxGridColors.FocusBorder,
-                        focusedContentColor = MuxGridColors.CanvasTv,
-                    ),
-                ) {
-                    Text("Server", fontSize = 13.sp)
-                }
-            }
-        }
-
-        visibleError?.let { errState ->
-            Spacer(Modifier.height(10.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(MuxGridColors.CoralLive.copy(alpha = 0.16f))
-                    .border(1.dp, MuxGridColors.CoralLive.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(errState.message, color = MuxGridColors.TextPrimary, fontSize = 14.sp)
-                Button(onClick = if (errState.isAuthError) onOpenServerSetup else onRetryConnect) {
-                    Text(if (errState.isAuthError) "Edit Server" else "Retry")
-                }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
+    Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -530,358 +583,6 @@ private fun TvChannelCard(
                     text = if (channel.isRadio) "Live Radio" else "Live Stream",
                     style = MuxGridType.CardSubtitle,
                     color = MuxGridColors.TextMuted,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TvLivePlayerScreen(
-    playbackEngine: PlaybackEngine,
-    playbackState: PlaybackState,
-    activeChannel: Channel?,
-    nowNext: NowNextProgram?,
-    nowEpochSec: Long,
-    hwDecPreset: HwDecPreset,
-    imageLoader: ImageLoader,
-    canZap: Boolean,
-    onZapDelta: (Int) -> Unit,
-    onSelectPreset: (HwDecPreset) -> Unit,
-    onExit: () -> Unit,
-) {
-    var hudVisible by remember { mutableStateOf(false) }
-    var trackPanelOpen by remember { mutableStateOf(false) }
-    var zapOsdTrigger by remember { mutableLongStateOf(0L) }
-    var zapOsdVisible by remember { mutableStateOf(true) }
-    var dismissedError by remember(playbackState.error) { mutableStateOf(false) }
-    var suppressNextCenterKeyUp by remember { mutableStateOf(false) }
-
-    val playerFocusRequester = remember { FocusRequester() }
-    val playPauseFocusRequester = remember { FocusRequester() }
-
-    LaunchedEffect(playbackState.channelId) {
-        zapOsdVisible = true
-        zapOsdTrigger = System.currentTimeMillis()
-    }
-
-    LaunchedEffect(zapOsdTrigger, zapOsdVisible) {
-        if (zapOsdVisible) {
-            delay(3_000L)
-            zapOsdVisible = false
-        }
-    }
-
-    LaunchedEffect(hudVisible, trackPanelOpen, playbackState.status) {
-        if (hudVisible) {
-            runCatching { playPauseFocusRequester.requestFocus() }
-            if (!trackPanelOpen && playbackState.status == PlaybackStatus.PLAYING) {
-                delay(5_000L)
-                hudVisible = false
-            }
-        } else {
-            runCatching { playerFocusRequester.requestFocus() }
-        }
-    }
-
-    BackHandler {
-        when {
-            trackPanelOpen -> trackPanelOpen = false
-            hudVisible -> hudVisible = false
-            else -> onExit()
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .focusRequester(playerFocusRequester)
-            .focusable()
-            .onPreviewKeyEvent { keyEvent ->
-                val code = keyEvent.nativeKeyEvent.keyCode
-                if (keyEvent.type == KeyEventType.KeyUp) {
-                    if (suppressNextCenterKeyUp && (
-                            code == KeyEvent.KEYCODE_DPAD_CENTER ||
-                                code == KeyEvent.KEYCODE_ENTER ||
-                                code == KeyEvent.KEYCODE_NUMPAD_ENTER
-                            )
-                    ) {
-                        suppressNextCenterKeyUp = false
-                        return@onPreviewKeyEvent true
-                    }
-                    return@onPreviewKeyEvent false
-                }
-                if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                when {
-                    code == KeyEvent.KEYCODE_CHANNEL_UP -> {
-                        if (canZap) onZapDelta(1)
-                        true
-                    }
-                    code == KeyEvent.KEYCODE_CHANNEL_DOWN -> {
-                        if (canZap) onZapDelta(-1)
-                        true
-                    }
-                    code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
-                        code == KeyEvent.KEYCODE_MEDIA_PLAY ||
-                        code == KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-                        playbackEngine.togglePause()
-                        hudVisible = true
-                        true
-                    }
-                    !hudVisible && !trackPanelOpen && (code == KeyEvent.KEYCODE_DPAD_UP) -> {
-                        if (canZap) onZapDelta(-1)
-                        true
-                    }
-                    !hudVisible && !trackPanelOpen && (code == KeyEvent.KEYCODE_DPAD_DOWN) -> {
-                        if (canZap) onZapDelta(1)
-                        true
-                    }
-                    !hudVisible && !trackPanelOpen && (
-                        code == KeyEvent.KEYCODE_DPAD_CENTER ||
-                            code == KeyEvent.KEYCODE_ENTER ||
-                            code == KeyEvent.KEYCODE_NUMPAD_ENTER
-                        ) -> {
-                        suppressNextCenterKeyUp = true
-                        hudVisible = true
-                        true
-                    }
-                    else -> false
-                }
-            },
-    ) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx -> MuxGridVideoView(ctx, playbackEngine) },
-        )
-
-        if (playbackState.status == PlaybackStatus.BUFFERING) {
-            CircularProgressIndicator(
-                color = MuxGridColors.AccentBlueLight,
-                modifier = Modifier.align(Alignment.Center),
-            )
-        }
-
-        val err = playbackState.error
-        if (err != null && !dismissedError) {
-            PlayerErrorToast(
-                error = err,
-                onDismiss = { dismissedError = true },
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(28.dp),
-            )
-        }
-
-        // Minimal 3s zap OSD when full HUD is hidden
-        AnimatedVisibility(
-            visible = zapOsdVisible && !hudVisible && !trackPanelOpen,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(32.dp),
-        ) {
-            Row(
-                modifier = Modifier
-                    .widthIn(max = 500.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(MuxGridColors.ScrimSurface)
-                    .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(18.dp))
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (activeChannel != null) {
-                    ChannelPiconBadge(
-                        channelNumber = activeChannel.formattedNumber,
-                        channelName = activeChannel.name,
-                        piconModel = activeChannel.icon?.let { PiconModel(activeChannel.id, it) },
-                        imageLoader = imageLoader,
-                        size = 54.dp,
-                    )
-                    Spacer(Modifier.width(14.dp))
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = listOfNotNull(
-                            playbackState.channelNumber?.takeIf { it != "0" },
-                            playbackState.channelName ?: activeChannel?.name,
-                        ).joinToString(" · "),
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    nowNext?.now?.let { now ->
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = now.title,
-                            color = MuxGridColors.TextSecondary,
-                            fontSize = 14.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        LiveProgressBar(
-                            progress = nowNext.progressFraction(nowEpochSec),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
-            }
-        }
-
-        // Full TV HUD overlay (toggled with OK/Select)
-        AnimatedVisibility(
-            visible = hudVisible,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, MuxGridColors.ScrimSurface),
-                            ),
-                        )
-                        .padding(horizontal = 36.dp, vertical = 28.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (activeChannel != null) {
-                                ChannelPiconBadge(
-                                    channelNumber = activeChannel.formattedNumber,
-                                    channelName = activeChannel.name,
-                                    piconModel = activeChannel.icon?.let { PiconModel(activeChannel.id, it) },
-                                    imageLoader = imageLoader,
-                                    size = 48.dp,
-                                )
-                                Spacer(Modifier.width(12.dp))
-                            }
-                            Column {
-                                Text(
-                                    text = listOfNotNull(
-                                        playbackState.channelNumber?.takeIf { it != "0" },
-                                        playbackState.channelName ?: activeChannel?.name,
-                                    ).joinToString(" · "),
-                                    color = Color.White,
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                                nowNext?.now?.let { now ->
-                                    Text(
-                                        text = now.title,
-                                        color = MuxGridColors.TextSecondary,
-                                        fontSize = 14.sp,
-                                    )
-                                }
-                            }
-                        }
-
-                        if (playbackState.videoWidth > 0) {
-                            Text(
-                                text = "${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"} · deint=${playbackState.deinterlaceActive}",
-                                style = MuxGridType.TabularSmall,
-                            )
-                        }
-                    }
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Button(
-                            onClick = { playbackEngine.togglePause() },
-                            modifier = Modifier.focusRequester(playPauseFocusRequester),
-                            colors = ButtonDefaults.colors(
-                                containerColor = MuxGridColors.AccentBlue,
-                                contentColor = Color.White,
-                                focusedContainerColor = MuxGridColors.FocusBorder,
-                                focusedContentColor = MuxGridColors.CanvasTv,
-                            ),
-                        ) {
-                            Text(if (playbackState.isPaused) "Play" else "Pause")
-                        }
-                        if (canZap) {
-                            Button(
-                                onClick = { onZapDelta(-1) },
-                                colors = ButtonDefaults.colors(
-                                    containerColor = MuxGridColors.CardSurface,
-                                    contentColor = Color.White,
-                                    focusedContainerColor = MuxGridColors.FocusBorder,
-                                    focusedContentColor = MuxGridColors.CanvasTv,
-                                ),
-                            ) {
-                                Text("Ch -")
-                            }
-                            Button(
-                                onClick = { onZapDelta(1) },
-                                colors = ButtonDefaults.colors(
-                                    containerColor = MuxGridColors.CardSurface,
-                                    contentColor = Color.White,
-                                    focusedContainerColor = MuxGridColors.FocusBorder,
-                                    focusedContentColor = MuxGridColors.CanvasTv,
-                                ),
-                            ) {
-                                Text("Ch +")
-                            }
-                        }
-                        Button(
-                            onClick = { trackPanelOpen = !trackPanelOpen },
-                            colors = ButtonDefaults.colors(
-                                containerColor = MuxGridColors.CardSurface,
-                                contentColor = Color.White,
-                                focusedContainerColor = MuxGridColors.FocusBorder,
-                                focusedContentColor = MuxGridColors.CanvasTv,
-                            ),
-                        ) {
-                            Text("Tracks & Decoder")
-                        }
-                        Button(
-                            onClick = onExit,
-                            colors = ButtonDefaults.colors(
-                                containerColor = MuxGridColors.CardSurface,
-                                contentColor = Color.White,
-                                focusedContainerColor = MuxGridColors.FocusBorder,
-                                focusedContentColor = MuxGridColors.CanvasTv,
-                            ),
-                        ) {
-                            Text("Stop")
-                        }
-                    }
-                }
-            }
-        }
-
-        if (trackPanelOpen) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .padding(36.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                TrackAndPresetPanel(
-                    audioTracks = playbackState.audioTracks,
-                    subtitleTracks = playbackState.subtitleTracks,
-                    selectedAudioId = playbackState.selectedAudioId,
-                    selectedSubtitleId = playbackState.selectedSubtitleId,
-                    hwDecPreset = hwDecPreset,
-                    onSelectAudio = { playbackEngine.setAudioTrack(it) },
-                    onSelectSubtitle = { playbackEngine.setSubtitleTrack(it) },
-                    onSelectPreset = onSelectPreset,
-                    onClose = { trackPanelOpen = false },
-                    modifier = Modifier.widthIn(max = 560.dp),
                 )
             }
         }

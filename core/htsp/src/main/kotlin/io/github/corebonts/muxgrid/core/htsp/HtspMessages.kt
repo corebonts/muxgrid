@@ -62,6 +62,7 @@ data class EventUpdateDelta(
     val description: String? = null,
     val nextEventId: Long? = null,
     val dvrId: Long? = null,
+    val hasDvrIdField: Boolean = false,
 )
 
 data class DvrEntryUpdateDelta(
@@ -74,6 +75,7 @@ data class DvrEntryUpdateDelta(
     val description: String? = null,
     val state: DvrState? = null,
     val error: String? = null,
+    val hasErrorField: Boolean = false,
     val dataSize: Long? = null,
     val playPositionSec: Long? = null,
     val playCount: Int? = null,
@@ -196,7 +198,7 @@ internal object HtspMessageParser {
                     summary = msg.getString("summary"),
                     description = msg.getString("description"),
                     nextEventId = msg.getLong("nextEventId"),
-                    dvrId = msg.getLong("dvrId"),
+                    dvrId = msg.getLong("dvrId")?.takeIf { it > 0L },
                 ),
             )
         }
@@ -213,7 +215,8 @@ internal object HtspMessageParser {
                     summary = msg.getString("summary"),
                     description = msg.getString("description"),
                     nextEventId = msg.getLong("nextEventId"),
-                    dvrId = msg.getLong("dvrId"),
+                    dvrId = msg.getLong("dvrId")?.takeIf { it > 0L },
+                    hasDvrIdField = msg.containsKey("dvrId"),
                 ),
             )
         }
@@ -250,6 +253,7 @@ internal object HtspMessageParser {
                     description = msg.getString("description"),
                     state = msg.getString("state")?.let { DvrState.fromHtsp(it) },
                     error = msg.getString("error"),
+                    hasErrorField = msg.containsKey("error"),
                     dataSize = msg.getLong("dataSize"),
                     playPositionSec = msg.getLong("playposition"),
                     playCount = msg.getInt("playcount"),

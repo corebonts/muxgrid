@@ -7,12 +7,17 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import io.github.corebonts.muxgrid.core.data.TvheadendRepository
 import io.github.corebonts.muxgrid.core.model.FormFactor
+import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.player.MpvPlaybackEngine
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 class MuxGridAppContainer(context: Context) {
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -28,8 +33,104 @@ class MuxGridAppContainer(context: Context) {
         context = context.applicationContext,
         serverBaseUrlProvider = { repository.currentServerHttpBaseUrl() },
         ticketProvider = { channelId -> repository.getLiveTicket(channelId) },
+        dvrTicketProvider = { dvrId -> repository.getDvrTicket(dvrId) },
         conflictFinder = { channelId -> repository.findConflictingRecording(channelId) },
     )
+
+    private var activeTrackedDvrId: Long? = null
+    private var lastTrackedPosSec: Long = 0L
+    private var lastTrackedDurSec: Long = 0L
+    private var progressTickJob: Job? = null
+
+    init {
+        startDvrProgressTracking()
+    }
+
+    private fun startDvrProgressTracking() {
+        applicationScope.launch {
+            playbackEngine.state.collect { state ->
+                val dvrId = state.dvrEntryId
+                if (dvrId != activeTrackedDvrId) {
+                    val prevId = activeTrackedDvrId
+                    val prevPos = lastTrackedPosSec
+                    val prevDur = lastTrackedDurSec
+                    if (prevId != null && prevPos > 0L) {
+                        launch {
+                            repository.reportDvrPlaybackProgress(
+                                dvrId = prevId,
+                                positionSec = prevPos,
+                                durationSec = prevDur,
+                                markCompleted = false,
+                            )
+                        }
+                    }
+                    activeTrackedDvrId = dvrId
+                    lastTrackedPosSec = state.positionMs / 1000L
+                    lastTrackedDurSec = state.durationMs / 1000L
+                    progressTickJob?.cancel()
+                    progressTickJob = null
+                }
+
+                if (dvrId != null) {
+                    if (state.positionMs > 0L) {
+                        lastTrackedPosSec = state.positionMs / 1000L
+                    }
+                    if (state.durationMs > 0L) {
+                        lastTrackedDurSec = state.durationMs / 1000L
+                    }
+                    if (state.isCompleted) {
+                        progressTickJob?.cancel()
+                        progressTickJob = null
+                        activeTrackedDvrId = null
+                        launch {
+                            repository.reportDvrPlaybackProgress(
+                                dvrId = dvrId,
+                                positionSec = lastTrackedDurSec.coerceAtLeast(lastTrackedPosSec),
+                                durationSec = lastTrackedDurSec,
+                                markCompleted = true,
+                            )
+                        }
+                    } else if (state.status == PlaybackStatus.PLAYING && progressTickJob == null) {
+                        progressTickJob = launch {
+                            while (isActive) {
+                                delay(10_000L)
+                                val current = playbackEngine.state.value
+                                val curDvrId = current.dvrEntryId ?: break
+                                if (current.status == PlaybackStatus.PLAYING) {
+                                    repository.reportDvrPlaybackProgress(
+                                        dvrId = curDvrId,
+                                        positionSec = current.positionMs / 1000L,
+                                        durationSec = current.durationMs / 1000L,
+                                        markCompleted = false,
+                                    )
+                                }
+                            }
+                        }
+                    } else if (state.status != PlaybackStatus.PLAYING && progressTickJob != null) {
+                        progressTickJob?.cancel()
+                        progressTickJob = null
+                    }
+                }
+            }
+        }
+    }
+
+    fun flushDvrProgress() {
+        val dvrId = activeTrackedDvrId ?: return
+        val current = playbackEngine.state.value
+        val posSec = (current.positionMs / 1000L).takeIf { it > 0L } ?: lastTrackedPosSec
+        val durSec = (current.durationMs / 1000L).takeIf { it > 0L } ?: lastTrackedDurSec
+        if (posSec > 0L) {
+            applicationScope.launch {
+                repository.reportDvrPlaybackProgress(
+                    dvrId = dvrId,
+                    positionSec = posSec,
+                    durationSec = durSec,
+                    markCompleted = false,
+                )
+            }
+        }
+    }
 
     fun close() {
         playbackEngine.destroy()
@@ -52,7 +153,21 @@ class MuxGridApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        installCrashRecorder()
         container = MuxGridAppContainer(this)
+    }
+
+    private fun installCrashRecorder() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            runCatching {
+                val trace = android.util.Log.getStackTraceString(throwable)
+                java.io.File(filesDir, "last_crash.txt").writeText(
+                    "Thread: ${thread.name}\n$trace",
+                )
+            }
+            previous?.uncaughtException(thread, throwable)
+        }
     }
 
     override fun onTerminate() {

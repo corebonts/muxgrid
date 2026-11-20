@@ -123,6 +123,97 @@ class LocalMediaProxyTest {
         }
     }
 
+    @Test
+    fun `forwards DVR Range requests preserves 206 headers and refreshes expired ticket on 401`() {
+        val dvrTicketCounter = AtomicInteger(0)
+        val rejectFirst = AtomicBoolean(true)
+        val capturedRequests = mutableListOf<String>()
+        val capturedRanges = mutableListOf<String?>()
+
+        ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")).use { upstream ->
+            val thread = Thread {
+                repeat(3) {
+                    upstream.accept().use { sock ->
+                        val reader = BufferedReader(InputStreamReader(sock.getInputStream()))
+                        val reqLine = reader.readLine() ?: ""
+                        capturedRequests.add(reqLine)
+                        var range: String? = null
+                        while (true) {
+                            val l = reader.readLine() ?: break
+                            if (l.isEmpty()) break
+                            if (l.startsWith("Range:", ignoreCase = true)) {
+                                range = l.substringAfter(':').trim()
+                            }
+                        }
+                        capturedRanges.add(range)
+
+                        val out = sock.getOutputStream()
+                        if (reqLine.contains("ticket=DT1") && rejectFirst.compareAndSet(true, false)) {
+                            out.write("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+                        } else if (range == "bytes=10-19") {
+                            val slice = "0123456789".toByteArray(StandardCharsets.US_ASCII)
+                            out.write(
+                                (
+                                    "HTTP/1.1 206 Partial Content\r\n" +
+                                        "Content-Type: video/x-matroska\r\n" +
+                                        "Content-Range: bytes 10-19/100\r\n" +
+                                        "Accept-Ranges: bytes\r\n" +
+                                        "Content-Length: ${slice.size}\r\n" +
+                                        "Connection: close\r\n\r\n"
+                                    ).toByteArray(StandardCharsets.US_ASCII),
+                            )
+                            out.write(slice)
+                        } else {
+                            out.write(
+                                (
+                                    "HTTP/1.1 200 OK\r\n" +
+                                        "Content-Type: video/x-matroska\r\n" +
+                                        "Accept-Ranges: bytes\r\n" +
+                                        "Content-Length: 100\r\n" +
+                                        "Connection: close\r\n\r\n"
+                                    ).toByteArray(StandardCharsets.US_ASCII),
+                            )
+                        }
+                        out.flush()
+                    }
+                }
+            }.apply { start() }
+
+            val proxy = LocalMediaProxy(
+                serverBaseUrlProvider = { "http://127.0.0.1:${upstream.localPort}" },
+                ticketProvider = { chId -> StreamTicket("/stream/channelid/$chId", "LIVE") },
+                dvrTicketProvider = { dvrId ->
+                    val n = dvrTicketCounter.incrementAndGet()
+                    StreamTicket("/dvrfile/$dvrId", "DT$n")
+                },
+            )
+
+            try {
+                // Range request hits DT1 -> 401 -> refreshes to DT2 -> 206 Partial Content
+                val conn = URL(proxy.dvrStreamUrl(99L)).openConnection() as HttpURLConnection
+                conn.setRequestProperty("Range", "bytes=10-19")
+                assertEquals(206, conn.responseCode)
+                assertEquals("bytes 10-19/100", conn.getHeaderField("Content-Range"))
+                assertEquals("bytes", conn.getHeaderField("Accept-Ranges"))
+                assertEquals("0123456789", conn.inputStream.readBytes().toString(StandardCharsets.US_ASCII))
+                assertEquals(2, dvrTicketCounter.get())
+
+                // HEAD request reuses cached DT2
+                val headConn = URL(proxy.dvrStreamUrl(99L)).openConnection() as HttpURLConnection
+                headConn.requestMethod = "HEAD"
+                assertEquals(200, headConn.responseCode)
+                assertEquals("100", headConn.getHeaderField("Content-Length"))
+                assertEquals(2, dvrTicketCounter.get())
+
+                assertTrue(capturedRequests.all { !it.contains("profile=pass") })
+                assertEquals(listOf("bytes=10-19", "bytes=10-19", null), capturedRanges)
+            } finally {
+                proxy.close()
+                thread.join(2_000)
+            }
+        }
+    }
+
     private fun httpGet(url: String): String {
         val conn = URL(url).openConnection() as HttpURLConnection
         assertEquals(200, conn.responseCode)

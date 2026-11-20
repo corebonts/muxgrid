@@ -62,10 +62,14 @@ sealed interface PlaybackError {
 data class PlaybackState(
     val status: PlaybackStatus = PlaybackStatus.IDLE,
     val channelId: Long? = null,
+    val dvrEntryId: Long? = null,
     val channelNumber: String? = null,
     val channelName: String? = null,
+    val programTitle: String? = null,
     val isRadio: Boolean = false,
     val isPaused: Boolean = false,
+    val isSeekable: Boolean = false,
+    val isCompleted: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val liveEdgeOffsetMs: Long = 0L,
@@ -81,4 +85,7 @@ data class PlaybackState(
     val hwdecCurrent: String? = null,
     val deinterlaceActive: Boolean = false,
     val error: PlaybackError? = null,
-)
+) {
+    val isRecordingPlayback: Boolean
+        get() = dvrEntryId != null
+}

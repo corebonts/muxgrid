@@ -43,6 +43,9 @@ class TvheadendStore(
     private val _nowNextByChannel = MutableStateFlow<Map<Long, NowNextProgram>>(emptyMap())
     val nowNextByChannel: StateFlow<Map<Long, NowNextProgram>> = _nowNextByChannel.asStateFlow()
 
+    private val _epgByChannel = MutableStateFlow<Map<Long, List<EpgEvent>>>(emptyMap())
+    val epgByChannel: StateFlow<Map<Long, List<EpgEvent>>> = _epgByChannel.asStateFlow()
+
     private val _dvrEntries = MutableStateFlow<Map<Long, DvrEntry>>(emptyMap())
     val dvrEntries: StateFlow<Map<Long, DvrEntry>> = _dvrEntries.asStateFlow()
 
@@ -93,13 +96,13 @@ class TvheadendStore(
                         when (changed) {
                             ChangeScope.CHANNELS -> {
                                 publishChannelsLocked()
-                                publishNowNextLocked()
+                                publishNowNextLocked(rebuildEpg = false)
                             }
                             ChangeScope.TAGS -> {
                                 publishTagsLocked()
                                 publishChannelsLocked()
                             }
-                            ChangeScope.EVENTS -> publishNowNextLocked()
+                            ChangeScope.EVENTS -> publishNowNextLocked(rebuildEpg = true)
                             ChangeScope.DVR -> publishDvrLocked()
                             ChangeScope.NONE -> Unit
                         }
@@ -112,7 +115,7 @@ class TvheadendStore(
     fun refreshNowNext() {
         synchronized(lock) {
             if (!shadowSyncActive) {
-                publishNowNextLocked()
+                publishNowNextLocked(rebuildEpg = false)
             }
         }
     }
@@ -125,6 +128,10 @@ class TvheadendStore(
 
     fun getChannel(channelId: Long): Channel? = synchronized(lock) {
         liveChannels[channelId]
+    }
+
+    fun getDvrEntry(dvrId: Long): DvrEntry? = synchronized(lock) {
+        liveDvrEntries[dvrId]
     }
 
     private enum class ChangeScope {
@@ -205,7 +212,7 @@ class TvheadendStore(
                     summary = d.summary ?: existing.summary,
                     description = d.description ?: existing.description,
                     nextEventId = d.nextEventId ?: existing.nextEventId,
-                    dvrId = d.dvrId ?: existing.dvrId,
+                    dvrId = if (d.hasDvrIdField) d.dvrId else existing.dvrId,
                 )
             }
             ChangeScope.EVENTS
@@ -230,7 +237,7 @@ class TvheadendStore(
                     subtitle = d.subtitle ?: existing.subtitle,
                     description = d.description ?: existing.description,
                     state = d.state ?: existing.state,
-                    error = d.error ?: existing.error,
+                    error = if (d.hasErrorField) d.error else existing.error,
                     dataSize = d.dataSize ?: existing.dataSize,
                     playPositionSec = d.playPositionSec ?: existing.playPositionSec,
                     playCount = d.playCount ?: existing.playCount,
@@ -248,7 +255,7 @@ class TvheadendStore(
     private fun publishAllLocked() {
         publishTagsLocked()
         publishChannelsLocked()
-        publishNowNextLocked()
+        publishNowNextLocked(rebuildEpg = true)
         publishDvrLocked()
     }
 
@@ -273,7 +280,7 @@ class TvheadendStore(
             )
     }
 
-    private fun publishNowNextLocked() {
+    private fun publishNowNextLocked(rebuildEpg: Boolean = true) {
         val nowSec = epochSecondsProvider()
         val eventsByChannel = HashMap<Long, MutableList<EpgEvent>>()
         for (ev in liveEvents.values) {
@@ -281,6 +288,9 @@ class TvheadendStore(
         }
         for (list in eventsByChannel.values) {
             list.sortBy { it.startEpochSec }
+        }
+        if (rebuildEpg) {
+            _epgByChannel.value = eventsByChannel.mapValues { (_, list) -> list.toList() }
         }
 
         val result = HashMap<Long, NowNextProgram>(liveChannels.size)

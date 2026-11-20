@@ -1,17 +1,12 @@
 package io.github.corebonts.muxgrid.feature.mobile
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,7 +20,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -33,8 +27,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -46,13 +43,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -65,8 +60,6 @@ import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
-import io.github.corebonts.muxgrid.core.designsystem.PlayerErrorToast
-import io.github.corebonts.muxgrid.core.designsystem.TrackAndPresetPanel
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
 import io.github.corebonts.muxgrid.core.designsystem.filterChannels
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
@@ -75,21 +68,20 @@ import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LiveFilter
+import io.github.corebonts.muxgrid.core.model.MainTab
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
-import io.github.corebonts.muxgrid.core.model.PlaybackState
-import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.model.ServerProfile
-import io.github.corebonts.muxgrid.core.player.MuxGridVideoView
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private enum class MobileRoute {
     ONBOARDING,
-    LIVE,
+    MAIN,
     PLAYER,
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MobileMvpRoot(
     repository: TvheadendRepository,
@@ -101,6 +93,8 @@ fun MobileMvpRoot(
     val channels by repository.channels.collectAsState()
     val tags by repository.tags.collectAsState()
     val nowNextMap by repository.nowNextByChannel.collectAsState()
+    val epgByChannel by repository.epgByChannel.collectAsState()
+    val dvrEntries by repository.dvrEntries.collectAsState()
     val favorites by repository.favoriteChannelIds.collectAsState()
     val hwDecPreset by repository.hwDecPreset.collectAsState()
     val playbackState by playbackEngine.state.collectAsState()
@@ -119,18 +113,24 @@ fun MobileMvpRoot(
     }
 
     var route by remember(currentProfile.isConfigured) {
-        mutableStateOf(if (currentProfile.isConfigured) MobileRoute.LIVE else MobileRoute.ONBOARDING)
+        mutableStateOf(if (currentProfile.isConfigured) MobileRoute.MAIN else MobileRoute.ONBOARDING)
     }
+    var activeTab by remember { mutableStateOf(MainTab.LIVE) }
     var activeFilter by remember { mutableStateOf<LiveFilter>(LiveFilter.All) }
+    var guideChannelId by remember { mutableStateOf<Long?>(null) }
+    var settingsOpen by remember { mutableStateOf(false) }
 
     val filteredChannels = remember(channels, activeFilter, favorites) {
         filterChannels(channels, activeFilter, favorites)
     }
 
+    val offsetMs = (connectionState as? ConnectionState.Connected)?.serverClockOffsetMs ?: 0L
+    val nowEpochSec = (System.currentTimeMillis() + offsetMs) / 1000L
+
     when (route) {
         MobileRoute.ONBOARDING -> {
             BackHandler(enabled = currentProfile.isConfigured) {
-                route = MobileRoute.LIVE
+                route = MobileRoute.MAIN
             }
             OnboardingServerScreen(
                 initialProfile = currentProfile,
@@ -139,43 +139,114 @@ fun MobileMvpRoot(
                 onTestConnection = { repository.testConnection(it) },
                 onSaveAndConnect = { updated ->
                     repository.saveAndConnect(updated)
-                    route = MobileRoute.LIVE
+                    route = MobileRoute.MAIN
                 },
-                onCancel = { route = MobileRoute.LIVE },
+                onCancel = { route = MobileRoute.MAIN },
             )
         }
-        MobileRoute.LIVE -> {
-            val offsetMs = (connectionState as? ConnectionState.Connected)?.serverClockOffsetMs ?: 0L
-            val nowEpochSec = (System.currentTimeMillis() + offsetMs) / 1000L
-            MobileLiveChannelsScreen(
+        MobileRoute.MAIN -> {
+            BackHandler(enabled = activeTab != MainTab.LIVE) {
+                activeTab = MainTab.LIVE
+            }
+            MobileMainScaffold(
+                activeTab = activeTab,
                 connectionState = connectionState,
-                channels = filteredChannels,
-                filters = remember(tags) { buildLiveFilters(tags) },
-                activeFilter = activeFilter,
-                favorites = favorites,
-                nowNextMap = nowNextMap,
-                nowEpochSec = nowEpochSec,
-                imageLoader = repository.imageLoader,
-                onSelectFilter = { activeFilter = it },
-                onChannelClick = { channel ->
-                    playbackEngine.playChannel(channel, hwDecPreset)
-                    route = MobileRoute.PLAYER
-                },
-                onToggleFavorite = { channel ->
-                    scope.launch { repository.toggleFavorite(channel.id) }
-                },
+                onSelectTab = { activeTab = it },
+                onOpenSettings = { settingsOpen = true },
                 onOpenServerSetup = { route = MobileRoute.ONBOARDING },
                 onRetryConnect = { repository.reconnect() },
-            )
+            ) {
+                when (activeTab) {
+                    MainTab.LIVE -> {
+                        MobileLiveChannelsTab(
+                            connectionState = connectionState,
+                            channels = filteredChannels,
+                            filters = remember(tags) { buildLiveFilters(tags) },
+                            activeFilter = activeFilter,
+                            favorites = favorites,
+                            nowNextMap = nowNextMap,
+                            nowEpochSec = nowEpochSec,
+                            imageLoader = repository.imageLoader,
+                            onSelectFilter = { activeFilter = it },
+                            onChannelClick = { channel ->
+                                playbackEngine.playChannel(channel, hwDecPreset)
+                                route = MobileRoute.PLAYER
+                            },
+                            onToggleFavorite = { channel ->
+                                scope.launch { repository.toggleFavorite(channel.id) }
+                            },
+                            onOpenGuideForChannel = { channel ->
+                                guideChannelId = channel.id
+                                activeTab = MainTab.GUIDE
+                            },
+                            onRecordEvent = { eventId -> repository.scheduleRecording(eventId) },
+                        )
+                    }
+                    MainTab.GUIDE -> {
+                        MobileGuideScreen(
+                            channels = channels,
+                            epgByChannel = epgByChannel,
+                            dvrEntries = dvrEntries,
+                            nowEpochSec = nowEpochSec,
+                            imageLoader = repository.imageLoader,
+                            initialSelectedChannelId = guideChannelId,
+                            onWatchChannel = { channel ->
+                                playbackEngine.playChannel(channel, hwDecPreset)
+                                route = MobileRoute.PLAYER
+                            },
+                            onScheduleRecording = { eventId -> repository.scheduleRecording(eventId) },
+                            onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
+                            onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
+                        )
+                    }
+                    MainTab.RECORDINGS -> {
+                        MobileRecordingsScreen(
+                            dvrEntries = dvrEntries,
+                            channels = channels,
+                            nowEpochSec = nowEpochSec,
+                            imageLoader = repository.imageLoader,
+                            onWatchLiveChannel = { channel ->
+                                playbackEngine.playChannel(channel, hwDecPreset)
+                                route = MobileRoute.PLAYER
+                            },
+                            onPlayRecording = { entry, channel, startPosSec ->
+                                playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startPosSec)
+                                route = MobileRoute.PLAYER
+                            },
+                            onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
+                            onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
+                            onDeleteRecording = { dvrId -> repository.deleteRecording(dvrId) },
+                            onToggleWatched = { dvrId, watched -> repository.markRecordingWatched(dvrId, watched) },
+                        )
+                    }
+                }
+            }
+
+            if (settingsOpen) {
+                MobileSettingsSheet(
+                    profile = currentProfile,
+                    connectionState = connectionState,
+                    hwDecPreset = hwDecPreset,
+                    onSelectPreset = { preset ->
+                        scope.launch { repository.setHwDecPreset(preset) }
+                        playbackEngine.applyPreset(preset)
+                    },
+                    onOpenServerSetup = {
+                        settingsOpen = false
+                        route = MobileRoute.ONBOARDING
+                    },
+                    onDismiss = { settingsOpen = false },
+                )
+            }
         }
         MobileRoute.PLAYER -> {
             val activeChannel = channels.firstOrNull { it.id == playbackState.channelId }
             val activeNowNext = activeChannel?.let { nowNextMap[it.id] }
             BackHandler {
                 playbackEngine.stop()
-                route = MobileRoute.LIVE
+                route = MobileRoute.MAIN
             }
-            MobileLivePlayerScreen(
+            MobilePlayerScreen(
                 playbackEngine = playbackEngine,
                 playbackState = playbackState,
                 activeChannel = activeChannel,
@@ -205,7 +276,7 @@ fun MobileMvpRoot(
                 },
                 onExit = {
                     playbackEngine.stop()
-                    route = MobileRoute.LIVE
+                    route = MobileRoute.MAIN
                 },
             )
         }
@@ -213,20 +284,14 @@ fun MobileMvpRoot(
 }
 
 @Composable
-private fun MobileLiveChannelsScreen(
+private fun MobileMainScaffold(
+    activeTab: MainTab,
     connectionState: ConnectionState,
-    channels: List<Channel>,
-    filters: List<LiveFilter>,
-    activeFilter: LiveFilter,
-    favorites: Set<Long>,
-    nowNextMap: Map<Long, NowNextProgram>,
-    nowEpochSec: Long,
-    imageLoader: ImageLoader,
-    onSelectFilter: (LiveFilter) -> Unit,
-    onChannelClick: (Channel) -> Unit,
-    onToggleFavorite: (Channel) -> Unit,
+    onSelectTab: (MainTab) -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenServerSetup: () -> Unit,
     onRetryConnect: () -> Unit,
+    content: @Composable () -> Unit,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var visibleError by remember { mutableStateOf<ConnectionState.Error?>(null) }
@@ -243,79 +308,153 @@ private fun MobileLiveChannelsScreen(
         }
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MuxGridColors.CanvasPhone)
-            .statusBarsPadding()
-            .navigationBarsPadding(),
+            .statusBarsPadding(),
     ) {
-        // Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column {
-                Text("MuxGrid", style = MuxGridType.Title)
-                Text("Live TV & Radio", style = MuxGridType.TabularSmall)
-            }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                ConnectionStatusBadge(state = connectionState)
-                Text(
-                    text = "Server",
-                    color = MuxGridColors.AccentBlueLight,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(MuxGridColors.CardSurface)
-                        .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(50))
-                        .clickable(onClick = onOpenServerSetup)
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                )
-            }
-        }
-
-        visibleError?.let { errState ->
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(MuxGridColors.CoralLive.copy(alpha = 0.14f))
-                    .border(1.dp, MuxGridColors.CoralLive.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
-                    .padding(12.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = errState.message,
-                    color = MuxGridColors.TextPrimary,
-                    fontSize = 13.sp,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = if (errState.isAuthError) "Edit" else "Retry",
-                    color = MuxGridColors.AccentBlueLight,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
+                Column {
+                    Text("MuxGrid", style = MuxGridType.Title)
+                    Text(
+                        text = when (activeTab) {
+                            MainTab.LIVE -> "Live TV & Radio"
+                            MainTab.GUIDE -> "Program Guide"
+                            MainTab.RECORDINGS -> "DVR Recordings"
+                        },
+                        style = MuxGridType.TabularSmall,
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ConnectionStatusBadge(state = connectionState)
+                    Text(
+                        text = "Settings",
+                        color = MuxGridColors.AccentBlueLight,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(MuxGridColors.CardSurface)
+                            .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(50))
+                            .clickable(onClick = onOpenSettings)
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
+            }
+
+            visibleError?.let { errState ->
+                Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable {
-                            if (errState.isAuthError) onOpenServerSetup() else onRetryConnect()
-                        }
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                )
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MuxGridColors.CoralLive.copy(alpha = 0.14f))
+                        .border(1.dp, MuxGridColors.CoralLive.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = errState.message,
+                        color = MuxGridColors.TextPrimary,
+                        fontSize = 13.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = if (errState.isAuthError) "Edit" else "Retry",
+                        color = MuxGridColors.AccentBlueLight,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                if (errState.isAuthError) onOpenServerSetup() else onRetryConnect()
+                            }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+            }
+
+            Box(modifier = Modifier.weight(1f)) {
+                content()
             }
         }
 
+        // Floating translucent bottom navigation pill
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(MuxGridColors.ScrimSurface)
+                .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(24.dp))
+                .padding(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf(
+                MainTab.LIVE to "Live",
+                MainTab.GUIDE to "Guide",
+                MainTab.RECORDINGS to "Recordings",
+            ).forEach { (tab, label) ->
+                val selected = tab == activeTab
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(if (selected) MuxGridColors.AccentBlue else Color.Transparent)
+                        .clickable { onSelectTab(tab) }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = label,
+                        color = if (selected) Color.White else MuxGridColors.TextSecondary,
+                        fontSize = 13.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MobileLiveChannelsTab(
+    connectionState: ConnectionState,
+    channels: List<Channel>,
+    filters: List<LiveFilter>,
+    activeFilter: LiveFilter,
+    favorites: Set<Long>,
+    nowNextMap: Map<Long, NowNextProgram>,
+    nowEpochSec: Long,
+    imageLoader: ImageLoader,
+    onSelectFilter: (LiveFilter) -> Unit,
+    onChannelClick: (Channel) -> Unit,
+    onToggleFavorite: (Channel) -> Unit,
+    onOpenGuideForChannel: (Channel) -> Unit,
+    onRecordEvent: suspend (Long) -> Result<Long>,
+) {
+    val scope = rememberCoroutineScope()
+    var actionChannel by remember { mutableStateOf<Channel?>(null) }
+    var actionMessage by remember { mutableStateOf<String?>(null) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
         // Filter pills
         Row(
             modifier = Modifier
@@ -362,7 +501,7 @@ private fun MobileLiveChannelsScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 100.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(channels, key = { it.id }) { channel ->
@@ -373,8 +512,78 @@ private fun MobileLiveChannelsScreen(
                         isFavorite = channel.id in favorites,
                         imageLoader = imageLoader,
                         onClick = { onChannelClick(channel) },
+                        onLongClick = {
+                            actionMessage = null
+                            actionChannel = channel
+                        },
                         onToggleFavorite = { onToggleFavorite(channel) },
                     )
+                }
+            }
+        }
+    }
+
+    actionChannel?.let { ch ->
+        val nowEvent = nowNextMap[ch.id]?.now
+        val isFav = ch.id in favorites
+        ModalBottomSheet(
+            onDismissRequest = { actionChannel = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = MuxGridColors.CardSurfaceElevated,
+            contentColor = MuxGridColors.TextPrimary,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(ch.name, style = MuxGridType.Title, fontSize = 18.sp)
+                nowEvent?.let { Text("On Now: ${it.title}", style = MuxGridType.CardSubtitle) }
+                actionMessage?.let { Text(it, color = MuxGridColors.CoralLive, fontSize = 12.sp) }
+
+                Button(
+                    onClick = {
+                        actionChannel = null
+                        onChannelClick(ch)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MuxGridColors.AccentBlue, contentColor = Color.White),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Watch Live")
+                }
+                OutlinedButton(
+                    onClick = {
+                        onToggleFavorite(ch)
+                        actionChannel = null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (isFav) "Remove from Favorites" else "Add to Favorites", color = MuxGridColors.TextPrimary)
+                }
+                OutlinedButton(
+                    onClick = {
+                        actionChannel = null
+                        onOpenGuideForChannel(ch)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("View EPG Guide", color = MuxGridColors.TextPrimary)
+                }
+                if (nowEvent != null && nowEvent.dvrId == null) {
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                onRecordEvent(nowEvent.id)
+                                    .onSuccess { actionChannel = null }
+                                    .onFailure { actionMessage = it.message ?: "Failed to record" }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Record Current Show", color = MuxGridColors.CoralLive)
+                    }
                 }
             }
         }
@@ -390,6 +599,7 @@ private fun MobileChannelCard(
     isFavorite: Boolean,
     imageLoader: ImageLoader,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     onToggleFavorite: () -> Unit,
 ) {
     val shape = RoundedCornerShape(16.dp)
@@ -401,7 +611,7 @@ private fun MobileChannelCard(
             .border(1.dp, MuxGridColors.HairlineBorder, shape)
             .combinedClickable(
                 onClick = onClick,
-                onLongClick = onToggleFavorite,
+                onLongClick = onLongClick,
             )
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -493,265 +703,98 @@ private fun MobileChannelCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MobileLivePlayerScreen(
-    playbackEngine: PlaybackEngine,
-    playbackState: PlaybackState,
-    activeChannel: Channel?,
-    nowNext: NowNextProgram?,
+private fun MobileSettingsSheet(
+    profile: ServerProfile,
+    connectionState: ConnectionState,
     hwDecPreset: HwDecPreset,
-    imageLoader: ImageLoader,
-    canZap: Boolean,
-    onZapPrevious: () -> Unit,
-    onZapNext: () -> Unit,
     onSelectPreset: (HwDecPreset) -> Unit,
-    onExit: () -> Unit,
+    onOpenServerSetup: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
-    var hudVisible by remember { mutableStateOf(true) }
-    var trackPanelOpen by remember { mutableStateOf(false) }
-    var dismissedError by remember(playbackState.error) { mutableStateOf(false) }
-
-    LaunchedEffect(hudVisible, trackPanelOpen, playbackState.status) {
-        if (hudVisible && !trackPanelOpen && playbackState.status == PlaybackStatus.PLAYING) {
-            delay(4_000L)
-            hudVisible = false
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) {
-                if (trackPanelOpen) {
-                    trackPanelOpen = false
-                } else {
-                    hudVisible = !hudVisible
-                }
-            },
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MuxGridColors.CardSurfaceElevated,
+        contentColor = MuxGridColors.TextPrimary,
     ) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx -> MuxGridVideoView(ctx, playbackEngine) },
-        )
-
-        if (playbackState.status == PlaybackStatus.BUFFERING) {
-            CircularProgressIndicator(
-                color = MuxGridColors.AccentBlueLight,
-                modifier = Modifier.align(Alignment.Center),
-            )
-        }
-
-        val err = playbackState.error
-        if (err != null && !dismissedError) {
-            PlayerErrorToast(
-                error = err,
-                onDismiss = { dismissedError = true },
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-                    .padding(16.dp),
-            )
-        }
-
-        AnimatedVisibility(
-            visible = hudVisible,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.fillMaxSize(),
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Top dark gradient scrim
-                val scrimBtnColors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = MuxGridColors.ScrimSurface,
-                    contentColor = Color.White,
+            Text("Settings", style = MuxGridType.Title, fontSize = 19.sp)
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MuxGridColors.CardSurface)
+                    .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Tvheadend Server", style = MuxGridType.CardTitle)
+                Text(
+                    text = "${profile.host}:${profile.htspPort} (HTTP ${profile.httpPort})",
+                    style = MuxGridType.TabularSmall,
                 )
-                val scrimBtnBorder = BorderStroke(1.dp, Color.White.copy(alpha = 0.24f))
-
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Black.copy(alpha = 0.82f), Color.Transparent),
-                            ),
-                        )
-                        .statusBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        OutlinedButton(
-                            onClick = onExit,
-                            colors = scrimBtnColors,
-                            border = scrimBtnBorder,
-                        ) {
-                            Text("Back", color = Color.White, fontSize = 13.sp)
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        if (activeChannel != null) {
-                            ChannelPiconBadge(
-                                channelNumber = activeChannel.formattedNumber,
-                                channelName = activeChannel.name,
-                                piconModel = activeChannel.icon?.let { PiconModel(activeChannel.id, it) },
-                                imageLoader = imageLoader,
-                                size = 38.dp,
-                            )
-                            Spacer(Modifier.width(10.dp))
-                        }
-                        Column {
-                            Text(
-                                text = listOfNotNull(
-                                    playbackState.channelNumber?.takeIf { it != "0" },
-                                    playbackState.channelName ?: activeChannel?.name,
-                                ).joinToString(" · "),
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            nowNext?.now?.let { now ->
-                                Text(
-                                    text = now.title,
-                                    color = Color.White.copy(alpha = 0.82f),
-                                    fontSize = 12.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.width(8.dp))
-                    OutlinedButton(
-                        onClick = { trackPanelOpen = !trackPanelOpen },
-                        colors = scrimBtnColors,
-                        border = scrimBtnBorder,
-                    ) {
-                        Text("Tracks", color = Color.White, fontSize = 13.sp)
-                    }
+                if (connectionState is ConnectionState.Connected) {
+                    Text(
+                        text = "${connectionState.serverName} ${connectionState.serverVersion} · HTSP v${connectionState.htspVersion}",
+                        style = MuxGridType.TabularSmall,
+                        color = MuxGridColors.EmeraldOk,
+                    )
                 }
-
-                // Bottom dark gradient scrim
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.86f)),
-                            ),
-                        )
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                Button(
+                    onClick = onOpenServerSetup,
+                    colors = ButtonDefaults.buttonColors(containerColor = MuxGridColors.AccentBlue, contentColor = Color.White),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
+                    Text("Edit Server Connection")
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MuxGridColors.CardSurface)
+                    .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Video Decoder & Deinterlacer", style = MuxGridType.CardTitle)
+                listOf(
+                    HwDecPreset.MEDIACODEC_COPY_BWDIF to "Hardware Copy + bwdif Deinterlace (Phone Default)",
+                    HwDecPreset.MEDIACODEC_ZERO_COPY to "Hardware Zero-Copy (mediacodec)",
+                ).forEach { (preset, label) ->
+                    val selected = preset == hwDecPreset
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (selected) MuxGridColors.AccentBlue.copy(alpha = 0.22f) else MuxGridColors.CardSurfaceElevated)
+                            .border(
+                                1.dp,
+                                if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
+                                RoundedCornerShape(10.dp),
+                            )
+                            .clickable { onSelectPreset(preset) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .width(8.dp)
-                                    .height(8.dp)
-                                    .clip(RoundedCornerShape(50))
-                                    .background(MuxGridColors.CoralLive),
-                            )
-                            Text(
-                                text = "LIVE",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            if (playbackState.videoWidth > 0) {
-                                Text(
-                                    text = "· ${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}",
-                                    style = MuxGridType.TabularSmall,
-                                    color = Color.White.copy(alpha = 0.85f),
-                                )
-                            }
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (canZap) {
-                            OutlinedButton(
-                                onClick = onZapPrevious,
-                                colors = scrimBtnColors,
-                                border = scrimBtnBorder,
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text("Prev Ch", color = Color.White, fontSize = 13.sp)
-                            }
-                        }
-                        Button(
-                            onClick = { playbackEngine.togglePause() },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MuxGridColors.AccentBlue,
-                                contentColor = Color.White,
-                            ),
-                            modifier = Modifier.weight(1.2f),
-                        ) {
-                            Text(
-                                text = if (playbackState.isPaused) "Play" else "Pause",
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                        if (canZap) {
-                            OutlinedButton(
-                                onClick = onZapNext,
-                                colors = scrimBtnColors,
-                                border = scrimBtnBorder,
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text("Next Ch", color = Color.White, fontSize = 13.sp)
-                            }
+                        Text(label, fontSize = 13.sp, color = MuxGridColors.TextPrimary, modifier = Modifier.weight(1f))
+                        if (selected) {
+                            Spacer(Modifier.width(8.dp))
+                            Text("Active", color = MuxGridColors.AccentBlueLight, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
-            }
-        }
-
-        if (trackPanelOpen) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-                    .padding(20.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                TrackAndPresetPanel(
-                    audioTracks = playbackState.audioTracks,
-                    subtitleTracks = playbackState.subtitleTracks,
-                    selectedAudioId = playbackState.selectedAudioId,
-                    selectedSubtitleId = playbackState.selectedSubtitleId,
-                    hwDecPreset = hwDecPreset,
-                    onSelectAudio = { playbackEngine.setAudioTrack(it) },
-                    onSelectSubtitle = { playbackEngine.setSubtitleTrack(it) },
-                    onSelectPreset = onSelectPreset,
-                    onClose = { trackPanelOpen = false },
-                    modifier = Modifier.widthIn(max = 540.dp).fillMaxWidth(),
-                )
             }
         }
     }

@@ -190,6 +190,96 @@ class HtspClient(
         )
     }
 
+    suspend fun addDvrEntry(eventId: Long): Long {
+        val reply = rpc(
+            "addDvrEntry",
+            htsMap {
+                put("eventId", eventId)
+            },
+        )
+        assertDvrSuccess("addDvrEntry", reply)
+        return reply.getLong("id") ?: throw HtspException("Missing id in addDvrEntry reply")
+    }
+
+    suspend fun addManualDvrEntry(
+        channelId: Long,
+        startEpochSec: Long,
+        stopEpochSec: Long,
+        title: String,
+        description: String? = null,
+    ): Long {
+        val reply = rpc(
+            "addDvrEntry",
+            htsMap {
+                put("channelId", channelId)
+                put("start", startEpochSec)
+                put("stop", stopEpochSec)
+                put("title", title)
+                if (!description.isNullOrBlank()) {
+                    put("description", description)
+                }
+            },
+        )
+        assertDvrSuccess("addDvrEntry", reply)
+        return reply.getLong("id") ?: throw HtspException("Missing id in addDvrEntry reply")
+    }
+
+    suspend fun stopDvrEntry(id: Long) {
+        val reply = rpc(
+            "stopDvrEntry",
+            htsMap {
+                put("id", id)
+            },
+        )
+        assertDvrSuccess("stopDvrEntry", reply)
+    }
+
+    suspend fun cancelDvrEntry(id: Long) {
+        val reply = rpc(
+            "cancelDvrEntry",
+            htsMap {
+                put("id", id)
+            },
+        )
+        assertDvrSuccess("cancelDvrEntry", reply)
+    }
+
+    suspend fun deleteDvrEntry(id: Long) {
+        val reply = rpc(
+            "deleteDvrEntry",
+            htsMap {
+                put("id", id)
+            },
+        )
+        assertDvrSuccess("deleteDvrEntry", reply)
+    }
+
+    suspend fun updateDvrEntry(
+        id: Long,
+        playPositionSec: Long? = null,
+        playCount: Int? = null,
+    ) {
+        val reply = rpc(
+            "updateDvrEntry",
+            htsMap {
+                put("id", id)
+                if (playPositionSec != null) {
+                    put("playposition", playPositionSec.coerceAtLeast(0L))
+                }
+                if (playCount != null) {
+                    put("playcount", playCount.coerceAtLeast(0))
+                }
+            },
+        )
+        assertDvrSuccess("updateDvrEntry", reply)
+    }
+
+    private fun assertDvrSuccess(method: String, reply: HtsMap) {
+        if (reply.containsKey("success") && (reply.getLong("success") ?: 1L) == 0L) {
+            throw HtspException(reply.getString("error") ?: "Tvheadend rejected '$method'")
+        }
+    }
+
     private suspend fun rpc(method: String, params: HtsMap, timeoutMs: Long = RPC_TIMEOUT_MS): HtsMap {
         val session = activeSession ?: throw HtspException("HTSP is not connected")
         return session.rpc(method, params, timeoutMs)
@@ -456,7 +546,7 @@ class HtspClient(
         private const val CONNECT_TIMEOUT_MS = 6_000
         private const val RPC_TIMEOUT_MS = 10_000L
         private const val INITIAL_SYNC_TIMEOUT_MS = 30_000L
-        private const val DEFAULT_EPG_WINDOW_SEC = 2L * 86_400L
+        private const val DEFAULT_EPG_WINDOW_SEC = 7L * 86_400L
         private const val DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000L
         private const val INITIAL_BACKOFF_MS = 1_000L
         private const val MAX_BACKOFF_MS = 15_000L

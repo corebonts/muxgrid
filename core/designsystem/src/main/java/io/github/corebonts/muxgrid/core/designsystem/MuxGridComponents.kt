@@ -45,6 +45,7 @@ import coil3.compose.SubcomposeAsyncImage
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ChannelTag
 import io.github.corebonts.muxgrid.core.model.ConnectionState
+import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LiveFilter
 import io.github.corebonts.muxgrid.core.model.MediaTrack
@@ -409,3 +410,44 @@ fun formatEpochHm(epochSec: Long): String =
     Instant.ofEpochSecond(epochSec)
         .atZone(ZoneId.systemDefault())
         .format(TIME_FMT)
+
+@Composable
+fun DvrStateBadge(
+    state: DvrState,
+    isWatched: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val (color, label) = when {
+        state == DvrState.RECORDING -> MuxGridColors.CoralLive to "REC"
+        state == DvrState.SCHEDULED -> MuxGridColors.AccentBlueLight to "Scheduled"
+        state == DvrState.COMPLETED && isWatched -> MuxGridColors.EmeraldOk to "Watched"
+        state == DvrState.MISSED -> MuxGridColors.AmberWarn to "Missed"
+        state == DvrState.INVALID -> MuxGridColors.CoralLive to "Failed"
+        else -> return
+    }
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(color.copy(alpha = 0.16f))
+            .border(1.dp, color.copy(alpha = 0.42f), RoundedCornerShape(50))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        if (state == DvrState.RECORDING) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(color),
+            )
+        }
+        Text(
+            text = label,
+            color = color,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
+}

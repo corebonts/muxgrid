@@ -1,6 +1,7 @@
 package io.github.corebonts.muxgrid.core.data
 
 import android.content.Context
+import android.graphics.Bitmap
 import coil3.ImageLoader
 import coil3.decode.DataSource
 import coil3.decode.ImageSource
@@ -10,6 +11,8 @@ import coil3.fetch.Fetcher
 import coil3.fetch.SourceFetchResult
 import coil3.memory.MemoryCache
 import coil3.request.Options
+import coil3.request.allowHardware
+import coil3.request.bitmapConfig
 import io.github.corebonts.muxgrid.core.htsp.HtspClient
 import io.github.corebonts.muxgrid.core.htsp.HtspNoAccessException
 import io.github.corebonts.muxgrid.core.model.ServerProfile
@@ -163,6 +166,8 @@ class PiconFetcher(
                 .build()
 
             return ImageLoader.Builder(context)
+                .allowHardware(false)
+                .bitmapConfig(Bitmap.Config.ARGB_8888)
                 .components {
                     add(Factory(htspClient, okHttp, profileProvider))
                 }

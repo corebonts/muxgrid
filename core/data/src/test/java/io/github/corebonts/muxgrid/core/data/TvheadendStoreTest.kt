@@ -1,6 +1,8 @@
 package io.github.corebonts.muxgrid.core.data
 
 import io.github.corebonts.muxgrid.core.htsp.ChannelUpdateDelta
+import io.github.corebonts.muxgrid.core.htsp.DvrEntryUpdateDelta
+import io.github.corebonts.muxgrid.core.htsp.EventUpdateDelta
 import io.github.corebonts.muxgrid.core.htsp.HtspPushEvent
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
@@ -99,5 +101,65 @@ class TvheadendStoreTest {
 
         assertNull(store.findConflictingRecording(targetChannelId = 7L))
         assertEquals("Híradó", store.findConflictingRecording(targetChannelId = 1L)?.title)
+    }
+
+    @Test
+    fun `epgByChannel sorts events and clears dvrId on eventUpdate`() {
+        val store = TvheadendStore(epochSecondsProvider = { 1_000L })
+        store.applyEvent(HtspPushEvent.SyncStarting)
+        store.applyEvent(HtspPushEvent.ChannelAdd(Channel(id = 1L, number = 1, name = "M1 HD")))
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 2L, channelId = 1L, startEpochSec = 2_000L, stopEpochSec = 3_000L, title = "Later", dvrId = 50L),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 1L, channelId = 1L, startEpochSec = 900L, stopEpochSec = 1_500L, title = "Now"),
+            ),
+        )
+        store.applyEvent(HtspPushEvent.InitialSyncCompleted)
+
+        val ch1Events = store.epgByChannel.value[1L].orEmpty()
+        assertEquals(listOf(1L, 2L), ch1Events.map { it.id })
+        assertEquals(50L, ch1Events[1].dvrId)
+
+        store.applyEvent(
+            HtspPushEvent.EventUpdate(
+                EventUpdateDelta(id = 2L, dvrId = null, hasDvrIdField = true),
+            ),
+        )
+        assertNull(store.epgByChannel.value[1L]?.get(1)?.dvrId)
+    }
+
+    @Test
+    fun `dvrEntryUpdate applies playPositionSec playCount and state transitions`() {
+        val store = TvheadendStore()
+        store.applyEvent(
+            HtspPushEvent.DvrEntryAdd(
+                DvrEntry(
+                    id = 88L,
+                    channelId = 1L,
+                    startEpochSec = 100L,
+                    stopEpochSec = 3_700L,
+                    title = "Documentary",
+                    state = DvrState.RECORDING,
+                ),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.DvrEntryUpdate(
+                DvrEntryUpdateDelta(
+                    id = 88L,
+                    state = DvrState.COMPLETED,
+                    playPositionSec = 1_200L,
+                    playCount = 1,
+                ),
+            ),
+        )
+        val entry = store.dvrEntries.value[88L]!!
+        assertEquals(DvrState.COMPLETED, entry.state)
+        assertEquals(1_200L, entry.playPositionSec)
+        assertEquals(1, entry.playCount)
     }
 }

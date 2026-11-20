@@ -59,7 +59,7 @@ Build **one codebase** (with ABI-split APKs: `armeabi-v7a` and `arm64-v8a`) cont
 | :--- | :--- | :--- |
 | **Language** | Kotlin `2.4.21` + Coroutines + `StateFlow` | Strict concurrency; zero RxJava. |
 | **Build** | AGP `9.5.2` + Gradle Kotlin DSL + Version Catalog (`libs.versions.toml`) | Multi-module builds, ABI splits (`armeabi-v7a`, `arm64-v8a`), Java 17 bytecode target. |
-| **SDK Targets** | `minSdk = 28`, `compileSdk = 36`, `targetSdk = 36` | App ID `io.github.corebonts.muxgrid`. Covers Android TV 11 (API 30) through Android 17 (Poco F8 Ultra) while keeping implicit local-network access until opting into `targetSdk = 37`. |
+| **SDK Targets** | `minSdk = 28`, `compileSdk = 37.2` (`release(37)`, minor `2`), `targetSdk = 36` | App ID `io.github.corebonts.muxgrid`. Covers Android TV 11 (API 30) through Android 17 (Poco F8 Ultra) while keeping implicit local-network access until opting into `targetSdk = 37`. |
 | **Mobile UI** | Jetpack Compose BOM `2026.11.01` (Compose `1.13.0`, Material 3 `1.5.0`) + Haze `2.1.0` | Haze (`dev.chrisbanes.haze:haze:2.1.0`) for non-video backdrop blur; translucent dark scrims over `SurfaceView` video (see Pitfall #10). |
 | **TV UI** | Compose for TV (`androidx.tv:tv-material:1.1.0`) | Never use legacy Leanback XML (`androidx.leanback`). |
 | **Navigation** | Type-safe Navigation Compose (`androidx.navigation:navigation-compose:2.10.2`) | Stable `@Serializable` routes. |
@@ -111,14 +111,14 @@ flowchart LR
 
 ---
 
-### Milestone 0 — Project Skeleton & Hardware Playback Spike (De-Risking)
+### Milestone 0 — Project Skeleton & Hardware Playback Spike (Completed)
 *Goal: Eliminate all unknown hardware, ABI, decoder, and growing-MKV risks before building app architecture.*
 - Scaffold multi-module Gradle project (`libs.versions.toml`, Kotlin `2.4.21`, AGP `9.5.2`, Compose BOM `2026.11.01`, Compose for TV `1.1.0`, `io.github.abdallahmehiz:mpv-android-lib:0.2.1`, ABI splits for `armeabi-v7a` and `arm64-v8a`).
 - Configure unified `AndroidManifest.xml`:
   - `LAUNCHER` + `LEANBACK_LAUNCHER`, `android:banner="@drawable/tv_banner"`, `<uses-feature android:name="android.software.leanback" android:required="false" />`, `<uses-feature android:name="android.hardware.touchscreen" android:required="false" />`.
   - `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, `supportsPictureInPicture="true"`.
   - `network_security_config.xml` with `<base-config cleartextTrafficPermitted="true" />` (required for arbitrary user-entered LAN/VPN IPs in OkHttp/Coil and loopback `127.0.0.1`).
-- Build a minimal, throwaway **Playback Spike Activity** (`SurfaceView` + `libmpv` with a hard-coded `?profile=pass` URL + test toggles) and run on **both Phone and TCL C635**:
+- Built and verified the M0 hardware spike on Phone and TCL C635 (`armeabi-v7a`), locking `mediacodec` + `deinterlace=no` for TV and `mediacodec-copy` + `bwdif` (`deinterlace=yes`) for modern phones, then replaced the throwaway spike activity with the M1 screens:
   1. Confirm `adb shell getprop ro.product.cpu.abilist` and free storage (`df -h /data`) on TCL C635.
   2. Benchmark `vo=gpu` + `hwdec=mediacodec` vs `vo=gpu` + `hwdec=mediacodec-copy` + `deinterlace=yes` (`bwdif`) on a `1440×1080i50` MindigTV HD channel (combing, dropped frames, CPU %, RAM).
   3. Verify `MP2`/`AC3`/`AAC` audio track switching and bitmap `DVBSUB` subtitle rendering.
@@ -127,7 +127,7 @@ flowchart LR
 
 ---
 
-### Milestone 1 — Early Working MVP: Connect, Browse Live & Watch TV (`:core:htsp`, `:core:data`, `:core:player`, `:core:designsystem`, minimal UI)
+### Milestone 1 — Early Working MVP: Connect, Browse Live & Watch TV (Completed)
 *Goal: Get an actual, daily-usable Live TV app running on Phone (and basic usable D-pad playback on TV) as early as possible.*
 - **`:core:htsp` (Pure JVM) — Live & Auth Core:**
   - Binary `htsmsg` encoder/decoder supporting wire types `1` (`MAP`), `2` (`S64`, LE stripped + full 8-byte negative two's complement), `3` (`STR` UTF-8), `4` (`BIN`), `5` (`LIST`), `7` (`BOOL`: `true` = `0x01`, `false` = `dataLen 0`), `8` (`UUID`: 16 bytes), skipping unknown types by `dataLen`, never emitting `6` (`DBL`). Comprehensive JVM unit tests (negative S64, nested structures, Hungarian UTF-8).
@@ -139,17 +139,17 @@ flowchart LR
   - Server connection profile stored in **DataStore + Google Tink** (Keystore AEAD-encrypted password).
   - Custom **Coil 3 Picon `Fetcher`** normalizing `imagecache/<id>`, `/imagecache/<id>`, and raw `http(s)://` (HTSP `fileOpen` primary, Digest/Basic OkHttp fallback if user lacks `ACCESS_HTSP_RECORDER`).
 - **`:core:player` — Live Playback & Proxy Foundation:**
-  - `PlaybackEngine` interface + `MpvPlaybackEngine` (`SurfaceView`, `vo=gpu`, M0-locked hwdec/deinterlace defaults, fast MPEG-TS probe tuning, `StateFlow<PlaybackState>`).
+  - `PlaybackEngine` interface + `MpvPlaybackEngine` (`SurfaceView`, `vo=gpu`, M0-locked hwdec/deinterlace defaults, `idle=yes` reuse, `isPaused`/`hwdecCurrent` state sync, fast MPEG-TS probe tuning, `StateFlow<PlaybackState>`).
   - **`LocalMediaProxy`** (`127.0.0.1:<ephemeralPort>/<token>/...`): live `/stream/channelid/<id>` relay with automatic HTSP `getTicket` fetch/refresh.
   - **Single-tuner safety & conflict detection:** Tear down active stream + upstream proxy socket cleanly before opening the next channel. On any live-stream open failure (especially Tvheadend's ~2 s **0-byte empty reply**), inspect HTSP for an active `dvrEntry` (`state == "recording"`) on another channel and emit a typed `TunerBusy(recordingTitle)` error.
 - **Minimal Dark UI (`:core:designsystem` foundations + MVP screens):**
   - Core dark obsidian palette, tabular numerals (`tnum`), clean channel card & translucent scrim components.
-  - **Onboarding / Server Setup** screen with live connection test (`host`, HTSP port `9982`, HTTP port `9981`, username, password).
-  - **Live Channel List** (picon, channel #, name, Now/Next title + live progress bar, filter pills: `All`, `TV`, `Radio`, `Favorites`, server tags). Works with touch on Phone and basic D-pad navigation on TV.
-  - **Basic Fullscreen Live Player** (tap/OK to toggle simple translucent scrim HUD: channel title, Play/Stop, Audio & DVB Subtitle track picker, single-tuner conflict toast, Settings preset toggle).
+  - **Onboarding / Server Setup** screen with live connection test (`host`, HTSP port `9982`, HTTP port `9981`, username, password) and D-pad focus stability.
+  - **Live Channel List** (picon, channel #, name, Now/Next title + live progress bar, filter pills: `All`, `TV`, `Radio`, `Favorites`, server tags). Works with touch on Phone and D-pad navigation on TV (`androidx.tv.material3`, unclipped focus outline).
+  - **Basic Fullscreen Live Player** (tap/OK to toggle translucent dark scrim HUD: channel title, `Play/Pause`, `Stop`, `Prev Ch`/`Next Ch`, Audio & DVB Subtitle track picker, single-tuner conflict toast, Settings preset toggle).
 - **Acceptance:**
   - JVM tests pass for `htsmsg` codec, shadow-store atomic resync, and `LocalMediaProxy` ticket refresh.
-  - Installed on Phone and TCL C635: connects to `tv-server`, displays all channels with picons and Now/Next, tunes same-mux HD channel in **< 1 s** (cross-mux in **~1.5–3 s**), renders clean deinterlaced `1080i` + `MP2`/`AC3` + `DVBSUB`, switches tracks, and shows a clear notice if a recording holds the tuner.
+  - Installed on Phone and TCL C635: connects to Tvheadend, displays all channels with picons and Now/Next, tunes same-mux HD channel in **< 1 s** (cross-mux in **~1.5–3 s**), renders clean deinterlaced `1080i` + `MP2`/`AC3` + `DVBSUB`, switches tracks, and shows a clear notice if a recording holds the tuner.
 
 ---
 
@@ -229,7 +229,7 @@ flowchart LR
 *Goal: Harden networking, battery, storage hygiene, and produce signed release APKs.*
 - **Multiple Server Profiles:** Easy switching (and optional automatic LAN ↔ WireGuard/Tailscale fallback) with clear reachability status.
 - **Battery & Network Resilience:**
-  - Close idle HTSP socket after a short grace period when the app is backgrounded and not playing; reconnect + atomic shadow-resync seamlessly on resume.
+  - *(Implemented in M1 polish)* Close idle HTSP socket after a 3s grace period when backgrounded without active playback; suppress transient socket-abort errors while backgrounded, reconnect + atomic shadow-resync on foreground, and defer non-auth error banners until `RESUMED`.
   - Graceful Wi-Fi ↔ VPN/cellular transitions without blanking UI.
 - **System Hygiene:**
   - `KEEP_SCREEN_ON` strictly during active foreground video playback (never while paused indefinitely or audio-only backgrounded).

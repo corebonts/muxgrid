@@ -15,6 +15,30 @@ Built as a **single unified APK** targeting both modern Android phones/tablets a
 - **TV-First Ergonomics:** Pure Compose for TV D-pad navigation, instant Channel Up/Down zapping, progressive seek steps, and zero focus traps.
 - **Modern Aesthetic:** Dark-first, content-forward canvas with translucent frosted-glass overlays, tabular typography, and minimal navigation clutter (inspired by Infuse, Channels, and Apple TV).
 
+## Current Implementation Status
+
+- **Completed (M0 + M1):** Multi-module Gradle project (`compileSdk 37.2`, `targetSdk 36`, `minSdk 28`), HTSP binary client + atomic shadow-store resync, DataStore + Tink credential storage, Coil HTSP/HTTP picon fetcher, `LocalMediaProxy` live stream ticket handling + single-tuner conflict detection, `libmpv` playback engine (`mediacodec` on TV, `mediacodec-copy` + `bwdif` on phone), onboarding Server Setup (with connection test), Mobile & TV Live channel grid/list with filters (`All`, `TV`, `Radio`, `Favorites`, server tags), fullscreen live player (`Play/Pause`, `Stop`, `Prev Ch`/`Next Ch`, Audio/Subtitle/`HwDec` track picker), and lifecycle-aware background HTSP pause/reconnect with deferred error banners.
+- **Planned (M2–M6):** EPG Guide tab, DVR scheduling & `/dvrfile` playback + growing tail-follow proxy, `libmpv` disk timeshift ring buffer, `MediaSessionService` + PiP + mobile gestures + Haze blur + mini-player, dedicated TV Navigation Rail + progressive seek, and multi-profile switching.
+
+## Build, Test & Sideload
+
+1. **Optional debug defaults:** Create an untracked `.env` in `android-client/` (already ignored by `.gitignore`) if you want `BuildConfig` prefill defaults during local builds:
+   ```properties
+   TVH_HOST=192.168.1.5
+   TVH_USER=androidclient
+   TVH_PASS=...
+   ```
+2. **Run JVM unit tests and build ABI-split debug APKs:**
+   ```bash
+   ./gradlew test assembleDebug
+   ```
+   Outputs:
+   - Phone (`arm64-v8a`): `app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`
+   - 32-bit Android TV (`armeabi-v7a`, e.g., TCL C635): `app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk`
+3. **Install / Sideload:**
+   - Via ADB: `adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk` (or `app-armeabi-v7a-debug.apk` for TV)
+   - Over LAN browser (phone): run `python3 -m http.server 18123 --bind 0.0.0.0 --directory app/build/outputs/apk/debug` and download `http://<host-ip>:18123/app-arm64-v8a-debug.apk` on your phone.
+
 ## Documentation Map
 
 | Document | Purpose |

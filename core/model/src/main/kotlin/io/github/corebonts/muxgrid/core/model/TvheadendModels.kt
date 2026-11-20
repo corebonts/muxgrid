@@ -86,7 +86,37 @@ data class DvrEntry(
     val dataSize: Long = 0L,
     val playPositionSec: Long = 0L,
     val playCount: Int = 0,
+) {
+    val durationSec: Long
+        get() = (stopEpochSec - startEpochSec).coerceAtLeast(0L)
+
+    val isWatched: Boolean
+        get() = playCount > 0
+
+    val isFileMissing: Boolean
+        get() = error?.contains("missing", ignoreCase = true) == true
+
+    val hasResumePosition: Boolean
+        get() = playCount == 0 && playPositionSec > 10L
+
+    fun resumeProgressFraction(): Float {
+        if (playCount > 0) return 1f
+        val dur = durationSec
+        if (dur <= 0L || playPositionSec <= 0L) return 0f
+        return (playPositionSec.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+    }
+}
+
+data class LocalDvrProgress(
+    val playPositionSec: Long,
+    val playCount: Int,
 )
+
+enum class MainTab {
+    LIVE,
+    GUIDE,
+    RECORDINGS,
+}
 
 sealed interface LiveFilter {
     data object All : LiveFilter
