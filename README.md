@@ -1,4 +1,6 @@
-# Tvheadend Android Client (Phone + Android TV)
+# MuxGrid — Tvheadend Android Client (Phone + Android TV)
+
+<img src="./docs/assets/muxgrid-icon.svg" alt="MuxGrid icon" width="72" />
 
 A lightweight, native Android & Android TV client for **Tvheadend** (`4.3+`), designed for instant channel zapping, live pause/rewind (timeshift), smooth playback of completed and in-progress recordings, background audio play on mobile, and a calm, iOS/iPadOS-inspired dark interface.
 
@@ -19,6 +21,8 @@ Built as a **single unified APK** targeting both modern Android phones/tablets a
 | :--- | :--- |
 | [PLAN.md](./PLAN.md) | Master implementation plan: architecture, tech stack, module boundaries, phased milestones (M0–M6), and dead ends to avoid |
 | [docs/DESIGN.md](./docs/DESIGN.md) | Visual design system, Phone/Tablet & Android TV layouts, player HUD, gestures, and D-pad interaction rules |
+| [docs/muxgrid-prototype.html](./docs/muxgrid-prototype.html) | Self-contained interactive HTML prototype of **MuxGrid** (Android TV 10-ft & Phone portrait modes, animated player HUD, EPG, timeshift, PiP, and mini-player) — open directly in any browser |
+| [docs/assets/muxgrid-icon.svg](./docs/assets/muxgrid-icon.svg) | **MuxGrid** VectorDrawable-ready SVG app icon source (`512×512`) |
 | [docs/PROTOCOL.md](./docs/PROTOCOL.md) | Tvheadend HTSP wire format, RPC subset, HTTP streaming URLs, and the growing-recording loopback bridge contract |
 | [docs/SERVER_SETUP.md](./docs/SERVER_SETUP.md) | Recommended Tvheadend server configuration (profiles, least-privilege ACL user, single-tuner & timeshift notes, verification steps) |
 

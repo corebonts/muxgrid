@@ -1,5 +1,7 @@
 # Design & UX Specification
 
+> **Interactive Prototype & App Icon:** Open [muxgrid-prototype.html](./muxgrid-prototype.html) in a browser to preview the **MuxGrid** UI across both **Android TV (10-ft)** (with keyboard D-pad navigation) and **Phone (Portrait)** form factors, including live timeshift scrubbing, EPG recording scheduling, DVB subtitles, PiP, background audio mini-player, and single-tuner toast feedback. The VectorDrawable-ready app icon source lives at [assets/muxgrid-icon.svg](./assets/muxgrid-icon.svg).
+
 ## 1. Visual Philosophy — Calm, Modern, iOS/iPadOS-Inspired
 
 Think **Infuse**, **Channels**, and **Apple TV**: dark-first, content-forward, airy spacing, zero visual noise, and instant physical responsiveness.
