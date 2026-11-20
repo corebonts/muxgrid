@@ -59,7 +59,7 @@ Build **one codebase** (with ABI-split APKs: `armeabi-v7a` and `arm64-v8a`) cont
 | :--- | :--- | :--- |
 | **Language** | Kotlin `2.4.21` + Coroutines + `StateFlow` | Strict concurrency; zero RxJava. |
 | **Build** | AGP `9.5.2` + Gradle Kotlin DSL + Version Catalog (`libs.versions.toml`) | Multi-module builds, ABI splits (`armeabi-v7a`, `arm64-v8a`), Java 17 bytecode target. |
-| **SDK Targets** | `minSdk = 26` (or `28`), `compileSdk = 36`, `targetSdk = 36` | Covers Android TV 11 (API 30) & modern phones. Keeps implicit local-network access until explicitly opting into Android 17 (`targetSdk = 37` + `ACCESS_LOCAL_NETWORK`). |
+| **SDK Targets** | `minSdk = 28`, `compileSdk = 36`, `targetSdk = 36` | App ID `io.github.corebonts.muxgrid`. Covers Android TV 11 (API 30) through Android 17 (Poco F8 Ultra) while keeping implicit local-network access until opting into `targetSdk = 37`. |
 | **Mobile UI** | Jetpack Compose BOM `2026.11.01` (Compose `1.13.0`, Material 3 `1.5.0`) + Haze `2.1.0` | Haze (`dev.chrisbanes.haze:haze:2.1.0`) for non-video backdrop blur; translucent dark scrims over `SurfaceView` video (see Pitfall #10). |
 | **TV UI** | Compose for TV (`androidx.tv:tv-material:1.1.0`) | Never use legacy Leanback XML (`androidx.leanback`). |
 | **Navigation** | Type-safe Navigation Compose (`androidx.navigation:navigation-compose:2.10.2`) | Stable `@Serializable` routes. |
@@ -173,7 +173,7 @@ flowchart LR
 ### Milestone 3 — Live Timeshift & Growing (In-Progress) Recordings
 *Goal: Add full pause/rewind on Live TV and seamless watch-while-recording ("chase play").*
 - **Live Timeshift (`MpvPlaybackEngine`):**
-  - Target window: **configurable in Settings** with safe device defaults (e.g., **15 min ≈ 1 GB disk** on TV, **30 min ≈ 2 GB disk** on Phone; options `5m / 15m / 30m` or `Off`).
+  - Target window: **configurable in Settings** with safe device defaults (e.g., **5–10 min ≈ 400–700 MB disk** on TV given ~4.1 GB free `/data`, **30 min ≈ 2 GB disk** on Phone; options `5m / 10m / 15m / 30m` or `Off`).
   - Configure `cache=yes`, `demuxer-seekable-cache=yes`, `cache-on-disk=yes`, `demuxer-cache-dir=<appCacheDir>/mpv-cache`, and size **both** `demuxer-max-bytes` (governs how long playback can remain *paused* before mpv stalls Tvheadend) and `demuxer-max-back-bytes` (rewind depth).
   - Check available free disk space in `context.cacheDir` before allocating large disk cache; ensure immediate teardown on zap so mpv's append-only temp file is deleted right away.
   - Define buffer-full UX: when pause reaches the forward-buffer cap, display a clear notice and either auto-resume or cleanly jump to live on reconnect.
