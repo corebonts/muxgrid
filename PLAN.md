@@ -42,7 +42,7 @@ Use **HTSP (port `9982`)** for control, real-time state, authentication tickets,
     2. A `BroadcastReceiver` for `AudioManager.ACTION_AUDIO_BECOMING_NOISY` (pause on headphone/BT disconnect).
     3. `WifiManager.WifiLock` (`WIFI_MODE_FULL_LOW_LATENCY` / `WIFI_MODE_FULL_HIGH_PERF`) + `PowerManager.PARTIAL_WAKE_LOCK` during active background audio/radio playback so Wi-Fi power-save never stalls screen-off streams.
 - **Abstraction Boundary:**
-  Define a clean `PlaybackEngine` interface in `:core:player`. Neither UI modules nor repositories may import `libmpv` classes directly.
+  Define a clean `PlaybackEngine` interface and transport-agnostic `PlaybackState` (`positionMs`, `durationMs`, `liveEdgeOffsetMs`, `bufferWindowMs`, `isTimeshiftSeekable`) in `:core:player`. Neither UI modules nor repositories may import `libmpv` classes directly. Inside `:core:player`, isolate live stream URL resolution and timeshift seeking behind an internal `LiveStreamStrategy` interface (`HttpPassStrategy` in v1 using `LocalMediaProxy` + `libmpv` cache; no HTSP `subscribe` implementation or UI in v1, but a future `HtspSubscribeStrategy` can plug in later without redesigning the UI or data layers).
 
 ### 1.3 Single Unified APK (Phone/Tablet + Android TV)
 
@@ -177,7 +177,7 @@ flowchart LR
   - Configure `cache=yes`, `demuxer-seekable-cache=yes`, `cache-on-disk=yes`, `demuxer-cache-dir=<appCacheDir>/mpv-cache`, and size **both** `demuxer-max-bytes` (governs how long playback can remain *paused* before mpv stalls Tvheadend) and `demuxer-max-back-bytes` (rewind depth).
   - Check available free disk space in `context.cacheDir` before allocating large disk cache; ensure immediate teardown on zap so mpv's append-only temp file is deleted right away.
   - Define buffer-full UX: when pause reaches the forward-buffer cap, display a clear notice and either auto-resume or cleanly jump to live on reconnect.
-  - Expose `liveEdgeOffsetMs` and `bufferWindowMs` in `PlaybackState`; add **seekbar with buffered range** + **`-MM:SS · Back to Live`** pill in the player HUD.
+  - Expose transport-agnostic `liveEdgeOffsetMs`, `bufferWindowMs`, and `isTimeshiftSeekable` in `PlaybackState` via `LiveStreamStrategy` (implemented in v1 by `HttpPassStrategy` + `libmpv` cache); add **seekbar with buffered range** + **`-MM:SS · Back to Live`** pill in the player HUD.
 - **Growing Recordings (`LocalMediaProxy` Tail-Follow Mode):**
   - Automatically route `dvrEntry.state == "recording"` through the proxy's **HTSP VFS tail-follow handler** (`fileOpen("/dvrfile/<id>")`, `fileStat`, `fileRead`, `fileClose` on a dedicated/non-blocking HTSP read path so bulk reads never stall control RPCs).
   - Reply with **`Accept-Ranges: bytes`** and **`Content-Range: bytes X-Y/*`** (unknown total) or `Transfer-Encoding: chunked` without a frozen `Content-Length`.
