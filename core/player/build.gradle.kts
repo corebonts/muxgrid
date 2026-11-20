@@ -26,4 +26,12 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.mpv.android.lib)
     implementation(libs.androidx.media3.session)
+
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.platform.launcher)
+    testImplementation(libs.kotlinx.coroutines.test)
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
 }
