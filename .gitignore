@@ -1,0 +1,30 @@
+# Gradle & Android build outputs
+.gradle/
+build/
+**/build/
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# IDE / JetBrains / Android Studio
+.idea/
+*.iml
+.kotlin/
+.cxx/
+captures/
+.externalNativeBuild/
+
+# Keystores & secrets
+*.jks
+*.keystore
+keystore.properties
+google-services.json
+
+# OS / Misc
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
