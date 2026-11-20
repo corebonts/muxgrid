@@ -10,8 +10,10 @@ Think **Infuse**, **Channels**, and **Apple TV**: dark-first, content-forward, a
 - **Video and artwork are the hero:** No busy borders, heavy drop shadows, garish gradients, or cluttered status text.
 - **Dark-first surface hierarchy:**
   - Deep obsidian canvas (`#0A0B0F` on TV / `#0C0D12` on phone).
-  - Elevated cards (`#161822` at 100% opaque, or translucent frosted glass `#1C1F2B` @ 65–75% alpha with subtle `1dp` hairline stroke `white @ 10% alpha`).
-  - Leverage Jetpack Compose `1.13+` progressive blur / scrims on floating bars, player HUDs, and sheets (gracefully falling back to clean translucent dark scrims on older Android API levels or low-RAM TV hardware).
+  - Elevated cards (`#161822` at 100% opaque, or translucent glass `#1C1F2B` @ 65–75% alpha with subtle `1dp` hairline stroke `white @ 10% alpha`).
+  - **Surface Blur vs. Video Scrims (Platform Rule):**
+    - Over **non-video Compose content** (floating bottom nav pill, mini-player, bottom sheets, drawers over lists): use **Haze (`2.1.0`)** backdrop blur on capable phones/tablets, gracefully falling back to clean translucent dark scrims on low-RAM TV hardware. *(Note: Compose `1.13+` native `Modifier.blur(BlurRadiusSpec...)` is a self-layer blur only, not a backdrop blur.)*
+    - Over **live/recorded video (`SurfaceView`)**: Compose/Haze/`RenderEffect` cannot sample a `SurfaceView` plane (and switching to `TextureView` hurts 1080i50 smoothness on low-end TVs). Always use **crisp translucent dark gradient scrims + `1dp` hairline pill surfaces** (non-blurred) as the default for player HUDs and OSDs.
 - **Accent palette (restraint is key):**
   - Primary interactive accent: crisp cool blue or icy white-on-glass (`#3B82F6` / `#60A5FA` on mobile; crisp white focus pill `#F8FAFC` with subtle glow on TV).
   - Live / Recording status dot: warm Apple-style coral red (`#FF453A`).
@@ -59,7 +61,7 @@ Keep top-level navigation ruthlessly simple across both form factors:
 
 ### Mobile Fullscreen Player
 - Edge-to-edge video (`SYSTEM_UI_FLAG` / `WindowInsetsController` immersive bars).
-- **Tap** video: toggles translucent frosted-glass top & bottom HUD (auto-hides after 3.5s).
+- **Tap** video: toggles translucent dark scrim top & bottom HUD (auto-hides after 3.5s).
 - **Top bar:** Back button, Channel picon + Title + Current Show, **PiP** button, **Background Audio** button (or Radio mode toggle), **Tracks** button (Audio / DVB Subtitles / Aspect).
 - **Bottom bar:**
   - Smooth scrub bar showing buffered timeshift range (for Live) or growing/total duration (for Recordings).
@@ -99,12 +101,12 @@ Designed strictly for **10-foot viewing** and a standard TV remote (`D-pad`, `OK
 ### TV Fullscreen Player (Zero-Friction Remote Controls)
 - **Channel Zapping (`Ch+`/`Ch-` or `D-pad Up`/`Down` while HUD hidden):**
   - Immediately stops previous stream and tunes next/previous channel.
-  - Displays a sleek minimal **bottom-left frosted OSD pill** (Picon, Channel #, Channel Name, Now/Next + progress bar) that fades out after 3 seconds.
+  - Displays a sleek minimal **bottom-left translucent scrim OSD pill** (Picon, Channel #, Channel Name, Now/Next + progress bar) that fades out after 3 seconds.
 - **Smooth Seeking (`D-pad Left`/`Right` while HUD hidden):**
   - Opens a minimal bottom timeline bar and steps smoothly through the timeshift buffer or recording.
   - **Progressive step escalation:** single press = `±10s`, rapid presses / hold escalate smoothly (`10s → 30s → 1m → 5m`) with instant preview timestamp and commit on short settle — avoids Kodi's clunky seek behavior!
 - **Full Overlay (`OK`/`Select` while HUD hidden):**
-  - Opens translucent frosted-glass bottom HUD: Play/Pause, `Back to Live` pill (when timeshifted), Audio Track selector, DVB Subtitles toggle, and a horizontal **Quick Channel Strip** underneath so the user can browse and zap without leaving video.
+  - Opens translucent dark scrim bottom HUD: Play/Pause, `Back to Live` pill (when timeshifted), Audio Track selector, DVB Subtitles toggle, and a horizontal **Quick Channel Strip** underneath so the user can browse and zap without leaving video.
 - **Play/Pause remote key:** Toggles pause directly and reveals minimal timeline status.
 - **Back remote key:** Dismisses open overlay/drawer first; if no overlay is visible, stops playback cleanly and returns to the previous screen.
 - **Single-Tuner Notice:** If tuning fails because an active recording holds the sole DVB-T tuner on another mux, show a crisp, auto-dismissing top-right glass toast naming the active recording rather than an infinite loading spinner.
