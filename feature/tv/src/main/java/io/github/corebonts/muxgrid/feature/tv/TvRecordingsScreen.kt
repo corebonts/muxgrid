@@ -230,14 +230,24 @@ internal fun TvRecordingsScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     when (entry.state) {
                         DvrState.RECORDING -> {
+                            Button(
+                                onClick = {
+                                    selectedEntry = null
+                                    val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
+                                    onPlayRecording(entry, ch, startSec)
+                                },
+                                modifier = Modifier.focusRequester(primaryFocusRequester),
+                                colors = tvPrimaryButtonColors(),
+                            ) {
+                                Text(if (entry.hasResumePosition) "Resume" else "Watch from Start")
+                            }
                             if (ch != null) {
                                 Button(
                                     onClick = {
                                         selectedEntry = null
                                         onWatchLiveChannel(ch)
                                     },
-                                    modifier = Modifier.focusRequester(primaryFocusRequester),
-                                    colors = tvPrimaryButtonColors(),
+                                    colors = tvSecondaryButtonColors(),
                                 ) {
                                     Text("Watch Live")
                                 }
@@ -254,7 +264,6 @@ internal fun TvRecordingsScreen(
                                         actionBusy = false
                                     }
                                 },
-                                modifier = if (ch == null) Modifier.focusRequester(primaryFocusRequester) else Modifier,
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Text("Stop & Save")

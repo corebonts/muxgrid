@@ -1,19 +1,19 @@
 package io.github.corebonts.muxgrid.core.player
 
+import io.github.corebonts.muxgrid.core.model.GrowingDvrFile
 import io.github.corebonts.muxgrid.core.model.StreamTicket
 import kotlinx.coroutines.runBlocking
 import java.io.BufferedInputStream
-import java.io.BufferedReader
 import java.io.ByteArrayOutputStream
 import java.io.EOFException
 import java.io.IOException
 import java.io.InputStream
-import java.io.InputStreamReader
 import java.io.OutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.UUID
@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicReference
  * Responsibilities:
  * - Obtains and caches HTSP `getTicket` tokens, refreshing before expiry and retrying once on 401.
  * - Serves live `/live/<channelId>` (`?profile=pass`) and completed DVR `/dvr/<dvrId>` with `Range` forwarding.
+ * - Serves in-progress (growing) DVR `/growing/<dvrId>` via HTSP VFS tail-follow (`fileOpen`/`fileStat`/`fileRead`/`fileClose`).
  * - Enforces single-tuner safety by tearing down any active live upstream socket before opening the next.
  * - Uses direct HTTP/1.1 sockets (never JDK HttpURLConnection auto-retry) so Tvheadend's ~2s 0-byte
  *   empty reply on tuner conflict is detected immediately on the first EOF.
@@ -39,8 +40,13 @@ class LocalMediaProxy(
     private val dvrTicketProvider: suspend (dvrId: Long) -> StreamTicket = {
         throw UnsupportedOperationException("DVR ticket provider is not configured")
     },
+    private val growingFileOpener: suspend (dvrId: Long) -> GrowingDvrFile = {
+        throw UnsupportedOperationException("Growing DVR file opener is not configured")
+    },
+    private val isDvrRecordingProvider: (dvrId: Long) -> Boolean = { false },
     private val onLiveOpenFailed: (channelId: Long, reason: String, isEmptyReply: Boolean) -> Unit = { _, _, _ -> },
     private val ticketTtlMs: Long = DEFAULT_TICKET_TTL_MS,
+    private val growingPollIntervalMs: Long = DEFAULT_GROWING_POLL_INTERVAL_MS,
     private val nowMsProvider: () -> Long = { System.currentTimeMillis() },
 ) {
     private data class TicketCacheKey(
@@ -102,6 +108,9 @@ class LocalMediaProxy(
     fun dvrStreamUrl(dvrId: Long): String =
         "http://127.0.0.1:$port/$sessionToken/dvr/$dvrId"
 
+    fun growingDvrStreamUrl(dvrId: Long): String =
+        "http://127.0.0.1:$port/$sessionToken/growing/$dvrId"
+
     fun stopActiveStream() {
         activeLiveUpstream.getAndSet(null)?.close()
         val dvrHandles = activeDvrUpstreams.toList()
@@ -132,11 +141,11 @@ class LocalMediaProxy(
         var dvrHandle: ActiveStreamHandle? = null
         try {
             clientSocket.soTimeout = 15_000
-            val reader = BufferedReader(InputStreamReader(clientSocket.getInputStream(), StandardCharsets.US_ASCII))
-            val requestLine = reader.readLine() ?: return
+            val clientIn = clientSocket.getInputStream()
+            val requestLine = readHeaderLine(clientIn) ?: return
             var rangeHeader: String? = null
             while (true) {
-                val line = reader.readLine() ?: break
+                val line = readHeaderLine(clientIn) ?: break
                 if (line.isEmpty()) break
                 if (line.startsWith("Range:", ignoreCase = true)) {
                     rangeHeader = line.substringAfter(':').trim()
@@ -178,6 +187,13 @@ class LocalMediaProxy(
                     dvrHandle = handle
                     activeDvrUpstreams.add(handle)
                     relayDvrStream(method, id, rangeHeader, handle, clientSocket.getOutputStream())
+                }
+                "growing" -> {
+                    activeLiveUpstream.getAndSet(null)?.close()
+                    val handle = ActiveStreamHandle(clientSocket = clientSocket)
+                    dvrHandle = handle
+                    activeDvrUpstreams.add(handle)
+                    relayGrowingDvrStream(method, id, rangeHeader, clientSocket, handle, clientSocket.getOutputStream())
                 }
                 else -> writeHttpError(clientSocket.getOutputStream(), 404, "Not Found")
             }
@@ -386,6 +402,196 @@ class LocalMediaProxy(
         }
     }
 
+    private sealed interface ByteRangeSpec {
+        data class FromTo(val start: Long, val endInclusive: Long?) : ByteRangeSpec
+        data class Suffix(val suffixLength: Long) : ByteRangeSpec
+    }
+
+    private fun parseByteRange(rangeHeader: String?): ByteRangeSpec? {
+        val raw = rangeHeader?.trim() ?: return null
+        if (!raw.startsWith("bytes=", ignoreCase = true)) return null
+        val spec = raw.substring(6).substringBefore(',').trim()
+        val dash = spec.indexOf('-')
+        if (dash < 0) return null
+        val startPart = spec.substring(0, dash).trim()
+        val endPart = spec.substring(dash + 1).trim()
+        return if (startPart.isEmpty()) {
+            val suffix = endPart.toLongOrNull()?.takeIf { it > 0L } ?: return null
+            ByteRangeSpec.Suffix(suffix)
+        } else {
+            val start = startPart.toLongOrNull()?.takeIf { it >= 0L } ?: return null
+            val end = if (endPart.isEmpty()) null else endPart.toLongOrNull()?.takeIf { it >= start } ?: return null
+            ByteRangeSpec.FromTo(start, end)
+        }
+    }
+
+    private fun relayGrowingDvrStream(
+        method: String,
+        dvrId: Long,
+        rangeHeader: String?,
+        clientSocket: Socket,
+        handle: ActiveStreamHandle,
+        clientOut: OutputStream,
+    ) {
+        val file = try {
+            runBlocking { growingFileOpener(dvrId) }
+        } catch (e: Exception) {
+            if (!handle.cancelled.get()) {
+                writeHttpError(clientOut, 502, e.message ?: "Failed to open growing DVR file")
+            }
+            return
+        }
+
+        try {
+            var currentSize = file.initialSize.coerceAtLeast(0L)
+            val rangeSpec = parseByteRange(rangeHeader)
+            var hasRange = false
+            var startOffset = 0L
+            var requestedEnd: Long? = null
+            if (rangeSpec != null) {
+                hasRange = true
+                when (rangeSpec) {
+                    is ByteRangeSpec.FromTo -> {
+                        startOffset = rangeSpec.start
+                        requestedEnd = rangeSpec.endInclusive
+                    }
+                    is ByteRangeSpec.Suffix -> {
+                        startOffset = (currentSize - rangeSpec.suffixLength).coerceAtLeast(0L)
+                    }
+                }
+            }
+
+            if (method == "HEAD") {
+                if (hasRange && startOffset >= currentSize && !isDvrRecordingProvider(dvrId)) {
+                    val headers = "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */$currentSize\r\nConnection: close\r\n\r\n"
+                    clientOut.write(headers.toByteArray(StandardCharsets.US_ASCII))
+                    clientOut.flush()
+                    return
+                }
+                val headers = buildString {
+                    if (hasRange) {
+                        val headerEnd = requestedEnd ?: (currentSize - 1L).coerceAtLeast(startOffset)
+                        append("HTTP/1.1 206 Partial Content\r\n")
+                        append("Content-Range: bytes $startOffset-$headerEnd/*\r\n")
+                    } else {
+                        append("HTTP/1.1 200 OK\r\n")
+                    }
+                    append("Content-Type: video/x-matroska\r\n")
+                    append("Accept-Ranges: bytes\r\n")
+                    append("Connection: close\r\n\r\n")
+                }
+                clientOut.write(headers.toByteArray(StandardCharsets.US_ASCII))
+                clientOut.flush()
+                return
+            }
+
+            if (hasRange && startOffset >= currentSize) {
+                while (!handle.cancelled.get()) {
+                    val stillRecording = isDvrRecordingProvider(dvrId)
+                    currentSize = runBlocking { file.statSize() }.coerceAtLeast(0L)
+                    if (currentSize > startOffset) break
+                    if (!stillRecording) {
+                        val headers = "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */$currentSize\r\nConnection: close\r\n\r\n"
+                        clientOut.write(headers.toByteArray(StandardCharsets.US_ASCII))
+                        clientOut.flush()
+                        return
+                    }
+                    if (!waitForPollOrDisconnect(clientSocket, growingPollIntervalMs, handle)) {
+                        return
+                    }
+                }
+            }
+
+            if (handle.cancelled.get()) return
+
+            val respHeaders = buildString {
+                if (hasRange) {
+                    val headerEnd = if (requestedEnd != null) {
+                        minOf(requestedEnd, (currentSize - 1L).coerceAtLeast(startOffset))
+                    } else {
+                        (currentSize - 1L).coerceAtLeast(startOffset)
+                    }
+                    append("HTTP/1.1 206 Partial Content\r\n")
+                    append("Content-Range: bytes $startOffset-$headerEnd/*\r\n")
+                } else {
+                    append("HTTP/1.1 200 OK\r\n")
+                }
+                append("Content-Type: video/x-matroska\r\n")
+                append("Accept-Ranges: bytes\r\n")
+                append("Transfer-Encoding: chunked\r\n")
+                append("Connection: close\r\n\r\n")
+            }
+            clientOut.write(respHeaders.toByteArray(StandardCharsets.US_ASCII))
+            clientOut.flush()
+
+            var offset = startOffset
+            while (!handle.cancelled.get()) {
+                if (requestedEnd != null && offset > requestedEnd) break
+                val remaining = if (requestedEnd != null) (requestedEnd - offset + 1L) else Long.MAX_VALUE
+                val toRead = minOf(GROWING_READ_CHUNK_BYTES.toLong(), remaining).toInt()
+                val chunk = runBlocking { file.read(offset, toRead) }
+                if (chunk.isNotEmpty()) {
+                    writeHttpChunk(clientOut, chunk)
+                    offset += chunk.size
+                    continue
+                }
+
+                val stillRecording = isDvrRecordingProvider(dvrId)
+                val latestSize = runBlocking { file.statSize() }.coerceAtLeast(0L)
+                if (latestSize > offset) {
+                    continue
+                }
+                if (!stillRecording) {
+                    break
+                }
+                if (!waitForPollOrDisconnect(clientSocket, growingPollIntervalMs, handle)) {
+                    return
+                }
+            }
+
+            if (!handle.cancelled.get()) {
+                clientOut.write(FINAL_CHUNK_BYTES)
+                clientOut.flush()
+            }
+        } catch (_: IOException) {
+            // Client disconnected or VFS read aborted
+        } finally {
+            runCatching { file.close() }
+        }
+    }
+
+    private fun waitForPollOrDisconnect(
+        clientSocket: Socket,
+        pollMs: Long,
+        handle: ActiveStreamHandle,
+    ): Boolean {
+        if (handle.cancelled.get() || clientSocket.isClosed) return false
+        val prevTimeout = runCatching { clientSocket.soTimeout }.getOrDefault(15_000)
+        return try {
+            clientSocket.soTimeout = pollMs.toInt().coerceAtLeast(10)
+            clientSocket.getInputStream().read()
+            false
+        } catch (_: SocketTimeoutException) {
+            !handle.cancelled.get() && !clientSocket.isClosed
+        } catch (_: IOException) {
+            false
+        } finally {
+            runCatching {
+                if (!clientSocket.isClosed) {
+                    clientSocket.soTimeout = prevTimeout
+                }
+            }
+        }
+    }
+
+    private fun writeHttpChunk(out: OutputStream, bytes: ByteArray) {
+        val header = "${bytes.size.toString(16)}\r\n".toByteArray(StandardCharsets.US_ASCII)
+        out.write(header)
+        out.write(bytes)
+        out.write(CRLF_BYTES)
+        out.flush()
+    }
+
     private fun openUpstream(
         endpoint: UpstreamEndpoint,
         httpMethod: String,
@@ -549,5 +755,9 @@ class LocalMediaProxy(
 
     companion object {
         const val DEFAULT_TICKET_TTL_MS: Long = 240_000L
+        const val DEFAULT_GROWING_POLL_INTERVAL_MS: Long = 500L
+        private const val GROWING_READ_CHUNK_BYTES: Int = 65_536
+        private val CRLF_BYTES = "\r\n".toByteArray(StandardCharsets.US_ASCII)
+        private val FINAL_CHUNK_BYTES = "0\r\n\r\n".toByteArray(StandardCharsets.US_ASCII)
     }
 }

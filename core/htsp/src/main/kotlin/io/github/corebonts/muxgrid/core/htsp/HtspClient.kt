@@ -27,7 +27,6 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.min
 
@@ -46,7 +45,7 @@ class HtspClient(
     private var connectionJob: Job? = null
 
     @Volatile
-    private var activeSession: Session? = null
+    private var activeSession: HtspSession? = null
 
     @Volatile
     var suppressTransientErrors: Boolean = false
@@ -164,6 +163,20 @@ class HtspClient(
         val id = reply.getLong("id") ?: throw HtspException("Missing handle id in fileOpen reply")
         return HtspFileInfo(
             handleId = id,
+            size = reply.getLong("size") ?: 0L,
+            mtime = reply.getLong("mtime") ?: 0L,
+        )
+    }
+
+    suspend fun fileStat(handleId: Long): HtspFileInfo {
+        val reply = rpc(
+            "fileStat",
+            htsMap {
+                put("id", handleId)
+            },
+        )
+        return HtspFileInfo(
+            handleId = handleId,
             size = reply.getLong("size") ?: 0L,
             mtime = reply.getLong("mtime") ?: 0L,
         )
@@ -294,7 +307,7 @@ class HtspClient(
         socket.keepAlive = true
         socket.connect(InetSocketAddress(profile.host, profile.htspPort), CONNECT_TIMEOUT_MS)
 
-        val session = Session(socket)
+        val session = HtspSession(socket, seqGenerator)
         activeSession = session
 
         val initialSyncDeferred = CompletableDeferred<Unit>()
@@ -326,37 +339,10 @@ class HtspClient(
         }
 
         try {
-            val helloReply = session.rpc(
-                "hello",
-                htsMap {
-                    put("htspversion", CLIENT_HTSP_VERSION)
-                    put("clientname", CLIENT_NAME)
-                    put("clientversion", CLIENT_VERSION)
-                },
-                RPC_TIMEOUT_MS,
-            )
-            val serverHtspVersion = helloReply.getInt("htspversion") ?: CLIENT_HTSP_VERSION
-            negotiatedVersion = min(CLIENT_HTSP_VERSION, serverHtspVersion)
-            serverName = helloReply.getString("servername") ?: "Tvheadend"
-            serverVersion = helloReply.getString("serverversion") ?: ""
-            val challenge = helloReply.getBytes("challenge")
-
-            if (profile.username.isNotBlank() || profile.password.isNotBlank()) {
-                val authParams = htsMap {
-                    put("username", profile.username)
-                    if (challenge != null) {
-                        put("digest", computeSha1Digest(profile.password, challenge))
-                    }
-                }
-                val authReply = try {
-                    session.rpc("authenticate", authParams, RPC_TIMEOUT_MS)
-                } catch (e: HtspNoAccessException) {
-                    throw HtspAuthException("Invalid username or password")
-                }
-                if ((authReply.getLong("noaccess") ?: 0L) != 0L) {
-                    throw HtspAuthException("Invalid username or password")
-                }
-            }
+            val authResult = HtspSession.handshakeAndAuthenticate(session, profile, RPC_TIMEOUT_MS)
+            negotiatedVersion = authResult.negotiatedVersion
+            serverName = authResult.serverName
+            serverVersion = authResult.serverVersion
 
             _connectionState.value = ConnectionState.Syncing(
                 serverName = serverName,
@@ -421,121 +407,12 @@ class HtspClient(
         }
     }
 
-    private suspend fun fetchClockOffsetOrZero(session: Session): Long = try {
+    private suspend fun fetchClockOffsetOrZero(session: HtspSession): Long = try {
         val sysTime = session.rpc("getSysTime", htsMap {}, RPC_TIMEOUT_MS)
         val serverSec = sysTime.getLong("time") ?: return 0L
         (serverSec * 1000L) - System.currentTimeMillis()
     } catch (_: Exception) {
         0L
-    }
-
-    private inner class Session(
-        private val socket: Socket,
-    ) {
-        private val input = BufferedInputStream(socket.getInputStream(), 65536)
-        private val output = BufferedOutputStream(socket.getOutputStream(), 16384)
-        private val writeQueue = Channel<ByteArray>(Channel.UNLIMITED)
-        private val pending = ConcurrentHashMap<Long, CompletableDeferred<HtsMap>>()
-
-        @Volatile
-        private var closed = false
-
-        suspend fun rpc(method: String, params: HtsMap, timeoutMs: Long): HtsMap {
-            if (closed) throw HtspException("HTSP session closed")
-            val seq = seqGenerator.getAndIncrement()
-            val deferred = CompletableDeferred<HtsMap>()
-            pending[seq] = deferred
-
-            val request = htsMap {
-                put("method", method)
-                put("seq", seq)
-                for ((k, v) in params) {
-                    when (v) {
-                        is HtsValue.S64 -> put(k, v.value)
-                        is HtsValue.Str -> put(k, v.value)
-                        is HtsValue.Bin -> put(k, v.value)
-                        is HtsValue.Bool -> put(k, v.value)
-                        is HtsValue.MapVal -> put(k, v.value)
-                        is HtsValue.ListVal -> put(k, v.items)
-                        is HtsValue.Uuid -> putUuid(k, v.bytes)
-                    }
-                }
-            }
-            val frame = HtsMsgCodec.encodeFrame(request)
-            if (writeQueue.trySend(frame).isFailure) {
-                pending.remove(seq)
-                throw HtspException("Failed to enqueue HTSP RPC '$method'")
-            }
-
-            return try {
-                val reply = withTimeout(timeoutMs) { deferred.await() }
-                if ((reply.getLong("noaccess") ?: 0L) != 0L) {
-                    throw HtspNoAccessException("Access denied for HTSP method '$method'")
-                }
-                val error = reply.getString("error")
-                if (!error.isNullOrBlank()) {
-                    throw HtspException("HTSP error for '$method': $error")
-                }
-                reply
-            } finally {
-                pending.remove(seq)
-            }
-        }
-
-        suspend fun writeLoop() {
-            try {
-                for (frame in writeQueue) {
-                    output.write(frame)
-                    // Drain any immediately queued frames before flushing
-                    while (true) {
-                        val next = writeQueue.tryReceive().getOrNull() ?: break
-                        output.write(next)
-                    }
-                    output.flush()
-                }
-            } catch (_: Exception) {
-                close()
-            }
-        }
-
-        fun readLoop(onPush: (String, HtsMap) -> Unit) {
-            try {
-                while (!closed && !socket.isClosed) {
-                    val msg = HtsMsgCodec.readFrame(input)
-                    val seq = msg.getLong("seq")
-                    if (seq != null) {
-                        pending.remove(seq)?.complete(msg)
-                    } else {
-                        val method = msg.getString("method")
-                        if (!method.isNullOrEmpty()) {
-                            onPush(method, msg)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                failAllPending(e)
-                throw e
-            }
-        }
-
-        private fun failAllPending(cause: Throwable) {
-            val entries = pending.entries.toList()
-            for ((seq, deferred) in entries) {
-                pending.remove(seq)
-                deferred.completeExceptionally(cause)
-            }
-        }
-
-        fun close() {
-            if (closed) return
-            closed = true
-            writeQueue.close()
-            failAllPending(HtspException("HTSP session closed"))
-            try {
-                socket.close()
-            } catch (_: IOException) {
-            }
-        }
     }
 
     companion object {

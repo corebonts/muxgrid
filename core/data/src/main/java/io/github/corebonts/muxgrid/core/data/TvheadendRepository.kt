@@ -4,17 +4,21 @@ import android.content.Context
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.htsp.HtspClient
 import io.github.corebonts.muxgrid.core.htsp.HtspNoAccessException
+import io.github.corebonts.muxgrid.core.htsp.HtspVfsClient
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ChannelTag
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.ConnectionTestResult
 import io.github.corebonts.muxgrid.core.model.DvrEntry
+import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.EpgEvent
 import io.github.corebonts.muxgrid.core.model.FormFactor
+import io.github.corebonts.muxgrid.core.model.GrowingDvrFile
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import io.github.corebonts.muxgrid.core.model.StreamTicket
+import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -35,6 +39,7 @@ class TvheadendRepository(
 ) {
     private val settings = SettingsRepository(context.applicationContext, formFactor)
     private val htspClient = HtspClient(scope = scope)
+    private val vfsClient = HtspVfsClient(profileProvider = { serverProfile.value ?: ServerProfile(host = "") })
     private var backgroundDisconnectJob: Job? = null
     private val store = TvheadendStore(
         epochSecondsProvider = {
@@ -78,6 +83,9 @@ class TvheadendRepository(
     val hwDecPreset: StateFlow<HwDecPreset> = settings.hwDecPreset
         .stateIn(scope, SharingStarted.Eagerly, HwDecPreset.defaultFor(formFactor))
 
+    val timeshiftWindow: StateFlow<TimeshiftWindow> = settings.timeshiftWindow
+        .stateIn(scope, SharingStarted.Eagerly, TimeshiftWindow.defaultFor(formFactor))
+
     val imageLoader: ImageLoader = PiconFetcher.createImageLoader(
         context = context.applicationContext,
         htspClient = htspClient,
@@ -94,6 +102,7 @@ class TvheadendRepository(
             settings.serverProfile
                 .distinctUntilChanged()
                 .collect { profile ->
+                    vfsClient.disconnect()
                     if (profile.isConfigured) {
                         htspClient.connect(profile)
                     } else {
@@ -146,6 +155,7 @@ class TvheadendRepository(
             if (!keepAliveInBackground) {
                 backgroundDisconnectJob = scope.launch {
                     delay(3_000L)
+                    vfsClient.disconnect()
                     htspClient.disconnect()
                 }
             }
@@ -158,6 +168,24 @@ class TvheadendRepository(
 
     suspend fun setHwDecPreset(preset: HwDecPreset) {
         settings.setHwDecPreset(preset)
+    }
+
+    suspend fun setTimeshiftWindow(window: TimeshiftWindow) {
+        settings.setTimeshiftWindow(window)
+    }
+
+    suspend fun openGrowingDvrFile(dvrId: Long): GrowingDvrFile =
+        vfsClient.openFile("dvrfile/$dvrId")
+
+    fun isDvrRecording(dvrId: Long): Boolean =
+        dvrEntries.value[dvrId]?.state == DvrState.RECORDING
+
+    fun getDvrEntry(dvrId: Long): DvrEntry? =
+        dvrEntries.value[dvrId] ?: store.getDvrEntry(dvrId)
+
+    fun currentServerEpochSec(): Long {
+        val offsetMs = (connectionState.value as? ConnectionState.Connected)?.serverClockOffsetMs ?: 0L
+        return (System.currentTimeMillis() + offsetMs) / 1000L
     }
 
     suspend fun getLiveTicket(channelId: Long): StreamTicket =
@@ -212,9 +240,12 @@ class TvheadendRepository(
         markCompleted: Boolean = false,
     ) {
         val entry = dvrEntries.value[dvrId] ?: store.getDvrEntry(dvrId)
+        val isStillRecording = entry?.state == DvrState.RECORDING
         val effectiveDur = if (durationSec > 0L) durationSec else (entry?.durationSec ?: 0L)
-        val watchedNow = markCompleted ||
-            (effectiveDur > 0L && positionSec.toFloat() / effectiveDur.toFloat() >= WATCHED_THRESHOLD_FRACTION)
+        val watchedNow = !isStillRecording && (
+            markCompleted ||
+                (effectiveDur > 0L && positionSec.toFloat() / effectiveDur.toFloat() >= WATCHED_THRESHOLD_FRACTION)
+            )
 
         val targetPos = if (watchedNow) 0L else positionSec.coerceAtLeast(0L)
         val existingCount = entry?.playCount ?: 0

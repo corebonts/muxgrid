@@ -153,7 +153,7 @@ flowchart LR
 
 ---
 
-### Milestone 2 — EPG Guide, DVR Management & Completed Recordings
+### Milestone 2 — EPG Guide, DVR Management & Completed Recordings (Completed)
 *Goal: Turn the Live TV MVP into a complete TV + DVR viewer with cross-device resume sync.*
 - **`:core:htsp` & `:core:data`:**
   - Expand `enableAsyncMetadata` window (`epgMaxTime = now + 7 days`) with fast channel-indexed EPG queries and search.
@@ -170,10 +170,10 @@ flowchart LR
 
 ---
 
-### Milestone 3 — Live Timeshift & Growing (In-Progress) Recordings
+### Milestone 3 — Live Timeshift & Growing (In-Progress) Recordings (Implemented; Pending Hardware Verification)
 *Goal: Add full pause/rewind on Live TV and seamless watch-while-recording ("chase play").*
 - **Live Timeshift (`MpvPlaybackEngine`):**
-  - Target window: **configurable in Settings** with safe device defaults (e.g., **5–10 min ≈ 400–700 MB disk** on TV given ~4.1 GB free `/data`, **30 min ≈ 2 GB disk** on Phone; options `5m / 10m / 15m / 30m` or `Off`).
+  - Target cache size: **configurable size cap in Settings** with safe device defaults (**`1 GB` max disk** split 50/50 pause/rewind on TV given 5.0 GB free `/data`, **`2 GB` max disk** on Phone; options `Off / 512 MB / 1 GB / 2 GB / 4 GB`, with measured MindigTV hints e.g. `~35 min SD or ~15 min HD` for `1 GB`).
   - Configure `cache=yes`, `demuxer-seekable-cache=yes`, `cache-on-disk=yes`, `demuxer-cache-dir=<appCacheDir>/mpv-cache`, and size **both** `demuxer-max-bytes` (governs how long playback can remain *paused* before mpv stalls Tvheadend) and `demuxer-max-back-bytes` (rewind depth).
   - Check available free disk space in `context.cacheDir` before allocating large disk cache; ensure immediate teardown on zap so mpv's append-only temp file is deleted right away.
   - Define buffer-full UX: when pause reaches the forward-buffer cap, display a clear notice and either auto-resume or cleanly jump to live on reconnect.

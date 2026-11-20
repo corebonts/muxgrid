@@ -1,10 +1,14 @@
 package io.github.corebonts.muxgrid.core.player
 
+import io.github.corebonts.muxgrid.core.model.GrowingDvrFile
 import io.github.corebonts.muxgrid.core.model.StreamTicket
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.InetAddress
@@ -16,6 +20,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 class LocalMediaProxyTest {
 
@@ -211,6 +216,201 @@ class LocalMediaProxyTest {
                 proxy.close()
                 thread.join(2_000)
             }
+        }
+    }
+
+    @Test
+    fun `growing DVR reads at write head transitions recording to completed and calls fileClose`() {
+        val data = AtomicReference("0123456789".toByteArray(StandardCharsets.US_ASCII))
+        val isRecording = AtomicBoolean(true)
+        val closeCount = AtomicInteger(0)
+        val closeLatch = CountDownLatch(1)
+
+        val proxy = LocalMediaProxy(
+            serverBaseUrlProvider = { null },
+            ticketProvider = { StreamTicket("", "") },
+            growingFileOpener = {
+                object : GrowingDvrFile {
+                    override val initialSize: Long get() = data.get().size.toLong()
+                    override suspend fun statSize(): Long = data.get().size.toLong()
+                    override suspend fun read(offset: Long, size: Int): ByteArray {
+                        val buf = data.get()
+                        val off = offset.toInt()
+                        if (off >= buf.size) return ByteArray(0)
+                        return buf.copyOfRange(off, minOf(buf.size, off + size))
+                    }
+                    override fun close() {
+                        closeCount.incrementAndGet()
+                        closeLatch.countDown()
+                    }
+                }
+            },
+            isDvrRecordingProvider = { isRecording.get() },
+            growingPollIntervalMs = 30L,
+        )
+
+        val appender = Thread {
+            Thread.sleep(80L)
+            data.set("0123456789ABCDEF".toByteArray(StandardCharsets.US_ASCII))
+            Thread.sleep(80L)
+            data.set("0123456789ABCDEF_TAIL".toByteArray(StandardCharsets.US_ASCII))
+            isRecording.set(false)
+        }.apply { start() }
+
+        try {
+            val conn = URL(proxy.growingDvrStreamUrl(101L)).openConnection() as HttpURLConnection
+            assertEquals(200, conn.responseCode)
+            assertEquals("bytes", conn.getHeaderField("Accept-Ranges"))
+            assertNull(conn.getHeaderField("Content-Length"))
+
+            val body = conn.inputStream.readBytes().toString(StandardCharsets.US_ASCII)
+            assertEquals("0123456789ABCDEF_TAIL", body)
+            assertTrue(closeLatch.await(3, TimeUnit.SECONDS))
+            assertEquals(1, closeCount.get())
+        } finally {
+            appender.join(2_000)
+            proxy.close()
+        }
+    }
+
+    @Test
+    fun `growing DVR range past current size waits without 416 while recording and returns 416 once completed`() {
+        val data = AtomicReference("0123456789".toByteArray(StandardCharsets.US_ASCII))
+        val isRecording = AtomicBoolean(true)
+        val closeCount = AtomicInteger(0)
+
+        val proxy = LocalMediaProxy(
+            serverBaseUrlProvider = { null },
+            ticketProvider = { StreamTicket("", "") },
+            growingFileOpener = {
+                object : GrowingDvrFile {
+                    override val initialSize: Long get() = data.get().size.toLong()
+                    override suspend fun statSize(): Long = data.get().size.toLong()
+                    override suspend fun read(offset: Long, size: Int): ByteArray {
+                        val buf = data.get()
+                        val off = offset.toInt()
+                        if (off >= buf.size) return ByteArray(0)
+                        return buf.copyOfRange(off, minOf(buf.size, off + size))
+                    }
+                    override fun close() {
+                        closeCount.incrementAndGet()
+                    }
+                }
+            },
+            isDvrRecordingProvider = { isRecording.get() },
+            growingPollIntervalMs = 30L,
+        )
+
+        val appender = Thread {
+            Thread.sleep(90L)
+            data.set("012345678901234abcdefghij".toByteArray(StandardCharsets.US_ASCII))
+            Thread.sleep(80L)
+            isRecording.set(false)
+        }.apply { start() }
+
+        try {
+            // Range starts at byte 15 while size is 10 -> must NOT return 416; waits and serves 206 with /*
+            val conn = URL(proxy.growingDvrStreamUrl(202L)).openConnection() as HttpURLConnection
+            conn.setRequestProperty("Range", "bytes=15-")
+            assertEquals(206, conn.responseCode)
+            assertEquals("bytes", conn.getHeaderField("Accept-Ranges"))
+            val contentRange = conn.getHeaderField("Content-Range") ?: ""
+            assertTrue(contentRange.startsWith("bytes 15-") && contentRange.endsWith("/*"), "Unexpected Content-Range: $contentRange")
+            assertNull(conn.getHeaderField("Content-Length"))
+            assertEquals("abcdefghij", conn.inputStream.readBytes().toString(StandardCharsets.US_ASCII))
+            appender.join(2_000)
+
+            // Once recording completed, out-of-bounds range returns 416
+            val completedConn = URL(proxy.growingDvrStreamUrl(202L)).openConnection() as HttpURLConnection
+            completedConn.setRequestProperty("Range", "bytes=100-")
+            assertEquals(416, completedConn.responseCode)
+            assertEquals("bytes */25", completedConn.getHeaderField("Content-Range"))
+            assertTrue(closeCount.get() >= 2)
+        } finally {
+            appender.join(2_000)
+            proxy.close()
+        }
+    }
+
+    @Test
+    fun `growing DVR mid-read client disconnect immediately invokes fileClose`() {
+        val data = "0123456789".toByteArray(StandardCharsets.US_ASCII)
+        val closeLatch = CountDownLatch(1)
+
+        val proxy = LocalMediaProxy(
+            serverBaseUrlProvider = { null },
+            ticketProvider = { StreamTicket("", "") },
+            growingFileOpener = {
+                object : GrowingDvrFile {
+                    override val initialSize: Long = data.size.toLong()
+                    override suspend fun statSize(): Long = data.size.toLong()
+                    override suspend fun read(offset: Long, size: Int): ByteArray {
+                        val off = offset.toInt()
+                        if (off >= data.size) return ByteArray(0)
+                        return data.copyOfRange(off, minOf(data.size, off + size))
+                    }
+                    override fun close() {
+                        closeLatch.countDown()
+                    }
+                }
+            },
+            isDvrRecordingProvider = { true },
+            growingPollIntervalMs = 200L,
+        )
+
+        try {
+            val conn = URL(proxy.growingDvrStreamUrl(303L)).openConnection() as HttpURLConnection
+            assertEquals(200, conn.responseCode)
+            val input = conn.inputStream
+            val collected = ByteArrayOutputStream()
+            val buf = ByteArray(10)
+            while (collected.size() < 10) {
+                val n = input.read(buf, 0, 10 - collected.size())
+                if (n < 0) break
+                collected.write(buf, 0, n)
+            }
+            assertEquals("0123456789", collected.toString(StandardCharsets.US_ASCII.name()))
+
+            // Disconnect mid-stream while proxy is polling at the write head
+            input.close()
+            conn.disconnect()
+            assertTrue(closeLatch.await(2, TimeUnit.SECONDS))
+        } finally {
+            proxy.close()
+        }
+    }
+
+    @Test
+    fun `HttpPassStrategy computes transport-agnostic live timeshift metrics`() {
+        val proxy = LocalMediaProxy(
+            serverBaseUrlProvider = { null },
+            ticketProvider = { StreamTicket("", "") },
+        )
+        try {
+            val strategy = HttpPassStrategy(proxy)
+            val live = strategy.computeTimeshiftMetrics(
+                positionMs = 120_000L,
+                seekable = true,
+                cacheStartMs = 10_000L,
+                cacheEndMs = 150_000L,
+                timeshiftEnabled = true,
+            )
+            assertTrue(live.isTimeshiftSeekable)
+            assertEquals(10_000L, live.bufferStartMs)
+            assertEquals(150_000L, live.bufferEndMs)
+            assertEquals(140_000L, live.bufferWindowMs)
+            assertEquals(30_000L, live.liveEdgeOffsetMs)
+
+            val disabled = strategy.computeTimeshiftMetrics(
+                positionMs = 120_000L,
+                seekable = true,
+                cacheStartMs = 10_000L,
+                cacheEndMs = 150_000L,
+                timeshiftEnabled = false,
+            )
+            assertFalse(disabled.isTimeshiftSeekable)
+        } finally {
+            proxy.close()
         }
     }
 

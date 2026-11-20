@@ -1,26 +1,33 @@
 package io.github.corebonts.muxgrid.core.player
 
 import android.content.Context
+import android.os.StatFs
 import android.util.Log
 import android.view.Surface
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
+import io.github.corebonts.muxgrid.core.model.DvrState
+import io.github.corebonts.muxgrid.core.model.GrowingDvrFile
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.MediaTrack
 import io.github.corebonts.muxgrid.core.model.PlaybackError
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.model.StreamTicket
+import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.model.TrackType
 import `is`.xyz.mpv.MPV
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
@@ -33,6 +40,12 @@ class MpvPlaybackEngine(
     dvrTicketProvider: suspend (dvrId: Long) -> StreamTicket = {
         throw UnsupportedOperationException("DVR ticket provider is not configured")
     },
+    growingFileOpener: suspend (dvrId: Long) -> GrowingDvrFile = {
+        throw UnsupportedOperationException("Growing DVR file opener is not configured")
+    },
+    private val dvrEntryProvider: (dvrId: Long) -> DvrEntry? = { null },
+    private val nowEpochSecProvider: () -> Long = { System.currentTimeMillis() / 1000L },
+    initialTimeshiftWindow: TimeshiftWindow = TimeshiftWindow.GB_1,
     private val conflictFinder: (channelId: Long) -> Pair<DvrEntry, String?>?,
 ) : PlaybackEngine, MPV.EventObserver {
 
@@ -40,11 +53,14 @@ class MpvPlaybackEngine(
     private val mpvExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "muxgrid-mpv").apply { isDaemon = true }
     }
+    private val mpvCacheDir = File(context.cacheDir, "mpv-cache")
 
     private val proxy = LocalMediaProxy(
         serverBaseUrlProvider = serverBaseUrlProvider,
         ticketProvider = ticketProvider,
         dvrTicketProvider = dvrTicketProvider,
+        growingFileOpener = growingFileOpener,
+        isDvrRecordingProvider = { dvrId -> dvrEntryProvider(dvrId)?.state == DvrState.RECORDING },
         onLiveOpenFailed = { channelId, reason, isEmptyReply ->
             handleProxyFailure(channelId, reason, isEmptyReply)
         },
@@ -75,6 +91,24 @@ class MpvPlaybackEngine(
     @Volatile
     private var currentPreset: HwDecPreset = HwDecPreset.MEDIACODEC_ZERO_COPY
 
+    @Volatile
+    private var currentTimeshiftWindow: TimeshiftWindow = initialTimeshiftWindow
+
+    @Volatile
+    private var effectiveForwardCapBytes: Long = DEFAULT_RAM_CACHE_BYTES
+
+    @Volatile
+    private var hadFileLoaded: Boolean = false
+
+    @Volatile
+    private var retriedLiveReconnect: Boolean = false
+
+    @Volatile
+    private var lastObservedMpvDurationMs: Long = 0L
+
+    private var cacheMonitorJob: Job? = null
+    private var noticeClearJob: Job? = null
+
     init {
         mpvExecutor.execute {
             initMpvLocked()
@@ -83,8 +117,12 @@ class MpvPlaybackEngine(
 
     private fun initMpvLocked() {
         val cfgDir = File(context.filesDir, "mpv").apply { mkdirs() }.absolutePath
-        val cacheDir = File(context.cacheDir, "mpv").apply { mkdirs() }.absolutePath
-        val instance = MPV(context.applicationContext, cfgDir, cacheDir).apply {
+        mpvCacheDir.mkdirs()
+        // Prune any orphaned temp cache files left behind by an earlier process kill
+        mpvCacheDir.listFiles()?.forEach { file ->
+            runCatching { file.deleteRecursively() }
+        }
+        val instance = MPV(context.applicationContext, cfgDir, mpvCacheDir.absolutePath).apply {
             setOptionString("profile", "fast")
             setOptionString("vo", "gpu")
             setOptionString("gpu-context", "android")
@@ -92,6 +130,9 @@ class MpvPlaybackEngine(
             setOptionString("hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
             setOptionString("demuxer-lavf-o", "analyzeduration=500000,probesize=524288")
             setOptionString("cache", "yes")
+            setOptionString("demuxer-seekable-cache", "yes")
+            setOptionString("demuxer-donate-buffer", "yes")
+            setOptionString("demuxer-cache-dir", mpvCacheDir.absolutePath)
             setOptionString("demuxer-max-bytes", "64MiB")
             setOptionString("demuxer-max-back-bytes", "64MiB")
             setOptionString("sub-visibility", "yes")
@@ -126,6 +167,10 @@ class MpvPlaybackEngine(
         activeDvrEntry = null
         currentPreset = preset
         explicitlyStopped = false
+        hadFileLoaded = false
+        retriedLiveReconnect = false
+        lastObservedMpvDurationMs = 0L
+        noticeClearJob?.cancel()
 
         _state.update {
             PlaybackState(
@@ -140,12 +185,14 @@ class MpvPlaybackEngine(
         }
 
         val url = liveStrategy.resolveLiveUrl(channel.id)
-        Log.i(TAG, "playChannel id=${channel.id} (${channel.name}) url=$url")
+        val requestedWindow = currentTimeshiftWindow
+        Log.i(TAG, "playChannel id=${channel.id} (${channel.name}) timeshift=$requestedWindow url=$url")
         mpvExecutor.execute {
             val instance = ensureMpvLocked() ?: return@execute
             instance.command("stop")
             liveStrategy.stopActive()
             applyPresetOnInstance(instance, preset)
+            configureLiveTimeshiftLocked(instance, requestedWindow)
             instance.setPropertyString("idle", "yes")
             instance.setPropertyString("start", "none")
             instance.setPropertyBoolean("pause", false)
@@ -158,6 +205,7 @@ class MpvPlaybackEngine(
                 Log.i(TAG, "loadfile deferred until surfaceCreated channel=${channel.id}")
             }
         }
+        startCacheMonitor()
     }
 
     override fun playDvrEntry(
@@ -170,7 +218,17 @@ class MpvPlaybackEngine(
         activeDvrEntry = entry
         currentPreset = preset
         explicitlyStopped = false
+        hadFileLoaded = false
+        retriedLiveReconnect = false
+        lastObservedMpvDurationMs = 0L
+        noticeClearJob?.cancel()
 
+        val isGrowing = entry.state == DvrState.RECORDING
+        val initialDurationMs = if (isGrowing) {
+            ((nowEpochSecProvider() - entry.startEpochSec).coerceAtLeast(1L)) * 1000L
+        } else {
+            entry.durationSec * 1000L
+        }
         val resumeSec = startPositionSec.coerceAtLeast(0L)
         _state.update {
             PlaybackState(
@@ -183,23 +241,29 @@ class MpvPlaybackEngine(
                 isRadio = channel?.isRadio ?: false,
                 isPaused = false,
                 isSeekable = true,
+                isGrowingRecording = isGrowing,
                 positionMs = resumeSec * 1000L,
-                durationMs = entry.durationSec * 1000L,
+                durationMs = initialDurationMs,
                 error = null,
             )
         }
 
-        val url = proxy.dvrStreamUrl(entry.id)
-        Log.i(TAG, "playDvrEntry id=${entry.id} (${entry.title}) start=${resumeSec}s url=$url")
+        val url = if (isGrowing) {
+            proxy.growingDvrStreamUrl(entry.id)
+        } else {
+            proxy.dvrStreamUrl(entry.id)
+        }
+        Log.i(TAG, "playDvrEntry id=${entry.id} (${entry.title}) growing=$isGrowing start=${resumeSec}s url=$url")
         mpvExecutor.execute {
             val instance = ensureMpvLocked() ?: return@execute
             instance.command("stop")
             proxy.stopActiveStream()
             applyPresetOnInstance(instance, preset)
+            configureDvrCacheLocked(instance, isGrowing)
             instance.setPropertyString("idle", "yes")
             instance.setPropertyString("start", if (resumeSec > 0L) "+$resumeSec" else "none")
             instance.setPropertyBoolean("pause", false)
-            if (hasSurface) {
+            if (hasSurface || (channel?.isRadio == true)) {
                 pendingUrl = null
                 val rc = instance.command("loadfile", url)
                 Log.i(TAG, "loadfile DVR immediate id=${entry.id} rc=$rc")
@@ -208,13 +272,19 @@ class MpvPlaybackEngine(
                 Log.i(TAG, "loadfile DVR deferred until surfaceCreated id=${entry.id}")
             }
         }
+        startCacheMonitor()
     }
 
     override fun stop() {
         explicitlyStopped = true
+        hadFileLoaded = false
         pendingUrl = null
         activeChannel = null
         activeDvrEntry = null
+        cacheMonitorJob?.cancel()
+        cacheMonitorJob = null
+        noticeClearJob?.cancel()
+        noticeClearJob = null
         _state.value = PlaybackState(status = PlaybackStatus.IDLE)
 
         mpvExecutor.execute {
@@ -223,6 +293,7 @@ class MpvPlaybackEngine(
             if (instance.isInitialized) {
                 instance.command("stop")
                 instance.setPropertyString("start", "none")
+                instance.setPropertyString("force-seekable", "no")
             }
         }
     }
@@ -247,7 +318,8 @@ class MpvPlaybackEngine(
     }
 
     override fun seekTo(positionMs: Long) {
-        val clampedMs = positionMs.coerceAtLeast(0L)
+        val current = _state.value
+        val clampedMs = clampSeekTargetMs(current, positionMs)
         mpvExecutor.execute {
             val instance = mpv ?: return@execute
             if (instance.isInitialized) {
@@ -258,12 +330,34 @@ class MpvPlaybackEngine(
     }
 
     override fun seekBy(deltaMs: Long) {
+        val current = _state.value
+        if (current.isGrowingRecording || (!current.isRecordingPlayback && current.isTimeshiftSeekable)) {
+            seekTo(current.positionMs + deltaMs)
+            return
+        }
         mpvExecutor.execute {
             val instance = mpv ?: return@execute
             if (instance.isInitialized) {
                 val secStr = String.format(Locale.US, "%.3f", deltaMs / 1000.0)
                 instance.command("seek", secStr, "relative")
             }
+        }
+    }
+
+    override fun seekToLiveEdge() {
+        mpvExecutor.execute {
+            val instance = mpv ?: return@execute
+            if (!instance.isInitialized || activeChannel == null || activeDvrEntry != null) return@execute
+            val (_, endSec) = readSeekableCacheRangeSecLocked(instance)
+            val fallbackEnd = runCatching { instance.getPropertyDouble("demuxer-cache-time") }.getOrNull()
+            val liveSec = endSec ?: fallbackEnd
+            if (liveSec != null && liveSec > 0.5) {
+                val target = (liveSec - 0.5).coerceAtLeast(0.0)
+                val secStr = String.format(Locale.US, "%.3f", target)
+                instance.command("seek", secStr, "absolute")
+            }
+            instance.setPropertyBoolean("pause", false)
+            _state.update { it.copy(timeshiftNotice = null) }
         }
     }
 
@@ -299,6 +393,10 @@ class MpvPlaybackEngine(
                 applyPresetOnInstance(instance, preset)
             }
         }
+    }
+
+    override fun setTimeshiftWindow(window: TimeshiftWindow) {
+        currentTimeshiftWindow = window
     }
 
     override fun attachSurface(surface: Surface, width: Int, height: Int) {
@@ -352,6 +450,8 @@ class MpvPlaybackEngine(
 
     override fun destroy() {
         explicitlyStopped = true
+        cacheMonitorJob?.cancel()
+        noticeClearJob?.cancel()
         liveStrategy.stopActive()
         proxy.close()
         engineScope.cancel()
@@ -364,6 +464,192 @@ class MpvPlaybackEngine(
             }
         }
         mpvExecutor.shutdown()
+    }
+
+    private fun clampSeekTargetMs(state: PlaybackState, requestedMs: Long): Long {
+        val nonNeg = requestedMs.coerceAtLeast(0L)
+        return when {
+            state.isGrowingRecording -> {
+                val maxSafe = (state.durationMs - GROWING_WRITE_HEAD_SAFETY_MS).coerceAtLeast(0L)
+                nonNeg.coerceAtMost(maxSafe)
+            }
+            !state.isRecordingPlayback && state.isTimeshiftSeekable -> {
+                val minStart = state.bufferStartMs.coerceAtLeast(0L)
+                val maxEnd = (state.bufferEndMs - LIVE_EDGE_SAFETY_MS).coerceAtLeast(minStart)
+                nonNeg.coerceIn(minStart, maxEnd)
+            }
+            else -> nonNeg
+        }
+    }
+
+    private fun configureLiveTimeshiftLocked(instance: MPV, requested: TimeshiftWindow) {
+        val (bytesPerDir, useDisk) = resolveEffectiveTimeshiftBudget(requested)
+        effectiveForwardCapBytes = bytesPerDir
+        val mb = (bytesPerDir / (1024L * 1024L)).coerceAtLeast(64L)
+        instance.setPropertyString("cache-on-disk", if (useDisk) "yes" else "no")
+        instance.setPropertyString(
+            "demuxer-seekable-cache",
+            if (requested != TimeshiftWindow.OFF) "yes" else "auto",
+        )
+        instance.setPropertyString("demuxer-max-bytes", "${mb}MiB")
+        instance.setPropertyString("demuxer-max-back-bytes", "${mb}MiB")
+        instance.setPropertyString("force-seekable", "no")
+        if (requested != TimeshiftWindow.OFF && !useDisk) {
+            postTimeshiftNotice("Low storage: live timeshift using memory buffer", autoClearMs = 6_000L)
+        }
+    }
+
+    private fun configureDvrCacheLocked(instance: MPV, isGrowing: Boolean) {
+        effectiveForwardCapBytes = DEFAULT_RAM_CACHE_BYTES
+        instance.setPropertyString("cache-on-disk", "no")
+        instance.setPropertyString("demuxer-seekable-cache", "auto")
+        instance.setPropertyString("demuxer-max-bytes", "64MiB")
+        instance.setPropertyString("demuxer-max-back-bytes", "64MiB")
+        instance.setPropertyString("force-seekable", if (isGrowing) "yes" else "no")
+    }
+
+    private fun resolveEffectiveTimeshiftBudget(requested: TimeshiftWindow): Pair<Long, Boolean> {
+        if (requested == TimeshiftWindow.OFF) {
+            return DEFAULT_RAM_CACHE_BYTES to false
+        }
+        val availableBytes = runCatching {
+            mpvCacheDir.mkdirs()
+            StatFs(mpvCacheDir.absolutePath).availableBytes
+        }.getOrDefault(0L)
+        val usableBytes = (availableBytes - DISK_SAFETY_RESERVE_BYTES).coerceAtLeast(0L)
+        val maxPerDirection = usableBytes / 2L
+        if (maxPerDirection < DEFAULT_RAM_CACHE_BYTES) {
+            return DEFAULT_RAM_CACHE_BYTES to false
+        }
+        return minOf(requested.maxBytesPerDirection, maxPerDirection) to true
+    }
+
+    private fun startCacheMonitor() {
+        cacheMonitorJob?.cancel()
+        cacheMonitorJob = engineScope.launch {
+            while (isActive && !explicitlyStopped) {
+                delay(CACHE_POLL_INTERVAL_MS)
+                if (explicitlyStopped) break
+                mpvExecutor.execute {
+                    val instance = mpv ?: return@execute
+                    if (!instance.isInitialized || explicitlyStopped) return@execute
+                    val dvrEntry = activeDvrEntry
+                    if (dvrEntry != null) {
+                        updateGrowingDvrStateLocked(dvrEntry)
+                    } else if (activeChannel != null) {
+                        updateLiveTimeshiftStateLocked(instance)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun updateGrowingDvrStateLocked(entry: DvrEntry) {
+        val latest = dvrEntryProvider(entry.id) ?: entry
+        val stillRecording = latest.state == DvrState.RECORDING
+        val effectiveDurMs = if (stillRecording) {
+            val elapsedMs = ((nowEpochSecProvider() - latest.startEpochSec).coerceAtLeast(1L)) * 1000L
+            maxOf(lastObservedMpvDurationMs, elapsedMs)
+        } else {
+            maxOf(lastObservedMpvDurationMs, latest.durationSec * 1000L)
+        }
+        _state.update { current ->
+            if (current.dvrEntryId != entry.id) {
+                current
+            } else {
+                current.copy(
+                    durationMs = effectiveDurMs,
+                    isGrowingRecording = stillRecording,
+                    isSeekable = stillRecording || current.isSeekable,
+                )
+            }
+        }
+    }
+
+    private fun updateLiveTimeshiftStateLocked(instance: MPV) {
+        val currentState = _state.value
+        if (currentState.status == PlaybackStatus.IDLE || currentState.status == PlaybackStatus.ERROR) return
+
+        val cacheNode = runCatching { instance.getPropertyNode("demuxer-cache-state") }.getOrNull()
+        val cacheMap = runCatching { cacheNode?.asMap() }.getOrNull()
+        val (rangeStartSec, rangeEndSec) = readSeekableCacheRangeSecLocked(instance, cacheMap)
+        val fwBytes = cacheMap?.get("fw-bytes")?.asInt() ?: 0L
+
+        val posSec = runCatching { instance.getPropertyDouble("time-pos") }.getOrNull()
+            ?: (currentState.positionMs / 1000.0)
+        val cacheEndSec = rangeEndSec
+            ?: runCatching { instance.getPropertyDouble("demuxer-cache-time") }.getOrNull()
+            ?: posSec
+        val cacheStartSec = rangeStartSec ?: posSec.coerceAtMost(cacheEndSec)
+        val seekable = runCatching { instance.getPropertyBoolean("seekable") }.getOrNull()
+            ?: currentState.isSeekable
+
+        val metrics = liveStrategy.computeTimeshiftMetrics(
+            positionMs = (posSec * 1000.0).toLong(),
+            seekable = seekable,
+            cacheStartMs = (cacheStartSec * 1000.0).toLong(),
+            cacheEndMs = (cacheEndSec * 1000.0).toLong(),
+            timeshiftEnabled = currentTimeshiftWindow != TimeshiftWindow.OFF,
+        )
+
+        if (currentTimeshiftWindow != TimeshiftWindow.OFF &&
+            currentState.isPaused &&
+            effectiveForwardCapBytes > 0L
+        ) {
+            val fillRatio = fwBytes.toDouble() / effectiveForwardCapBytes.toDouble()
+            if (fillRatio >= 0.98) {
+                instance.setPropertyBoolean("pause", false)
+                postTimeshiftNotice("Timeshift buffer full — playback resumed", autoClearMs = 6_000L)
+            } else if (fillRatio >= 0.90) {
+                postTimeshiftNotice("Timeshift pause buffer nearly full", autoClearMs = null)
+            } else if (currentState.timeshiftNotice == "Timeshift pause buffer nearly full") {
+                _state.update { it.copy(timeshiftNotice = null) }
+            }
+        } else if (!currentState.isPaused && currentState.timeshiftNotice == "Timeshift pause buffer nearly full") {
+            _state.update { it.copy(timeshiftNotice = null) }
+        }
+
+        _state.update { current ->
+            if (current.isRecordingPlayback || current.channelId != activeChannel?.id) {
+                current
+            } else {
+                current.copy(
+                    isSeekable = seekable,
+                    bufferStartMs = metrics.bufferStartMs,
+                    bufferEndMs = metrics.bufferEndMs,
+                    bufferWindowMs = metrics.bufferWindowMs,
+                    liveEdgeOffsetMs = metrics.liveEdgeOffsetMs,
+                    isTimeshiftSeekable = metrics.isTimeshiftSeekable,
+                )
+            }
+        }
+    }
+
+    private fun readSeekableCacheRangeSecLocked(
+        instance: MPV,
+        preloadedMap: Map<String, `is`.xyz.mpv.MPVNode>? = null,
+    ): Pair<Double?, Double?> {
+        val map = preloadedMap ?: runCatching {
+            instance.getPropertyNode("demuxer-cache-state")?.asMap()
+        }.getOrNull() ?: return null to null
+        val ranges = runCatching { map["seekable-ranges"]?.asArray() }.getOrNull() ?: return null to null
+        if (ranges.isEmpty()) return null to null
+        val firstStart = runCatching { ranges.first().asMap()?.get("start")?.asDouble() }.getOrNull()
+        val lastEnd = runCatching { ranges.last().asMap()?.get("end")?.asDouble() }.getOrNull()
+        return firstStart to lastEnd
+    }
+
+    private fun postTimeshiftNotice(message: String, autoClearMs: Long?) {
+        noticeClearJob?.cancel()
+        _state.update { it.copy(timeshiftNotice = message) }
+        if (autoClearMs != null) {
+            noticeClearJob = engineScope.launch {
+                delay(autoClearMs)
+                _state.update { current ->
+                    if (current.timeshiftNotice == message) current.copy(timeshiftNotice = null) else current
+                }
+            }
+        }
     }
 
     private fun applyPresetOnInstance(instance: MPV, preset: HwDecPreset) {
@@ -459,7 +745,14 @@ class MpvPlaybackEngine(
             "duration" -> {
                 val durMs = (value * 1000.0).toLong().coerceAtLeast(0L)
                 if (durMs > 0L) {
-                    _state.update { it.copy(durationMs = durMs) }
+                    lastObservedMpvDurationMs = durMs
+                    _state.update { current ->
+                        if (current.isGrowingRecording) {
+                            current.copy(durationMs = maxOf(current.durationMs, durMs))
+                        } else {
+                            current.copy(durationMs = durMs)
+                        }
+                    }
                 }
             }
             "estimated-vf-fps" -> _state.update { it.copy(fps = value) }
@@ -491,6 +784,10 @@ class MpvPlaybackEngine(
             MPV.mpvEvent.MPV_EVENT_AUDIO_RECONFIG,
             MPV.mpvEvent.MPV_EVENT_VIDEO_RECONFIG,
             -> {
+                if (eventId == MPV.mpvEvent.MPV_EVENT_FILE_LOADED) {
+                    hadFileLoaded = true
+                    retriedLiveReconnect = false
+                }
                 mpvExecutor.execute {
                     val instance = mpv ?: return@execute
                     if (instance.isInitialized) {
@@ -514,14 +811,15 @@ class MpvPlaybackEngine(
             }
             MPV.mpvEvent.MPV_EVENT_END_FILE -> {
                 if (explicitlyStopped) return
+                val map = runCatching { data.asMap() }.getOrNull()
+                val reasonNode = map?.get("reason")
+                val reasonStr = runCatching { reasonNode?.asString() }.getOrNull()
+                val reasonInt = runCatching { reasonNode?.asInt()?.toInt() }.getOrNull()
+                val isErrorReason = reasonStr.equals("error", ignoreCase = true) || reasonInt == 4
+                val isStoppedReason = reasonStr.equals("stop", ignoreCase = true) || reasonInt == 2
+
                 val dvrEntry = activeDvrEntry
                 if (dvrEntry != null) {
-                    val map = runCatching { data.asMap() }.getOrNull()
-                    val reasonNode = map?.get("reason")
-                    val reasonStr = runCatching { reasonNode?.asString() }.getOrNull()
-                    val reasonInt = runCatching { reasonNode?.asInt()?.toInt() }.getOrNull()
-                    val isErrorReason = reasonStr.equals("error", ignoreCase = true) || reasonInt == 4
-                    val isStoppedReason = reasonStr.equals("stop", ignoreCase = true) || reasonInt == 2
                     if (isErrorReason) {
                         val fileErr = runCatching { map?.get("file_error")?.asString() }.getOrNull()
                         val msg = if (!fileErr.isNullOrBlank()) {
@@ -546,6 +844,7 @@ class MpvPlaybackEngine(
                                 current.copy(
                                     status = PlaybackStatus.IDLE,
                                     isCompleted = true,
+                                    isGrowingRecording = false,
                                 )
                             } else {
                                 current
@@ -555,20 +854,43 @@ class MpvPlaybackEngine(
                     return
                 }
 
-                val channelId = activeChannel?.id ?: return
+                if (isStoppedReason) return
+
+                val channel = activeChannel ?: return
                 val currentError = _state.value.error
                 if (currentError == null) {
-                    val conflict = conflictFinder(channelId)
-                    val err = if (conflict != null) {
-                        PlaybackError.TunerBusy(conflict.first.title, conflict.second)
+                    val conflict = conflictFinder(channel.id)
+                    if (conflict != null) {
+                        val err = PlaybackError.TunerBusy(conflict.first.title, conflict.second)
+                        _state.update { current ->
+                            if (current.channelId == channel.id && current.error == null) {
+                                current.copy(status = PlaybackStatus.ERROR, error = err)
+                            } else {
+                                current
+                            }
+                        }
+                    } else if (hadFileLoaded && !retriedLiveReconnect) {
+                        retriedLiveReconnect = true
+                        postTimeshiftNotice("Live stream reconnected", autoClearMs = 4_000L)
+                        val url = liveStrategy.resolveLiveUrl(channel.id)
+                        mpvExecutor.execute {
+                            val instance = mpv ?: return@execute
+                            if (!instance.isInitialized || explicitlyStopped || activeChannel?.id != channel.id) return@execute
+                            liveStrategy.stopActive()
+                            configureLiveTimeshiftLocked(instance, currentTimeshiftWindow)
+                            instance.setPropertyBoolean("pause", false)
+                            instance.command("loadfile", url)
+                        }
                     } else {
-                        PlaybackError.PlaybackFailed("Stream ended unexpectedly")
-                    }
-                    _state.update { current ->
-                        if (current.channelId == channelId && current.error == null) {
-                            current.copy(status = PlaybackStatus.ERROR, error = err)
-                        } else {
-                            current
+                        _state.update { current ->
+                            if (current.channelId == channel.id && current.error == null) {
+                                current.copy(
+                                    status = PlaybackStatus.ERROR,
+                                    error = PlaybackError.PlaybackFailed("Stream ended unexpectedly"),
+                                )
+                            } else {
+                                current
+                            }
                         }
                     }
                 }
@@ -638,5 +960,10 @@ class MpvPlaybackEngine(
 
     companion object {
         private const val TAG = "MuxGridPlayer"
+        private const val CACHE_POLL_INTERVAL_MS = 500L
+        private const val DEFAULT_RAM_CACHE_BYTES = 64L * 1024L * 1024L
+        private const val DISK_SAFETY_RESERVE_BYTES = 512L * 1024L * 1024L
+        private const val GROWING_WRITE_HEAD_SAFETY_MS = 2_000L
+        private const val LIVE_EDGE_SAFETY_MS = 500L
     }
 }

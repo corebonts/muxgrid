@@ -5,11 +5,13 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -47,12 +49,15 @@ import androidx.compose.ui.viewinterop.AndroidView
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
+import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.PlayerErrorToast
+import io.github.corebonts.muxgrid.core.designsystem.TimeshiftNoticeBanner
 import io.github.corebonts.muxgrid.core.designsystem.TrackAndPresetPanel
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMs
 import io.github.corebonts.muxgrid.core.model.Channel
+import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.PlaybackState
@@ -118,6 +123,20 @@ internal fun MobilePlayerScreen(
             CircularProgressIndicator(
                 color = MuxGridColors.AccentBlueLight,
                 modifier = Modifier.align(Alignment.Center),
+            )
+        }
+
+        playbackState.timeshiftNotice?.let { notice ->
+            TimeshiftNoticeBanner(
+                notice = notice,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(
+                        top = if (hudVisible) 84.dp else 16.dp,
+                        start = 16.dp,
+                        end = 16.dp,
+                    ),
             )
         }
 
@@ -263,25 +282,34 @@ internal fun MobilePlayerScreen(
                                 valueRange = 0f..1f,
                                 colors = SliderDefaults.colors(
                                     thumbColor = Color.White,
-                                    activeTrackColor = MuxGridColors.AccentBlueLight,
+                                    activeTrackColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.AccentBlueLight,
                                     inactiveTrackColor = MuxGridColors.TrackBackground,
                                 ),
                             )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
                                     text = formatDurationMs(displayPosMs),
                                     style = MuxGridType.TabularSmall,
                                     color = Color.White,
                                 )
-                                if (playbackState.videoWidth > 0) {
-                                    Text(
-                                        text = "${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}",
-                                        style = MuxGridType.TabularSmall,
-                                        color = Color.White.copy(alpha = 0.78f),
-                                    )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    if (playbackState.isGrowingRecording) {
+                                        DvrStateBadge(state = DvrState.RECORDING)
+                                    }
+                                    if (playbackState.videoWidth > 0) {
+                                        Text(
+                                            text = "${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}",
+                                            style = MuxGridType.TabularSmall,
+                                            color = Color.White.copy(alpha = 0.78f),
+                                        )
+                                    }
                                 }
                                 Text(
                                     text = formatDurationMs(playbackState.durationMs),
@@ -327,6 +355,7 @@ internal fun MobilePlayerScreen(
                             }
                         }
                     } else {
+                        // Live status + Back to Live pill + Quick Zap buttons
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -334,26 +363,123 @@ internal fun MobilePlayerScreen(
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f),
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .width(8.dp)
-                                        .height(8.dp)
-                                        .clip(RoundedCornerShape(50))
-                                        .background(MuxGridColors.CoralLive),
-                                )
-                                Text(
-                                    text = "LIVE",
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                )
+                                if (playbackState.isBehindLive) {
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(MuxGridColors.AccentBlue.copy(alpha = 0.9f))
+                                            .border(1.dp, MuxGridColors.AccentBlueLight, RoundedCornerShape(50))
+                                            .clickable { playbackEngine.seekToLiveEdge() }
+                                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Text(
+                                            text = "-${formatDurationMs(playbackState.liveEdgeOffsetMs)} · Back to Live",
+                                            style = MuxGridType.TabularSmall,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
+                                } else {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(8.dp)
+                                                .height(8.dp)
+                                                .clip(RoundedCornerShape(50))
+                                                .background(MuxGridColors.CoralLive),
+                                        )
+                                        Text(
+                                            text = "LIVE",
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
+                                }
                                 if (playbackState.videoWidth > 0) {
                                     Text(
-                                        text = "· ${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}",
+                                        text = "${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}",
                                         style = MuxGridType.TabularSmall,
-                                        color = Color.White.copy(alpha = 0.85f),
+                                        color = Color.White.copy(alpha = 0.8f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+
+                            if (canZap) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OutlinedButton(
+                                        onClick = onZapPrevious,
+                                        colors = scrimBtnColors,
+                                        border = scrimBtnBorder,
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    ) {
+                                        Text("Prev Ch", color = Color.White, fontSize = 12.sp)
+                                    }
+                                    OutlinedButton(
+                                        onClick = onZapNext,
+                                        colors = scrimBtnColors,
+                                        border = scrimBtnBorder,
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    ) {
+                                        Text("Next Ch", color = Color.White, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        if (playbackState.isTimeshiftSeekable) {
+                            val bufStart = playbackState.bufferStartMs
+                            val bufWindow = playbackState.bufferWindowMs.coerceAtLeast(1L)
+                            val bufEnd = playbackState.bufferEndMs.coerceAtLeast(bufStart + bufWindow)
+                            val displayPosMs = if (isScrubbing) {
+                                scrubPositionMs.coerceIn(bufStart, bufEnd)
+                            } else {
+                                playbackState.positionMs.coerceIn(bufStart, bufEnd)
+                            }
+                            val sliderFraction = ((displayPosMs - bufStart).toFloat() / bufWindow.toFloat()).coerceIn(0f, 1f)
+                            val displayOffsetMs = (bufEnd - displayPosMs).coerceAtLeast(0L)
+
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Slider(
+                                    value = sliderFraction,
+                                    onValueChange = { fraction ->
+                                        isScrubbing = true
+                                        scrubPositionMs = bufStart + (fraction.coerceIn(0f, 1f) * bufWindow).toLong()
+                                    },
+                                    onValueChangeFinished = {
+                                        isScrubbing = false
+                                        playbackEngine.seekTo(scrubPositionMs)
+                                    },
+                                    valueRange = 0f..1f,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = Color.White,
+                                        activeTrackColor = MuxGridColors.AccentBlueLight,
+                                        inactiveTrackColor = MuxGridColors.TrackBackground,
+                                    ),
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(
+                                        text = if (displayOffsetMs >= 2_000L) "-${formatDurationMs(displayOffsetMs)}" else "Live edge",
+                                        style = MuxGridType.TabularSmall,
+                                        color = Color.White,
+                                    )
+                                    Text(
+                                        text = "Buffer ${formatDurationMs(bufWindow)}",
+                                        style = MuxGridType.TabularSmall,
+                                        color = Color.White.copy(alpha = 0.78f),
                                     )
                                 }
                             }
@@ -364,14 +490,14 @@ internal fun MobilePlayerScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (canZap) {
+                            if (playbackState.isTimeshiftSeekable) {
                                 OutlinedButton(
-                                    onClick = onZapPrevious,
+                                    onClick = { playbackEngine.seekBy(-10_000L) },
                                     colors = scrimBtnColors,
                                     border = scrimBtnBorder,
                                     modifier = Modifier.weight(1f),
                                 ) {
-                                    Text("Prev Ch", color = Color.White, fontSize = 13.sp)
+                                    Text("-10s", color = Color.White, fontSize = 13.sp)
                                 }
                             }
                             Button(
@@ -387,14 +513,14 @@ internal fun MobilePlayerScreen(
                                     fontWeight = FontWeight.SemiBold,
                                 )
                             }
-                            if (canZap) {
+                            if (playbackState.isTimeshiftSeekable) {
                                 OutlinedButton(
-                                    onClick = onZapNext,
+                                    onClick = { playbackEngine.seekBy(30_000L) },
                                     colors = scrimBtnColors,
                                     border = scrimBtnBorder,
                                     modifier = Modifier.weight(1f),
                                 ) {
-                                    Text("Next Ch", color = Color.White, fontSize = 13.sp)
+                                    Text("+30s", color = Color.White, fontSize = 13.sp)
                                 }
                             }
                         }

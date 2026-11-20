@@ -5,6 +5,7 @@ import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.PlaybackState
+import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import kotlinx.coroutines.flow.StateFlow
 
 interface PlaybackEngine {
@@ -17,9 +18,11 @@ interface PlaybackEngine {
     fun setPaused(paused: Boolean)
     fun seekTo(positionMs: Long)
     fun seekBy(deltaMs: Long)
+    fun seekToLiveEdge()
     fun setAudioTrack(trackId: Int)
     fun setSubtitleTrack(trackId: Int?)
     fun applyPreset(preset: HwDecPreset)
+    fun setTimeshiftWindow(window: TimeshiftWindow)
 
     fun attachSurface(surface: Surface, width: Int, height: Int)
     fun updateSurfaceSize(width: Int, height: Int)

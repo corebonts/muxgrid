@@ -17,8 +17,8 @@ Built as a **single unified APK** targeting both modern Android phones/tablets a
 
 ## Current Implementation Status
 
-- **Completed (M0 + M1):** Multi-module Gradle project (`compileSdk 37.2`, `targetSdk 36`, `minSdk 28`), HTSP binary client + atomic shadow-store resync, DataStore + Tink credential storage, Coil HTSP/HTTP picon fetcher, `LocalMediaProxy` live stream ticket handling + single-tuner conflict detection, `libmpv` playback engine (`mediacodec` on TV, `mediacodec-copy` + `bwdif` on phone), onboarding Server Setup (with connection test), Mobile & TV Live channel grid/list with filters (`All`, `TV`, `Radio`, `Favorites`, server tags), fullscreen live player (`Play/Pause`, `Stop`, `Prev Ch`/`Next Ch`, Audio/Subtitle/`HwDec` track picker), and lifecycle-aware background HTSP pause/reconnect with deferred error banners.
-- **Planned (M2–M6):** EPG Guide tab, DVR scheduling & `/dvrfile` playback + growing tail-follow proxy, `libmpv` disk timeshift ring buffer, `MediaSessionService` + PiP + mobile gestures + Haze blur + mini-player, dedicated TV Navigation Rail + progressive seek, and multi-profile switching.
+- **Completed (M0–M3):** Multi-module Gradle project (`compileSdk 37.2`, `targetSdk 36`, `minSdk 28`), HTSP binary client + atomic shadow-store resync + dedicated HTSP VFS connection (`HtspVfsClient`), DataStore + Tink credential storage, Coil HTSP/HTTP picon fetcher, `LocalMediaProxy` (live streams, completed `/dvrfile` Range relay with ticket auto-refresh, and growing recording HTSP tail-follow mode), `libmpv` playback engine (`mediacodec` on TV, `mediacodec-copy` + `bwdif` on phone, disk-backed live timeshift ring buffer with free-space check & buffer-full auto-resume), onboarding Server Setup, Mobile & TV Live/Guide/Recordings tabs with series grouping, DVR management, resume sync, live timeshift seekbar (`-MM:SS · Back to Live`), and "Watch from Start" chase-play for in-progress recordings.
+- **Planned (M4–M6):** `MediaSessionService` + PiP + mobile gestures + Haze blur + mini-player, dedicated TV Navigation Rail + progressive seek + quick channel strip, and multi-profile switching.
 
 ## Build, Test & Sideload
 

@@ -34,6 +34,10 @@ class MuxGridAppContainer(context: Context) {
         serverBaseUrlProvider = { repository.currentServerHttpBaseUrl() },
         ticketProvider = { channelId -> repository.getLiveTicket(channelId) },
         dvrTicketProvider = { dvrId -> repository.getDvrTicket(dvrId) },
+        growingFileOpener = { dvrId -> repository.openGrowingDvrFile(dvrId) },
+        dvrEntryProvider = { dvrId -> repository.getDvrEntry(dvrId) },
+        nowEpochSecProvider = { repository.currentServerEpochSec() },
+        initialTimeshiftWindow = repository.timeshiftWindow.value,
         conflictFinder = { channelId -> repository.findConflictingRecording(channelId) },
     )
 
@@ -43,6 +47,11 @@ class MuxGridAppContainer(context: Context) {
     private var progressTickJob: Job? = null
 
     init {
+        applicationScope.launch {
+            repository.timeshiftWindow.collect { window ->
+                playbackEngine.setTimeshiftWindow(window)
+            }
+        }
         startDvrProgressTracking()
     }
 

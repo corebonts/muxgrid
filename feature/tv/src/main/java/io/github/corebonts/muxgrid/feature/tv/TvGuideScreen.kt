@@ -76,6 +76,7 @@ internal fun TvGuideScreen(
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     onWatchChannel: (Channel) -> Unit,
+    onPlayRecording: (DvrEntry, Channel?, Long) -> Unit,
     onScheduleRecording: suspend (Long) -> Result<Long>,
     onStopRecording: suspend (Long) -> Result<Unit>,
     onCancelRecording: suspend (Long) -> Result<Unit>,
@@ -399,6 +400,18 @@ internal fun TvGuideScreen(
                             Button(
                                 enabled = !actionBusy,
                                 onClick = {
+                                    actionEvent = null
+                                    val startSec = if (linkedDvr.hasResumePosition) linkedDvr.playPositionSec else 0L
+                                    onPlayRecording(linkedDvr, ch, startSec)
+                                },
+                                modifier = recordButtonModifier,
+                                colors = tvSecondaryButtonColors(),
+                            ) {
+                                Text("Watch from Start")
+                            }
+                            Button(
+                                enabled = !actionBusy,
+                                onClick = {
                                     scope.launch {
                                         actionBusy = true
                                         actionError = null
@@ -408,7 +421,6 @@ internal fun TvGuideScreen(
                                         actionBusy = false
                                     }
                                 },
-                                modifier = recordButtonModifier,
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Text("Stop & Save")

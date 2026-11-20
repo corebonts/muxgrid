@@ -170,6 +170,10 @@ internal fun MobileRecordingsScreen(
                             channel = ch,
                             nowEpochSec = nowEpochSec,
                             imageLoader = imageLoader,
+                            onWatchFromStart = {
+                                val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
+                                onPlayRecording(entry, ch, startSec)
+                            },
                             onWatchLive = { if (ch != null) onWatchLiveChannel(ch) },
                             onStop = {
                                 scope.launch {
@@ -338,6 +342,7 @@ private fun RecordingNowCard(
     channel: Channel?,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
+    onWatchFromStart: () -> Unit,
     onWatchLive: () -> Unit,
     onStop: () -> Unit,
     onAbort: () -> Unit,
@@ -381,21 +386,28 @@ private fun RecordingNowCard(
             fillColor = MuxGridColors.CoralLive,
             modifier = Modifier.fillMaxWidth(),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (channel != null) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = onWatchLive,
+                    onClick = onWatchFromStart,
                     colors = ButtonDefaults.buttonColors(containerColor = MuxGridColors.AccentBlue, contentColor = Color.White),
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Watch Live", fontSize = 12.sp)
+                    Text(if (entry.hasResumePosition) "Resume" else "Watch from Start", fontSize = 12.sp)
+                }
+                if (channel != null) {
+                    OutlinedButton(onClick = onWatchLive, modifier = Modifier.weight(1f)) {
+                        Text("Watch Live", color = MuxGridColors.TextPrimary, fontSize = 12.sp)
+                    }
                 }
             }
-            OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) {
-                Text("Stop & Save", color = MuxGridColors.TextPrimary, fontSize = 12.sp)
-            }
-            OutlinedButton(onClick = onAbort) {
-                Text("Abort", color = MuxGridColors.CoralLive, fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) {
+                    Text("Stop & Save", color = MuxGridColors.TextPrimary, fontSize = 12.sp)
+                }
+                OutlinedButton(onClick = onAbort) {
+                    Text("Abort", color = MuxGridColors.CoralLive, fontSize = 12.sp)
+                }
             }
         }
     }

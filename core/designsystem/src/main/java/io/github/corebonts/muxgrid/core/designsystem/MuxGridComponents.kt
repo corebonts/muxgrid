@@ -451,3 +451,34 @@ fun DvrStateBadge(
         )
     }
 }
+
+@Composable
+fun TimeshiftNoticeBanner(
+    notice: String,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(MuxGridColors.ScrimSurface)
+            .border(1.dp, MuxGridColors.AmberWarn.copy(alpha = 0.55f), RoundedCornerShape(50))
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(MuxGridColors.AmberWarn),
+        )
+        Text(
+            text = notice,
+            color = MuxGridColors.TextPrimary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}

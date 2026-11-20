@@ -72,6 +72,7 @@ internal fun MobileGuideScreen(
     imageLoader: ImageLoader,
     initialSelectedChannelId: Long?,
     onWatchChannel: (Channel) -> Unit,
+    onPlayRecording: (DvrEntry, Channel?, Long) -> Unit,
     onScheduleRecording: suspend (Long) -> Result<Long>,
     onStopRecording: suspend (Long) -> Result<Unit>,
     onCancelRecording: suspend (Long) -> Result<Unit>,
@@ -460,6 +461,17 @@ internal fun MobileGuideScreen(
 
                     when (linkedDvr?.state) {
                         DvrState.RECORDING -> {
+                            OutlinedButton(
+                                enabled = !actionBusy,
+                                onClick = {
+                                    selectedEvent = null
+                                    val startSec = if (linkedDvr.hasResumePosition) linkedDvr.playPositionSec else 0L
+                                    onPlayRecording(linkedDvr, detailChannel, startSec)
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Watch from Start", color = MuxGridColors.AccentBlueLight)
+                            }
                             OutlinedButton(
                                 enabled = !actionBusy,
                                 onClick = {

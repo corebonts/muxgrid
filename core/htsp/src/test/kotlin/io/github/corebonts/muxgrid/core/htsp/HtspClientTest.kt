@@ -306,4 +306,101 @@ class HtspClientTest {
             assertTrue(capturedMethods.containsAll(listOf("addDvrEntry", "updateDvrEntry", "stopDvrEntry", "cancelDvrEntry", "deleteDvrEntry", "getTicket")))
         }
     }
+
+    @Test
+    fun `HtspVfsClient opens stats reads at growing head and closes file`() = runBlocking {
+        ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
+            val fileClosed = java.util.concurrent.atomic.AtomicBoolean(false)
+            val fileBytes = java.util.concurrent.atomic.AtomicReference("FIRST".toByteArray())
+
+            val serverTask = async(Dispatchers.IO) {
+                server.accept().use { sock ->
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+
+                    val hello = HtsMsgCodec.readFrame(input)
+                    output.write(
+                        HtsMsgCodec.encodeFrame(
+                            htsMap {
+                                put("seq", hello.getLong("seq")!!)
+                                put("htspversion", 44)
+                                put("servername", "MockTvh")
+                                put("serverversion", "4.3-mock")
+                            },
+                        ),
+                    )
+                    output.flush()
+
+                    while (true) {
+                        val req = try {
+                            HtsMsgCodec.readFrame(input)
+                        } catch (_: Exception) {
+                            break
+                        }
+                        val seq = req.getLong("seq")!!
+                        val reply = when (req.getString("method")) {
+                            "fileOpen" -> {
+                                assertEquals("dvrfile/55", req.getString("file"))
+                                htsMap {
+                                    put("seq", seq)
+                                    put("id", 900L)
+                                    put("size", fileBytes.get().size.toLong())
+                                    put("mtime", 1000L)
+                                }
+                            }
+                            "fileRead" -> {
+                                val off = (req.getLong("offset") ?: 0L).toInt()
+                                val sz = (req.getLong("size") ?: 0L).toInt()
+                                val current = fileBytes.get()
+                                val slice = if (off >= current.size) {
+                                    ByteArray(0)
+                                } else {
+                                    current.copyOfRange(off, minOf(current.size, off + sz))
+                                }
+                                htsMap {
+                                    put("seq", seq)
+                                    put("data", slice)
+                                }
+                            }
+                            "fileStat" -> htsMap {
+                                put("seq", seq)
+                                put("size", fileBytes.get().size.toLong())
+                                put("mtime", 1001L)
+                            }
+                            "fileClose" -> {
+                                fileClosed.set(true)
+                                htsMap { put("seq", seq) }
+                            }
+                            else -> htsMap { put("seq", seq) }
+                        }
+                        output.write(HtsMsgCodec.encodeFrame(reply))
+                        output.flush()
+                        if (fileClosed.get()) break
+                    }
+                }
+            }
+
+            val vfs = HtspVfsClient(
+                profileProvider = { ServerProfile(host = "127.0.0.1", htspPort = server.localPort) },
+                idleDisconnectDelayMs = 0L,
+            )
+
+            try {
+                val handle = vfs.openFile("dvrfile/55")
+                assertEquals(5L, handle.initialSize)
+                assertEquals("FIRST", handle.read(0L, 64).decodeToString())
+                assertEquals(0, handle.read(5L, 64).size)
+
+                fileBytes.set("FIRSTSECOND".toByteArray())
+                assertEquals(11L, handle.statSize())
+                assertEquals("SECOND", handle.read(5L, 64).decodeToString())
+
+                handle.closeSuspend()
+                assertTrue(fileClosed.get())
+            } finally {
+                vfs.close()
+                serverTask.await()
+            }
+        }
+    }
 }

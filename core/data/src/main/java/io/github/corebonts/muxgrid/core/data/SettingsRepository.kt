@@ -18,6 +18,7 @@ import io.github.corebonts.muxgrid.core.model.FormFactor
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LocalDvrProgress
 import io.github.corebonts.muxgrid.core.model.ServerProfile
+import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.nio.charset.StandardCharsets
@@ -52,6 +53,10 @@ class SettingsRepository(
         val raw = prefs[KEY_HWDEC_PRESET]
         raw?.let { runCatching { HwDecPreset.valueOf(it) }.getOrNull() }
             ?: HwDecPreset.defaultFor(formFactor)
+    }
+
+    val timeshiftWindow: Flow<TimeshiftWindow> = context.muxGridDataStore.data.map { prefs ->
+        TimeshiftWindow.fromPersisted(prefs[KEY_TIMESHIFT_WINDOW], formFactor)
     }
 
     val localDvrProgress: Flow<Map<Long, LocalDvrProgress>> = context.muxGridDataStore.data.map { prefs ->
@@ -118,6 +123,12 @@ class SettingsRepository(
         }
     }
 
+    suspend fun setTimeshiftWindow(window: TimeshiftWindow) {
+        context.muxGridDataStore.edit { prefs ->
+            prefs[KEY_TIMESHIFT_WINDOW] = window.name
+        }
+    }
+
     private fun createOrRecoverAead(): Aead? = runCatching {
         AeadConfig.register()
         AndroidKeysetManager.Builder()
@@ -156,6 +167,7 @@ class SettingsRepository(
         private val KEY_PASSWORD_ENC = stringPreferencesKey("server_password_enc")
         private val KEY_FAVORITES = stringSetPreferencesKey("favorite_channel_ids")
         private val KEY_HWDEC_PRESET = stringPreferencesKey("hwdec_preset")
+        private val KEY_TIMESHIFT_WINDOW = stringPreferencesKey("timeshift_window")
         private val KEY_LOCAL_DVR_PROGRESS = stringSetPreferencesKey("dvr_local_progress")
 
         private const val KEYSET_NAME = "muxgrid_master_keyset"

@@ -71,6 +71,7 @@ import io.github.corebonts.muxgrid.core.model.LiveFilter
 import io.github.corebonts.muxgrid.core.model.MainTab
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.ServerProfile
+import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -97,6 +98,7 @@ fun MobileMvpRoot(
     val dvrEntries by repository.dvrEntries.collectAsState()
     val favorites by repository.favoriteChannelIds.collectAsState()
     val hwDecPreset by repository.hwDecPreset.collectAsState()
+    val timeshiftWindow by repository.timeshiftWindow.collectAsState()
     val playbackState by playbackEngine.state.collectAsState()
 
     val currentProfile = profile
@@ -194,6 +196,10 @@ fun MobileMvpRoot(
                                 playbackEngine.playChannel(channel, hwDecPreset)
                                 route = MobileRoute.PLAYER
                             },
+                            onPlayRecording = { entry, channel, startPosSec ->
+                                playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startPosSec)
+                                route = MobileRoute.PLAYER
+                            },
                             onScheduleRecording = { eventId -> repository.scheduleRecording(eventId) },
                             onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
                             onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
@@ -227,9 +233,13 @@ fun MobileMvpRoot(
                     profile = currentProfile,
                     connectionState = connectionState,
                     hwDecPreset = hwDecPreset,
+                    timeshiftWindow = timeshiftWindow,
                     onSelectPreset = { preset ->
                         scope.launch { repository.setHwDecPreset(preset) }
                         playbackEngine.applyPreset(preset)
+                    },
+                    onSelectTimeshiftWindow = { window ->
+                        scope.launch { repository.setTimeshiftWindow(window) }
                     },
                     onOpenServerSetup = {
                         settingsOpen = false
@@ -709,7 +719,9 @@ private fun MobileSettingsSheet(
     profile: ServerProfile,
     connectionState: ConnectionState,
     hwDecPreset: HwDecPreset,
+    timeshiftWindow: TimeshiftWindow,
     onSelectPreset: (HwDecPreset) -> Unit,
+    onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
     onOpenServerSetup: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -795,6 +807,56 @@ private fun MobileSettingsSheet(
                         }
                     }
                 }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MuxGridColors.CardSurface)
+                    .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Live Timeshift Cache Limit", style = MuxGridType.CardTitle)
+                Text(
+                    text = "Split evenly between pause & rewind · applies on next tune",
+                    style = MuxGridType.TabularSmall,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TimeshiftWindow.entries.forEach { option ->
+                        val selected = option == timeshiftWindow
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(if (selected) MuxGridColors.AccentBlue else MuxGridColors.CardSurfaceElevated)
+                                .border(
+                                    1.dp,
+                                    if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
+                                    RoundedCornerShape(50),
+                                )
+                                .clickable { onSelectTimeshiftWindow(option) }
+                                .padding(horizontal = 12.dp, vertical = 7.dp),
+                        ) {
+                            Text(
+                                text = option.shortLabel,
+                                color = if (selected) Color.White else MuxGridColors.TextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = timeshiftWindow.description,
+                    style = MuxGridType.TabularSmall,
+                    color = MuxGridColors.AccentBlueLight,
+                )
             }
         }
     }

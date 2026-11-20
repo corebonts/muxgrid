@@ -72,9 +72,13 @@ data class PlaybackState(
     val isCompleted: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
+    val bufferStartMs: Long = 0L,
+    val bufferEndMs: Long = 0L,
     val liveEdgeOffsetMs: Long = 0L,
     val bufferWindowMs: Long = 0L,
     val isTimeshiftSeekable: Boolean = false,
+    val isGrowingRecording: Boolean = false,
+    val timeshiftNotice: String? = null,
     val audioTracks: List<MediaTrack> = emptyList(),
     val subtitleTracks: List<MediaTrack> = emptyList(),
     val selectedAudioId: Int? = null,
@@ -88,4 +92,18 @@ data class PlaybackState(
 ) {
     val isRecordingPlayback: Boolean
         get() = dvrEntryId != null
+
+    val isBehindLive: Boolean
+        get() = !isRecordingPlayback && isTimeshiftSeekable &&
+            (liveEdgeOffsetMs >= 5_000L || (isPaused && liveEdgeOffsetMs >= 2_000L))
+}
+
+/**
+ * Abstraction over an open growing DVR file (backed by HTSP VFS `fileOpen`/`fileStat`/`fileRead`/`fileClose`).
+ */
+interface GrowingDvrFile : AutoCloseable {
+    val initialSize: Long
+    suspend fun statSize(): Long
+    suspend fun read(offset: Long, size: Int): ByteArray
+    override fun close()
 }

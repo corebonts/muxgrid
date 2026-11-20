@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -38,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -71,6 +73,8 @@ import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LiveFilter
 import io.github.corebonts.muxgrid.core.model.MainTab
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
+import io.github.corebonts.muxgrid.core.model.ServerProfile
+import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -134,6 +138,7 @@ private fun TvMvpContent(
     val dvrEntries by repository.dvrEntries.collectAsState()
     val favorites by repository.favoriteChannelIds.collectAsState()
     val hwDecPreset by repository.hwDecPreset.collectAsState()
+    val timeshiftWindow by repository.timeshiftWindow.collectAsState()
     val playbackState by playbackEngine.state.collectAsState()
 
     val currentProfile = profile
@@ -154,6 +159,7 @@ private fun TvMvpContent(
     }
     var activeTab by remember { mutableStateOf(MainTab.LIVE) }
     var activeFilter by remember { mutableStateOf<LiveFilter>(LiveFilter.All) }
+    var settingsOpen by remember { mutableStateOf(false) }
 
     val filteredChannels = remember(channels, activeFilter, favorites) {
         filterChannels(channels, activeFilter, favorites)
@@ -246,30 +252,10 @@ private fun TvMvpContent(
                     ) {
                         ConnectionStatusBadge(state = connectionState)
                         Button(
-                            onClick = {
-                                val next = if (hwDecPreset == HwDecPreset.MEDIACODEC_ZERO_COPY) {
-                                    HwDecPreset.MEDIACODEC_COPY_BWDIF
-                                } else {
-                                    HwDecPreset.MEDIACODEC_ZERO_COPY
-                                }
-                                scope.launch { repository.setHwDecPreset(next) }
-                            },
+                            onClick = { settingsOpen = true },
                             colors = tvSecondaryButtonColors(),
                         ) {
-                            Text(
-                                text = if (hwDecPreset == HwDecPreset.MEDIACODEC_ZERO_COPY) {
-                                    "HwDec: mediacodec"
-                                } else {
-                                    "HwDec: copy + bwdif"
-                                },
-                                fontSize = 13.sp,
-                            )
-                        }
-                        Button(
-                            onClick = { route = TvRoute.ONBOARDING },
-                            colors = tvSecondaryButtonColors(),
-                        ) {
-                            Text("Server", fontSize = 13.sp)
+                            Text("Settings", fontSize = 13.sp)
                         }
                     }
                 }
@@ -329,6 +315,10 @@ private fun TvMvpContent(
                                     playbackEngine.playChannel(channel, hwDecPreset)
                                     route = TvRoute.PLAYER
                                 },
+                                onPlayRecording = { entry, channel, startSec ->
+                                    playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startSec)
+                                    route = TvRoute.PLAYER
+                                },
                                 onScheduleRecording = { eventId -> repository.scheduleRecording(eventId) },
                                 onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
                                 onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
@@ -356,6 +346,26 @@ private fun TvMvpContent(
                         }
                     }
                 }
+            }
+
+            if (settingsOpen) {
+                TvSettingsDialog(
+                    profile = currentProfile,
+                    hwDecPreset = hwDecPreset,
+                    timeshiftWindow = timeshiftWindow,
+                    onSelectPreset = { preset ->
+                        scope.launch { repository.setHwDecPreset(preset) }
+                        playbackEngine.applyPreset(preset)
+                    },
+                    onSelectTimeshiftWindow = { window ->
+                        scope.launch { repository.setTimeshiftWindow(window) }
+                    },
+                    onOpenServerSetup = {
+                        settingsOpen = false
+                        route = TvRoute.ONBOARDING
+                    },
+                    onDismiss = { settingsOpen = false },
+                )
             }
         }
         TvRoute.PLAYER -> {
@@ -584,6 +594,112 @@ private fun TvChannelCard(
                     style = MuxGridType.CardSubtitle,
                     color = MuxGridColors.TextMuted,
                 )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+private fun TvSettingsDialog(
+    profile: ServerProfile,
+    hwDecPreset: HwDecPreset,
+    timeshiftWindow: TimeshiftWindow,
+    onSelectPreset: (HwDecPreset) -> Unit,
+    onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
+    onOpenServerSetup: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .widthIn(min = 440.dp, max = 640.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(MuxGridColors.CardSurfaceElevated)
+                .border(1.dp, MuxGridColors.HairlineBorder, RoundedCornerShape(20.dp))
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text("Settings", style = MuxGridType.Title, fontSize = 20.sp)
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Video Decoder & Deinterlacer", style = MuxGridType.CardSubtitle, fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        HwDecPreset.MEDIACODEC_ZERO_COPY to "Zero-Copy (TV Default)",
+                        HwDecPreset.MEDIACODEC_COPY_BWDIF to "Copy + bwdif",
+                    ).forEach { (preset, label) ->
+                        FilterChip(
+                            selected = hwDecPreset == preset,
+                            onClick = { onSelectPreset(preset) },
+                            colors = FilterChipDefaults.colors(
+                                containerColor = MuxGridColors.CardSurface,
+                                contentColor = MuxGridColors.TextPrimary,
+                                selectedContainerColor = MuxGridColors.AccentBlue,
+                                selectedContentColor = Color.White,
+                                focusedContainerColor = MuxGridColors.FocusBorder,
+                                focusedContentColor = MuxGridColors.CanvasTv,
+                                focusedSelectedContainerColor = MuxGridColors.FocusBorder,
+                                focusedSelectedContentColor = MuxGridColors.CanvasTv,
+                            ),
+                        ) {
+                            Text(label, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Live Timeshift Cache Limit", style = MuxGridType.CardSubtitle, fontWeight = FontWeight.SemiBold)
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TimeshiftWindow.entries.forEach { option ->
+                        FilterChip(
+                            selected = timeshiftWindow == option,
+                            onClick = { onSelectTimeshiftWindow(option) },
+                            colors = FilterChipDefaults.colors(
+                                containerColor = MuxGridColors.CardSurface,
+                                contentColor = MuxGridColors.TextPrimary,
+                                selectedContainerColor = MuxGridColors.AccentBlue,
+                                selectedContentColor = Color.White,
+                                focusedContainerColor = MuxGridColors.FocusBorder,
+                                focusedContentColor = MuxGridColors.CanvasTv,
+                                focusedSelectedContainerColor = MuxGridColors.FocusBorder,
+                                focusedSelectedContentColor = MuxGridColors.CanvasTv,
+                            ),
+                        ) {
+                            Text(option.shortLabel, fontSize = 13.sp)
+                        }
+                    }
+                }
+                Text(
+                    text = "${timeshiftWindow.description} · split pause/rewind · applies on next tune",
+                    style = MuxGridType.TabularSmall,
+                    color = MuxGridColors.AccentBlueLight,
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Server: ${profile.host}:${profile.htspPort} (HTTP ${profile.httpPort})",
+                    style = MuxGridType.TabularSmall,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = onOpenServerSetup,
+                        colors = tvPrimaryButtonColors(),
+                    ) {
+                        Text("Edit Server Connection")
+                    }
+                    Button(
+                        onClick = onDismiss,
+                        colors = tvSecondaryButtonColors(),
+                    ) {
+                        Text("Close")
+                    }
+                }
             }
         }
     }
