@@ -170,7 +170,7 @@ flowchart LR
 
 ---
 
-### Milestone 3 — Live Timeshift & Growing (In-Progress) Recordings (Implemented; Pending Hardware Verification)
+### Milestone 3 — Live Timeshift & Growing (In-Progress) Recordings (Implemented; Live Timeshift Verified on TV)
 *Goal: Add full pause/rewind on Live TV and seamless watch-while-recording ("chase play").*
 - **Live Timeshift (`MpvPlaybackEngine`):**
   - Target cache size: **configurable size cap in Settings** with safe device defaults (**`1 GB` max disk** split 50/50 pause/rewind on TV given 5.0 GB free `/data`, **`2 GB` max disk** on Phone; options `Off / 512 MB / 1 GB / 2 GB / 4 GB`, with measured MindigTV hints e.g. `~35 min SD or ~15 min HD` for `1 GB`).
@@ -254,8 +254,8 @@ Read this section carefully before writing code — every item below represents 
    Tvheadend tickets expire after 300 s (breaking later recording seeks and reconnects with `401`), and Tvheadend 4.3 defaults to HTTP Digest MD5 (rejecting Basic auth). Route all media requests through `LocalMediaProxy` so tickets are fetched/refreshed transparently via HTSP `getTicket`, never exposing credentials in URLs.
 5. **DO NOT overlap streams on single-tuner servers or wait for HTTP `503` on tuner conflict:**
    A single DVB-T tuner (`IT9135 / Afatech AF9033`) tunes one mux at a time — always tear down the active stream and upstream proxy socket before opening the next channel. When no tuner is free, Tvheadend retries for ~2 s and closes the TCP socket with **0 bytes / empty reply** (never `503`). Detect tuner conflicts on any live open failure by checking HTSP for a `dvrEntry` with `state == "recording"` on another channel.
-6. **DO NOT assume `demuxer-max-back-bytes` alone controls live pause duration or use RAM-only buffers on TV:**
-   While paused, `mpv` buffers into the **forward** cache (`demuxer-max-bytes`) and stops reading once full, causing Tvheadend to drop the stalled client. Size *both* `demuxer-max-bytes` and `demuxer-max-back-bytes` with `cache-on-disk=yes` in `context.cacheDir`, remembering the temp file is append-only (reclaimed only on close) and metadata stays in RAM (~50 MB/hr) — critical on a 2 GB RAM / 16 GB flash TCL C635.
+6. **DO NOT assume `demuxer-max-back-bytes` alone controls live pause duration, use RAM-only buffers on TV, or gate live timeshift UI on `mpv`'s `seekable` property:**
+   While paused, `mpv` buffers into the **forward** cache (`demuxer-max-bytes`) and stops reading once full, causing Tvheadend to drop the stalled client. Size *both* `demuxer-max-bytes` and `demuxer-max-back-bytes` with `cache-on-disk=yes` in `context.cacheDir`, remembering the temp file is append-only (reclaimed only on close) and metadata stays in RAM (~50 MB/hr) — critical on a 2 GB RAM / 16 GB flash TCL C635. Furthermore, `libmpv` reports `seekable=false` (`partially-seekable=false`) on live HTTP MPEG-TS streams even while `demuxer-seekable-cache=yes` is populating `demuxer-cache-state.seekable-ranges` and in-cache `seek` commands succeed — derive `isTimeshiftSeekable` from `seekable-ranges`, not `seekable`.
 7. **DO NOT assume Media3 `SimpleBasePlayer` manages AudioFocus, Noisy Audio, or Wifi/Wake locks:**
    Those live in `ExoPlayerImpl`, not `MediaSessionService`/`SimpleBasePlayer`. Implement `AudioFocusRequest`, `ACTION_AUDIO_BECOMING_NOISY`, `WifiLock`, and `PARTIAL_WAKE_LOCK` explicitly, and own `libmpv` in `MediaSessionService` so `Activity.onStop()` never kills PiP or background audio (`vid=no` on detach).
 8. **DO NOT try to blur a `SurfaceView` video behind the player HUD (or switch TV playback to `TextureView`):**
