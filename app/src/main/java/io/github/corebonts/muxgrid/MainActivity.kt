@@ -157,6 +157,12 @@ private fun SpikeScreen(
                 fontSize = 12.sp,
                 fontFamily = FontFamily.Monospace,
             )
+            Text(
+                text = "State: pause=${stats.paused} | idle=${stats.coreIdle} | pos=${stats.timePos}",
+                color = Color(0xFFA7F3D0),
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+            )
         }
 
         // Bottom control bar (D-pad + touch friendly)
@@ -182,6 +188,9 @@ private fun SpikeScreen(
             SpikeButton("Stop") {
                 activeChannel = "Stopped"
                 scope.launch(Dispatchers.IO) { mpvView?.stopPlayback() }
+            }
+            SpikeButton("Pause/Play") {
+                scope.launch(Dispatchers.IO) { mpvView?.togglePause() }
             }
             SpikeButton(
                 label = if (preset == HwDecPreset.MEDIACODEC_ZERO_COPY) {

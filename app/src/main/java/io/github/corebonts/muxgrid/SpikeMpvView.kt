@@ -13,14 +13,15 @@ data class SpikeStats(
     val aid: String = "-",
     val sid: String = "-",
     val deinterlace: String = "-",
+    val paused: String = "-",
+    val coreIdle: String = "-",
+    val timePos: String = "-",
 )
 
 class SpikeMpvView(
     context: Context,
     attrs: AttributeSet? = null,
 ) : BaseMPVView(context, attrs) {
-
-    private var preset: HwDecPreset = HwDecPreset.MEDIACODEC_ZERO_COPY
 
     override fun initOptions() {
         mpv.setOptionString("profile", "fast")
@@ -30,6 +31,7 @@ class SpikeMpvView(
         mpv.setOptionString("hwdec", "mediacodec")
         mpv.setOptionString("hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
         mpv.setOptionString("deinterlace", "no")
+        mpv.setOptionString("pause", "no")
         mpv.setOptionString("demuxer-lavf-o", "analyzeduration=500000,probesize=524288")
         mpv.setOptionString("cache", "yes")
         mpv.setOptionString("demuxer-max-bytes", "64MiB")
@@ -40,6 +42,7 @@ class SpikeMpvView(
     fun loadUrl(url: String) {
         if (mpv.isInitialized) {
             mpv.command("stop")
+            mpv.setPropertyBoolean("pause", false)
         }
         playFile(url)
     }
@@ -50,8 +53,14 @@ class SpikeMpvView(
         }
     }
 
+    fun togglePause() {
+        if (mpv.isInitialized) {
+            val current = mpv.getPropertyBoolean("pause") ?: false
+            mpv.setPropertyBoolean("pause", !current)
+        }
+    }
+
     fun applyPreset(newPreset: HwDecPreset) {
-        preset = newPreset
         if (!mpv.isInitialized) return
         when (newPreset) {
             HwDecPreset.MEDIACODEC_ZERO_COPY -> {
@@ -82,6 +91,7 @@ class SpikeMpvView(
         val w = mpv.getPropertyInt("video-params/w") ?: 0
         val h = mpv.getPropertyInt("video-params/h") ?: 0
         val fps = mpv.getPropertyDouble("estimated-vf-fps")?.let { "%.1f".format(it) } ?: "-"
+        val pos = mpv.getPropertyDouble("time-pos")?.let { "%.1fs".format(it) } ?: "-"
         return SpikeStats(
             hwdecCurrent = mpv.getPropertyString("hwdec-current") ?: "-",
             resolution = if (w > 0 && h > 0) "${w}x${h}" else "-",
@@ -90,6 +100,9 @@ class SpikeMpvView(
             aid = mpv.getPropertyString("aid") ?: "-",
             sid = mpv.getPropertyString("sid") ?: "-",
             deinterlace = mpv.getPropertyString("deinterlace") ?: "-",
+            paused = (mpv.getPropertyBoolean("pause") ?: false).toString(),
+            coreIdle = (mpv.getPropertyBoolean("core-idle") ?: false).toString(),
+            timePos = pos,
         )
     }
 }
