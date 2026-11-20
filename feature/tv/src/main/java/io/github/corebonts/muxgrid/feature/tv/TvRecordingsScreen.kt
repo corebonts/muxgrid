@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -110,7 +111,7 @@ internal fun TvRecordingsScreen(
         if (recordingNow.isNotEmpty()) {
             item(key = "tv_rec_now") {
                 TvRecordingShelf(
-                    title = "Recording Now",
+                    title = "RECORDING NOW",
                     entries = recordingNow,
                     channelById = channelById,
                     nowEpochSec = nowEpochSec,
@@ -126,7 +127,7 @@ internal fun TvRecordingsScreen(
         if (continueWatching.isNotEmpty()) {
             item(key = "tv_continue") {
                 TvRecordingShelf(
-                    title = "Continue Watching",
+                    title = "CONTINUE WATCHING",
                     entries = continueWatching,
                     channelById = channelById,
                     nowEpochSec = nowEpochSec,
@@ -142,7 +143,7 @@ internal fun TvRecordingsScreen(
         if (completed.isNotEmpty()) {
             item(key = "tv_completed") {
                 TvRecordingShelf(
-                    title = "All Recordings",
+                    title = "ALL RECORDINGS",
                     entries = completed,
                     channelById = channelById,
                     nowEpochSec = nowEpochSec,
@@ -158,7 +159,7 @@ internal fun TvRecordingsScreen(
         if (scheduled.isNotEmpty()) {
             item(key = "tv_scheduled") {
                 TvRecordingShelf(
-                    title = "Scheduled Timers",
+                    title = "SCHEDULED TIMERS",
                     entries = scheduled,
                     channelById = channelById,
                     nowEpochSec = nowEpochSec,
@@ -185,7 +186,7 @@ internal fun TvRecordingsScreen(
                     .widthIn(min = 380.dp, max = 560.dp)
                     .clip(MuxGridShapes.Dialog)
                     .background(MuxGridColors.CardSurfaceElevated)
-                    .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
+                    .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
                     .padding(22.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -239,6 +240,7 @@ internal fun TvRecordingsScreen(
                                     onPlayRecording(entry, ch, startSec)
                                 },
                                 modifier = Modifier.focusRequester(primaryFocusRequester),
+                                shape = tvButtonShape(),
                                 colors = tvPrimaryButtonColors(),
                             ) {
                                 Icon(
@@ -247,7 +249,7 @@ internal fun TvRecordingsScreen(
                                     modifier = Modifier.size(16.dp),
                                 )
                                 Spacer(Modifier.width(4.dp))
-                                Text(if (entry.hasResumePosition) "Resume" else "Watch from Start")
+                                Text(if (entry.hasResumePosition) "Resume" else "Watch from Start", fontWeight = FontWeight.SemiBold)
                             }
                             if (ch != null) {
                                 Button(
@@ -255,6 +257,7 @@ internal fun TvRecordingsScreen(
                                         selectedEntry = null
                                         onWatchLiveChannel(ch)
                                     },
+                                    shape = tvButtonShape(),
                                     colors = tvSecondaryButtonColors(),
                                 ) {
                                     Icon(MuxGridIcons.Live, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -274,6 +277,7 @@ internal fun TvRecordingsScreen(
                                         actionBusy = false
                                     }
                                 },
+                                shape = tvButtonShape(),
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -292,6 +296,7 @@ internal fun TvRecordingsScreen(
                                         actionBusy = false
                                     }
                                 },
+                                shape = tvButtonShape(),
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -308,11 +313,12 @@ internal fun TvRecordingsScreen(
                                         onPlayRecording(entry, ch, startSec)
                                     },
                                     modifier = Modifier.focusRequester(primaryFocusRequester),
+                                    shape = tvButtonShape(),
                                     colors = tvPrimaryButtonColors(),
                                 ) {
                                     Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    Text(if (entry.hasResumePosition) "Resume" else "Play")
+                                    Text(if (entry.hasResumePosition) "Resume" else "Play", fontWeight = FontWeight.SemiBold)
                                 }
                                 if (entry.hasResumePosition) {
                                     Button(
@@ -320,6 +326,7 @@ internal fun TvRecordingsScreen(
                                             selectedEntry = null
                                             onPlayRecording(entry, ch, 0L)
                                         },
+                                        shape = tvButtonShape(),
                                         colors = tvSecondaryButtonColors(),
                                     ) {
                                         Icon(MuxGridIcons.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -338,6 +345,7 @@ internal fun TvRecordingsScreen(
                                             actionBusy = false
                                         }
                                     },
+                                    shape = tvButtonShape(),
                                     colors = tvSecondaryButtonColors(),
                                 ) {
                                     Icon(MuxGridIcons.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -357,6 +365,7 @@ internal fun TvRecordingsScreen(
                                     }
                                 },
                                 modifier = if (entry.isFileMissing) Modifier.focusRequester(primaryFocusRequester) else Modifier,
+                                shape = tvButtonShape(),
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -377,6 +386,7 @@ internal fun TvRecordingsScreen(
                                     }
                                 },
                                 modifier = Modifier.focusRequester(primaryFocusRequester),
+                                shape = tvButtonShape(),
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -397,6 +407,7 @@ internal fun TvRecordingsScreen(
                                     }
                                 },
                                 modifier = Modifier.focusRequester(primaryFocusRequester),
+                                shape = tvButtonShape(),
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -408,6 +419,7 @@ internal fun TvRecordingsScreen(
                     Button(
                         enabled = !actionBusy,
                         onClick = { selectedEntry = null },
+                        shape = tvButtonShape(),
                         colors = tvSecondaryButtonColors(),
                     ) {
                         Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -432,19 +444,18 @@ private fun TvRecordingShelf(
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             text = title,
-            style = MuxGridType.Title,
-            fontSize = 18.sp,
-            modifier = Modifier.padding(horizontal = 12.dp),
+            style = MuxGridType.Eyebrow,
+            modifier = Modifier.padding(horizontal = 4.dp),
         )
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
         ) {
             items(entries, key = { it.id }) { entry ->
                 val ch = channelById[entry.channelId]
                 Surface(
                     onClick = { onClickEntry(entry) },
-                    modifier = Modifier.width(300.dp),
+                    modifier = Modifier.width(292.dp),
                     shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Card),
                     colors = ClickableSurfaceDefaults.colors(
                         containerColor = MuxGridColors.CardSurface,
@@ -453,16 +464,13 @@ private fun TvRecordingShelf(
                         focusedContentColor = MuxGridColors.TextPrimary,
                     ),
                     border = ClickableSurfaceDefaults.border(
-                        border = Border(
-                            border = BorderStroke(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder),
-                            shape = MuxGridShapes.Card,
-                        ),
+                        border = Border.None,
                         focusedBorder = Border(
                             border = BorderStroke(MuxGridBorders.FocusedCard, MuxGridColors.FocusBorder),
                             shape = MuxGridShapes.Card,
                         ),
                     ),
-                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
                 ) {
                     Column(
                         modifier = Modifier.padding(14.dp),
@@ -520,7 +528,7 @@ private fun TvRecordingShelf(
                             Text(
                                 text = "Resume at ${formatDurationMs(entry.playPositionSec * 1000L)}",
                                 style = MuxGridType.TabularSmall,
-                                color = MuxGridColors.AccentBlueLight,
+                                color = MuxGridColors.AccentSoft,
                             )
                         } else {
                             Text(

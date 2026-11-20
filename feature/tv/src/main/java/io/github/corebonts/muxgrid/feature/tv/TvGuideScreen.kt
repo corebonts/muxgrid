@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -58,6 +59,7 @@ import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
@@ -129,19 +131,20 @@ internal fun TvGuideScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // Time navigation + Day jump bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Button(
                 onClick = { windowStartEpochSec = (windowStartEpochSec - TIMELINE_STEP_SEC).coerceAtLeast(floorToHalfHour(nowEpochSec) - 3600L) },
+                shape = tvButtonShape(),
                 colors = tvSecondaryButtonColors(),
             ) {
                 Icon(MuxGridIcons.ChevronLeft, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -150,21 +153,23 @@ internal fun TvGuideScreen(
             }
             Button(
                 onClick = { windowStartEpochSec = floorToHalfHour(nowEpochSec) },
+                shape = tvButtonShape(),
                 colors = tvPrimaryButtonColors(),
             ) {
                 Icon(MuxGridIcons.Schedule, contentDescription = null, modifier = Modifier.size(15.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Now", fontSize = 12.sp)
+                Text("Now", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
             Button(
                 onClick = { windowStartEpochSec += TIMELINE_STEP_SEC },
+                shape = tvButtonShape(),
                 colors = tvSecondaryButtonColors(),
             ) {
                 Text("+2h", fontSize = 12.sp)
                 Spacer(Modifier.width(2.dp))
                 Icon(MuxGridIcons.ChevronRight, contentDescription = null, modifier = Modifier.size(16.dp))
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
             val activeZone = ZoneId.systemDefault()
             val windowDate = Instant.ofEpochSecond(windowStartEpochSec).atZone(activeZone).toLocalDate()
             val todayDate = Instant.ofEpochSecond(nowEpochSec).atZone(activeZone).toLocalDate()
@@ -181,18 +186,27 @@ internal fun TvGuideScreen(
                             targetMidnight + 18L * 3600L // Prime time 18:00 on future days
                         }
                     },
+                    shape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm),
                     colors = FilterChipDefaults.colors(
                         containerColor = MuxGridColors.CardSurface,
-                        contentColor = MuxGridColors.TextPrimary,
-                        selectedContainerColor = MuxGridColors.AccentBlue,
-                        selectedContentColor = Color.White,
+                        contentColor = MuxGridColors.TextSecondary,
+                        selectedContainerColor = MuxGridColors.Accent,
+                        selectedContentColor = MuxGridColors.OnAccent,
                         focusedContainerColor = MuxGridColors.FocusBorder,
                         focusedContentColor = MuxGridColors.CanvasTv,
                         focusedSelectedContainerColor = MuxGridColors.FocusBorder,
                         focusedSelectedContentColor = MuxGridColors.CanvasTv,
                     ),
+                    border = FilterChipDefaults.border(
+                        border = Border.None,
+                        selectedBorder = Border.None,
+                    ),
                 ) {
-                    Text(formatDayLabel(dayDate, nowEpochSec), fontSize = 12.sp)
+                    Text(
+                        text = formatDayLabel(dayDate, nowEpochSec),
+                        fontSize = 12.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                    )
                 }
             }
         }
@@ -202,9 +216,9 @@ internal fun TvGuideScreen(
                 Text("No channels synced yet", style = MuxGridType.CardSubtitle, fontSize = 16.sp)
             }
         } else {
-            // Sticky time ruler + horizontal timeline rows with red "Now" hairline
+            // Sticky time ruler + tight broadcast horizontal timeline rows with red "Now" hairline
             BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                val channelColWidth = 176.dp
+                val channelColWidth = 172.dp
                 val trackWidth = (maxWidth - channelColWidth).coerceAtLeast(320.dp)
 
                 Column(modifier = Modifier.fillMaxSize()) {
@@ -212,16 +226,15 @@ internal fun TvGuideScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 6.dp),
+                            .padding(bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(
                             modifier = Modifier.width(channelColWidth).padding(start = 6.dp),
                         ) {
                             Text(
-                                text = "Channels",
-                                style = MuxGridType.TabularSmall,
-                                color = MuxGridColors.TextMuted,
+                                text = "CHANNELS",
+                                style = MuxGridType.Eyebrow,
                             )
                         }
                         Box(modifier = Modifier.width(trackWidth)) {
@@ -240,7 +253,7 @@ internal fun TvGuideScreen(
                                     modifier = Modifier
                                         .offset(x = trackWidth * frac)
                                         .width(2.dp)
-                                        .height(18.dp)
+                                        .height(16.dp)
                                         .background(MuxGridColors.CoralLive),
                                 )
                             }
@@ -250,10 +263,10 @@ internal fun TvGuideScreen(
                     // Channel rows
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(bottom = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
                     ) {
-                        items(channels, key = { it.id }) { channel ->
+                        itemsIndexed(channels, key = { _, ch -> ch.id }) { rowIndex, channel ->
                             val rowCells = remember(
                                 channel.id,
                                 epgByChannel[channel.id],
@@ -266,11 +279,12 @@ internal fun TvGuideScreen(
                                     windowEnd = windowEndEpochSec,
                                 )
                             }
+                            val baseCellBg = if (rowIndex % 2 == 0) MuxGridColors.CardSurface else MuxGridColors.CardSurfaceAlt
 
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(70.dp),
+                                    .height(64.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 // Sticky channel column
@@ -279,30 +293,27 @@ internal fun TvGuideScreen(
                                     modifier = Modifier
                                         .width(channelColWidth)
                                         .fillMaxHeight()
-                                        .padding(end = 8.dp),
-                                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Badge),
+                                        .padding(end = 4.dp),
+                                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
                                     colors = ClickableSurfaceDefaults.colors(
-                                        containerColor = MuxGridColors.CardSurface,
+                                        containerColor = baseCellBg,
                                         contentColor = MuxGridColors.TextPrimary,
                                         focusedContainerColor = MuxGridColors.CardSurfaceElevated,
                                         focusedContentColor = MuxGridColors.TextPrimary,
                                     ),
                                     border = ClickableSurfaceDefaults.border(
-                                        border = Border(
-                                            border = BorderStroke(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder),
-                                            shape = MuxGridShapes.Badge,
-                                        ),
+                                        border = Border.None,
                                         focusedBorder = Border(
                                             border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                                            shape = MuxGridShapes.Badge,
+                                            shape = MuxGridShapes.Sm,
                                         ),
                                     ),
-                                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.03f),
+                                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
                                 ) {
                                     Row(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .padding(horizontal = 10.dp),
+                                            .padding(horizontal = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     ) {
@@ -311,14 +322,14 @@ internal fun TvGuideScreen(
                                             channelName = channel.name,
                                             piconModel = channel.icon?.let { PiconModel(channel.id, it) },
                                             imageLoader = imageLoader,
-                                            size = 34.dp,
+                                            size = 32.dp,
                                         )
                                         Column(modifier = Modifier.weight(1f)) {
                                             if (channel.number > 0) {
                                                 Text(
                                                     text = channel.formattedNumber,
                                                     style = MuxGridType.TabularSmall,
-                                                    color = MuxGridColors.AccentBlueLight,
+                                                    color = MuxGridColors.TextMuted,
                                                 )
                                             }
                                             Text(
@@ -340,7 +351,7 @@ internal fun TvGuideScreen(
                                 ) {
                                     Row(
                                         modifier = Modifier.fillMaxSize(),
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp),
                                     ) {
                                         rowCells.forEach { cell ->
                                             val ev = cell.event
@@ -349,9 +360,8 @@ internal fun TvGuideScreen(
                                                     modifier = Modifier
                                                         .weight(cell.weight)
                                                         .fillMaxHeight()
-                                                        .clip(MuxGridShapes.Control)
-                                                        .background(MuxGridColors.CardSurface.copy(alpha = 0.45f))
-                                                        .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Control)
+                                                        .clip(MuxGridShapes.Xs)
+                                                        .background(baseCellBg.copy(alpha = 0.55f))
                                                         .padding(horizontal = 10.dp),
                                                     contentAlignment = Alignment.CenterStart,
                                                 ) {
@@ -379,36 +389,36 @@ internal fun TvGuideScreen(
                                                         .weight(cell.weight)
                                                         .fillMaxHeight()
                                                         .onFocusChanged { if (it.isFocused) focusedEvent = ev },
-                                                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Control),
+                                                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Xs),
                                                     colors = ClickableSurfaceDefaults.colors(
-                                                        containerColor = if (isLiveNow) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface,
+                                                        containerColor = if (isLiveNow) MuxGridColors.CardSurfaceElevated else baseCellBg,
                                                         contentColor = MuxGridColors.TextPrimary,
-                                                        focusedContainerColor = MuxGridColors.AccentBlue.copy(alpha = 0.28f),
-                                                        focusedContentColor = MuxGridColors.OnAccent,
+                                                        focusedContainerColor = MuxGridColors.Accent.copy(alpha = 0.22f),
+                                                        focusedContentColor = MuxGridColors.TextPrimary,
                                                     ),
                                                     border = ClickableSurfaceDefaults.border(
-                                                        border = Border(
-                                                            border = BorderStroke(
-                                                                MuxGridBorders.Hairline,
-                                                                when {
-                                                                    linkedDvr?.state == DvrState.RECORDING -> MuxGridColors.CoralLive.copy(alpha = 0.65f)
-                                                                    isLiveNow -> MuxGridColors.AccentBlue.copy(alpha = 0.55f)
-                                                                    else -> MuxGridColors.HairlineBorder
-                                                                },
-                                                            ),
-                                                            shape = MuxGridShapes.Control,
-                                                        ),
+                                                        border = if (linkedDvr?.state == DvrState.RECORDING) {
+                                                            Border(
+                                                                border = BorderStroke(
+                                                                    MuxGridBorders.Hairline,
+                                                                    MuxGridColors.CoralLive.copy(alpha = 0.65f),
+                                                                ),
+                                                                shape = MuxGridShapes.Xs,
+                                                            )
+                                                        } else {
+                                                            Border.None
+                                                        },
                                                         focusedBorder = Border(
                                                             border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                                                            shape = MuxGridShapes.Control,
+                                                            shape = MuxGridShapes.Xs,
                                                         ),
                                                     ),
-                                                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
+                                                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.015f),
                                                 ) {
                                                     Column(
                                                         modifier = Modifier
                                                             .fillMaxSize()
-                                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                            .padding(horizontal = 9.dp, vertical = 7.dp),
                                                         verticalArrangement = Arrangement.SpaceBetween,
                                                     ) {
                                                         Row(
@@ -418,7 +428,7 @@ internal fun TvGuideScreen(
                                                         ) {
                                                             Text(
                                                                 text = ev.title,
-                                                                fontSize = 13.sp,
+                                                                fontSize = 12.5.sp,
                                                                 fontWeight = FontWeight.SemiBold,
                                                                 maxLines = 1,
                                                                 overflow = TextOverflow.Ellipsis,
@@ -432,7 +442,7 @@ internal fun TvGuideScreen(
                                                         Text(
                                                             text = "${formatEpochHm(ev.startEpochSec)}–${formatEpochHm(ev.stopEpochSec)}",
                                                             style = MuxGridType.TabularSmall,
-                                                            color = if (isLiveNow) MuxGridColors.AccentBlueLight else MuxGridColors.TextMuted,
+                                                            color = if (isLiveNow) MuxGridColors.AccentSoft else MuxGridColors.TextMuted,
                                                             maxLines = 1,
                                                         )
                                                     }
@@ -459,65 +469,66 @@ internal fun TvGuideScreen(
         }
 
         // Fixed-height bottom details bar for focused program (avoids top-layout height jumping)
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(MuxGridShapes.Card)
-                .background(MuxGridColors.CardSurfaceElevated)
-                .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
-                .padding(14.dp),
+                .clip(MuxGridShapes.Sm)
+                .background(MuxGridColors.CardSurface),
         ) {
-            if (previewEvent != null) {
-                val dvr = findMatchingDvrEntry(previewEvent, dvrEntries)
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = previewEvent.title,
-                            style = MuxGridType.Title,
-                            fontSize = 18.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        if (dvr != null) {
-                            DvrStateBadge(state = dvr.state, isWatched = dvr.isWatched)
-                            Spacer(Modifier.width(10.dp))
+            MuxGridDivider()
+            Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                if (previewEvent != null) {
+                    val dvr = findMatchingDvrEntry(previewEvent, dvrEntries)
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = previewEvent.title,
+                                style = MuxGridType.Title,
+                                fontSize = 17.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            if (dvr != null) {
+                                DvrStateBadge(state = dvr.state, isWatched = dvr.isWatched)
+                                Spacer(Modifier.width(10.dp))
+                            }
+                            Text(
+                                text = "${formatEpochHm(previewEvent.startEpochSec)}–${formatEpochHm(previewEvent.stopEpochSec)} (${formatDurationMinutes(previewEvent.startEpochSec, previewEvent.stopEpochSec)})",
+                                style = MuxGridType.TabularSmall,
+                                color = MuxGridColors.AccentSoft,
+                            )
                         }
+                        val synopsis = previewEvent.description ?: previewEvent.summary ?: previewEvent.subtitle
                         Text(
-                            text = "${formatEpochHm(previewEvent.startEpochSec)}–${formatEpochHm(previewEvent.stopEpochSec)} (${formatDurationMinutes(previewEvent.startEpochSec, previewEvent.stopEpochSec)})",
-                            style = MuxGridType.TabularSmall,
-                            color = MuxGridColors.AccentBlueLight,
+                            text = synopsis?.takeIf { it.isNotBlank() } ?: "Press OK to watch or schedule recording",
+                            style = MuxGridType.CardSubtitle,
+                            color = MuxGridColors.TextSecondary,
+                            minLines = 2,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    val synopsis = previewEvent.description ?: previewEvent.summary ?: previewEvent.subtitle
-                    Text(
-                        text = synopsis?.takeIf { it.isNotBlank() } ?: "Press OK to watch or schedule recording",
-                        style = MuxGridType.CardSubtitle,
-                        color = MuxGridColors.TextPrimary.copy(alpha = 0.85f),
-                        minLines = 2,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = "Program Guide",
-                        style = MuxGridType.Title,
-                        fontSize = 18.sp,
-                        maxLines = 1,
-                    )
-                    Text(
-                        text = "Browse upcoming programs across all channels",
-                        style = MuxGridType.CardSubtitle,
-                        minLines = 2,
-                        maxLines = 2,
-                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            text = "Program Guide",
+                            style = MuxGridType.Title,
+                            fontSize = 17.sp,
+                            maxLines = 1,
+                        )
+                        Text(
+                            text = "Browse upcoming programs across all channels",
+                            style = MuxGridType.CardSubtitle,
+                            minLines = 2,
+                            maxLines = 2,
+                        )
+                    }
                 }
             }
         }
@@ -539,7 +550,7 @@ internal fun TvGuideScreen(
                     .widthIn(min = 380.dp, max = 560.dp)
                     .clip(MuxGridShapes.Dialog)
                     .background(MuxGridColors.CardSurfaceElevated)
-                    .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
+                    .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
                     .padding(22.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -588,11 +599,12 @@ internal fun TvGuideScreen(
                                 onWatchChannel(ch)
                             },
                             modifier = Modifier.focusRequester(primaryFocusRequester),
+                            shape = tvButtonShape(),
                             colors = tvPrimaryButtonColors(),
                         ) {
                             Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text(if (isLiveNow) "Watch Live" else "Watch Channel")
+                            Text(if (isLiveNow) "Watch Live" else "Watch Channel", fontWeight = FontWeight.SemiBold)
                         }
                     }
 
@@ -612,6 +624,7 @@ internal fun TvGuideScreen(
                                     onPlayRecording(linkedDvr, ch, startSec)
                                 },
                                 modifier = recordButtonModifier,
+                                shape = tvButtonShape(),
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -630,6 +643,7 @@ internal fun TvGuideScreen(
                                         actionBusy = false
                                     }
                                 },
+                                shape = tvButtonShape(),
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -651,6 +665,7 @@ internal fun TvGuideScreen(
                                     }
                                 },
                                 modifier = recordButtonModifier,
+                                shape = tvButtonShape(),
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -672,6 +687,7 @@ internal fun TvGuideScreen(
                                     }
                                 },
                                 modifier = recordButtonModifier,
+                                shape = tvButtonShape(),
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Record, contentDescription = null, modifier = Modifier.size(14.dp))
@@ -684,6 +700,7 @@ internal fun TvGuideScreen(
                     Button(
                         enabled = !actionBusy,
                         onClick = { actionEvent = null },
+                        shape = tvButtonShape(),
                         colors = tvSecondaryButtonColors(),
                     ) {
                         Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))

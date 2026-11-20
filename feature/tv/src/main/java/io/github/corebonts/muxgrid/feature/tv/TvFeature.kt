@@ -72,6 +72,7 @@ import io.github.corebonts.muxgrid.core.designsystem.ConnectionStatusBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
@@ -100,19 +101,22 @@ private enum class TvRoute {
 
 @Composable
 internal fun tvPrimaryButtonColors() = ButtonDefaults.colors(
-    containerColor = MuxGridColors.AccentBlue,
-    contentColor = Color.White,
+    containerColor = MuxGridColors.Accent,
+    contentColor = MuxGridColors.OnAccent,
     focusedContainerColor = MuxGridColors.FocusBorder,
     focusedContentColor = MuxGridColors.CanvasTv,
 )
 
 @Composable
 internal fun tvSecondaryButtonColors() = ButtonDefaults.colors(
-    containerColor = MuxGridColors.CardSurface,
+    containerColor = MuxGridColors.CardSurfaceElevated,
     contentColor = MuxGridColors.TextPrimary,
     focusedContainerColor = MuxGridColors.FocusBorder,
     focusedContentColor = MuxGridColors.CanvasTv,
 )
+
+@Composable
+internal fun tvButtonShape() = ButtonDefaults.shape(shape = MuxGridShapes.Sm)
 
 @Composable
 fun TvMvpRoot(
@@ -121,8 +125,8 @@ fun TvMvpRoot(
 ) {
     TvMaterialTheme(
         colorScheme = tvDarkColorScheme(
-            primary = MuxGridColors.AccentBlue,
-            onPrimary = MuxGridColors.TextPrimary,
+            primary = MuxGridColors.Accent,
+            onPrimary = MuxGridColors.OnAccent,
             background = MuxGridColors.CanvasTv,
             onBackground = MuxGridColors.TextPrimary,
             surface = MuxGridColors.CardSurface,
@@ -162,7 +166,7 @@ private fun TvMvpContent(
                 .background(MuxGridColors.CanvasTv),
             contentAlignment = Alignment.Center,
         ) {
-            CircularProgressIndicator(color = MuxGridColors.AccentBlueLight)
+            CircularProgressIndicator(color = MuxGridColors.AccentSoft)
         }
         return
     }
@@ -224,8 +228,7 @@ private fun TvMvpContent(
             Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MuxGridColors.CanvasTv)
-                    .padding(start = 16.dp, end = 24.dp, top = 16.dp, bottom = 16.dp),
+                    .background(MuxGridColors.CanvasTv),
             ) {
                 TvNavigationRail(
                     activeTab = activeTab,
@@ -236,34 +239,32 @@ private fun TvMvpContent(
                     onOpenSettings = { settingsOpen = true },
                 )
 
-                Spacer(Modifier.width(16.dp))
-
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
+                        .padding(start = 20.dp, end = 24.dp, top = 16.dp, bottom = 12.dp)
                         .focusGroup()
                         .focusRestorer(contentFocusRequester),
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Column {
-                            Text(
-                                text = when (activeTab) {
-                                    MainTab.LIVE -> "Live TV & Radio"
-                                    MainTab.GUIDE -> "Program Guide"
-                                    MainTab.RECORDINGS -> "DVR Recordings"
-                                },
-                                style = MuxGridType.Title,
-                                fontSize = 22.sp,
-                            )
+                        Text(
+                            text = when (activeTab) {
+                                MainTab.LIVE -> "Live"
+                                MainTab.GUIDE -> "Guide"
+                                MainTab.RECORDINGS -> "Recordings"
+                            },
+                            style = MuxGridType.ScreenTitle,
+                        )
+                        if (connectionState !is ConnectionState.Connected) {
+                            ConnectionStatusBadge(state = connectionState)
                         }
-                        ConnectionStatusBadge(state = connectionState)
                     }
 
                     visibleError?.let { errState ->
@@ -271,7 +272,7 @@ private fun TvMvpContent(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 8.dp)
+                                .padding(horizontal = 4.dp)
                                 .clip(MuxGridShapes.Row)
                                 .background(MuxGridColors.CoralLive.copy(alpha = 0.16f))
                                 .border(MuxGridBorders.Hairline, MuxGridColors.CoralLive.copy(alpha = 0.45f), MuxGridShapes.Row)
@@ -282,6 +283,7 @@ private fun TvMvpContent(
                             Text(errState.message, color = MuxGridColors.TextPrimary, fontSize = 14.sp)
                             Button(
                                 onClick = if (errState.isAuthError) ({ route = TvRoute.ONBOARDING }) else ({ repository.reconnect() }),
+                                shape = tvButtonShape(),
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Text(if (errState.isAuthError) "Edit Server" else "Retry")
@@ -431,84 +433,61 @@ private fun TvNavigationRail(
     onSelectTab: (MainTab) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    val railWidth by animateDpAsState(targetValue = if (expanded) 190.dp else 72.dp, label = "tvRailWidth")
+    val railWidth by animateDpAsState(targetValue = if (expanded) 186.dp else 68.dp, label = "tvRailWidth")
     val activeFocusRequester = remember { FocusRequester() }
 
-    Column(
-        modifier = Modifier
-            .width(railWidth)
-            .fillMaxHeight()
-            .clip(MuxGridShapes.Dialog)
-            .background(MuxGridColors.CardSurface)
-            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
-            .onFocusChanged { onRailFocusChanged(it.hasFocus) }
-            .focusGroup()
-            .focusRestorer(activeFocusRequester)
-            .padding(vertical = 16.dp, horizontal = 10.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
+    Row(modifier = Modifier.fillMaxHeight()) {
         Column(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .width(railWidth)
+                .fillMaxHeight()
+                .background(MuxGridColors.CardSurfaceAlt)
+                .onFocusChanged { onRailFocusChanged(it.hasFocus) }
+                .focusGroup()
+                .focusRestorer(activeFocusRequester)
+                .padding(vertical = 20.dp, horizontal = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.Center,
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(MuxGridShapes.Control)
-                        .background(MuxGridColors.AccentBlue),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("M", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                }
-                if (expanded) {
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = "MuxGrid",
-                        style = MuxGridType.Title,
-                        fontSize = 17.sp,
-                        maxLines = 1,
+                listOf(
+                    Triple(MainTab.LIVE, MuxGridIcons.Live to MuxGridIcons.LiveFilled, "Live"),
+                    Triple(MainTab.GUIDE, MuxGridIcons.Guide to MuxGridIcons.GuideFilled, "Guide"),
+                    Triple(MainTab.RECORDINGS, MuxGridIcons.Recordings to MuxGridIcons.RecordingsFilled, "Recordings"),
+                ).forEach { (tab, icons, label) ->
+                    val selected = tab == activeTab
+                    val itemModifier = when {
+                        selected && tab == MainTab.LIVE -> Modifier.focusRequester(railFocusRequester).focusRequester(activeFocusRequester)
+                        selected -> Modifier.focusRequester(activeFocusRequester)
+                        else -> Modifier
+                    }
+                    TvRailItem(
+                        icon = if (selected) icons.second else icons.first,
+                        label = label,
+                        expanded = expanded,
+                        selected = selected,
+                        onClick = { onSelectTab(tab) },
+                        modifier = itemModifier,
                     )
                 }
             }
 
-            Spacer(Modifier.height(6.dp))
-
-            listOf(
-                Triple(MainTab.LIVE, MuxGridIcons.Live to MuxGridIcons.LiveFilled, "Live"),
-                Triple(MainTab.GUIDE, MuxGridIcons.Guide to MuxGridIcons.GuideFilled, "Guide"),
-                Triple(MainTab.RECORDINGS, MuxGridIcons.Recordings to MuxGridIcons.RecordingsFilled, "Recordings"),
-            ).forEach { (tab, icons, label) ->
-                val selected = tab == activeTab
-                val itemModifier = when {
-                    selected && tab == MainTab.LIVE -> Modifier.focusRequester(railFocusRequester).focusRequester(activeFocusRequester)
-                    selected -> Modifier.focusRequester(activeFocusRequester)
-                    else -> Modifier
-                }
-                TvRailItem(
-                    icon = if (selected) icons.second else icons.first,
-                    label = label,
-                    expanded = expanded,
-                    selected = selected,
-                    onClick = { onSelectTab(tab) },
-                    modifier = itemModifier,
-                )
-            }
+            TvRailItem(
+                icon = MuxGridIcons.Settings,
+                label = "Settings",
+                expanded = expanded,
+                selected = false,
+                onClick = onOpenSettings,
+            )
         }
-
-        TvRailItem(
-            icon = MuxGridIcons.Settings,
-            label = "Settings",
-            expanded = expanded,
-            selected = false,
-            onClick = onOpenSettings,
+        Box(
+            modifier = Modifier
+                .width(MuxGridBorders.Divider)
+                .fillMaxHeight()
+                .background(MuxGridColors.Divider),
         )
     }
 }
@@ -525,39 +504,42 @@ private fun TvRailItem(
     Surface(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Row),
+        shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = if (selected) MuxGridColors.AccentBlue.copy(alpha = 0.25f) else Color.Transparent,
-            contentColor = if (selected) MuxGridColors.OnAccent else MuxGridColors.TextSecondary,
+            containerColor = if (selected) MuxGridColors.CardSurfaceElevated else Color.Transparent,
+            contentColor = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextMuted,
             focusedContainerColor = MuxGridColors.FocusBorder,
             focusedContentColor = MuxGridColors.CanvasTv,
         ),
         border = ClickableSurfaceDefaults.border(
-            border = Border(
-                border = BorderStroke(
-                    MuxGridBorders.Hairline,
-                    if (selected) MuxGridColors.AccentBlueLight.copy(alpha = 0.6f) else Color.Transparent,
-                ),
-                shape = MuxGridShapes.Row,
-            ),
+            border = Border.None,
             focusedBorder = Border(
                 border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                shape = MuxGridShapes.Row,
+                shape = MuxGridShapes.Sm,
             ),
         ),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 11.dp),
+                .padding(horizontal = 8.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.Center,
         ) {
+            if (selected) {
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .height(18.dp)
+                        .background(MuxGridColors.Accent),
+                )
+                Spacer(Modifier.width(if (expanded) 9.dp else 4.dp))
+            }
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(22.dp),
             )
             if (expanded) {
                 Spacer(Modifier.width(12.dp))
@@ -594,8 +576,8 @@ private fun TvLiveChannelsTab(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             filters.forEachIndexed { idx, filter ->
                 val selected = filter == activeFilter
@@ -609,30 +591,40 @@ private fun TvLiveChannelsTab(
                     selected = selected,
                     onClick = { onSelectFilter(filter) },
                     modifier = if (idx == 0) Modifier.focusRequester(initialContentFocusRequester) else Modifier,
+                    shape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm),
                     leadingIcon = filterIcon?.let { icon ->
                         {
                             Icon(
                                 imageVector = icon,
                                 contentDescription = null,
-                                modifier = Modifier.size(16.dp),
+                                modifier = Modifier.size(15.dp),
                             )
                         }
                     },
                     colors = FilterChipDefaults.colors(
-                        containerColor = MuxGridColors.CardSurface,
-                        contentColor = MuxGridColors.TextPrimary,
-                        selectedContainerColor = MuxGridColors.AccentBlue,
-                        selectedContentColor = Color.White,
+                        containerColor = Color.Transparent,
+                        contentColor = MuxGridColors.TextMuted,
+                        selectedContainerColor = MuxGridColors.Accent,
+                        selectedContentColor = MuxGridColors.OnAccent,
                         focusedContainerColor = MuxGridColors.FocusBorder,
                         focusedContentColor = MuxGridColors.CanvasTv,
                         focusedSelectedContainerColor = MuxGridColors.FocusBorder,
                         focusedSelectedContentColor = MuxGridColors.CanvasTv,
                     ),
+                    border = FilterChipDefaults.border(
+                        border = Border.None,
+                        selectedBorder = Border.None,
+                    ),
                 ) {
-                    Text(filter.label(), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        text = filter.label(),
+                        fontSize = 13.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                    )
                 }
             }
         }
+        MuxGridDivider(modifier = Modifier.padding(horizontal = 4.dp))
 
         Spacer(Modifier.height(6.dp))
 
@@ -651,9 +643,9 @@ private fun TvLiveChannelsTab(
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 10.dp, bottom = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                contentPadding = PaddingValues(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(channels, key = { it.id }) { channel ->
                     TvChannelCard(
@@ -684,7 +676,7 @@ private fun TvChannelCard(
     Surface(
         onClick = onClick,
         onLongClick = onLongClick,
-        shape = ClickableSurfaceDefaults.shape(shape = MuxGridShapes.CardLg),
+        shape = ClickableSurfaceDefaults.shape(shape = MuxGridShapes.Card),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = MuxGridColors.CardSurface,
             contentColor = MuxGridColors.TextPrimary,
@@ -692,22 +684,19 @@ private fun TvChannelCard(
             focusedContentColor = MuxGridColors.TextPrimary,
         ),
         border = ClickableSurfaceDefaults.border(
-            border = Border(
-                border = BorderStroke(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder),
-                shape = MuxGridShapes.CardLg,
-            ),
+            border = Border.None,
             focusedBorder = Border(
                 border = BorderStroke(MuxGridBorders.FocusedCard, MuxGridColors.FocusBorder),
-                shape = MuxGridShapes.CardLg,
+                shape = MuxGridShapes.Card,
             ),
         ),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -718,7 +707,7 @@ private fun TvChannelCard(
                     channelName = channel.name,
                     piconModel = channel.icon?.let { PiconModel(channel.id, it) },
                     imageLoader = imageLoader,
-                    size = 52.dp,
+                    size = 48.dp,
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Row(
@@ -729,7 +718,7 @@ private fun TvChannelCard(
                             Text(
                                 text = channel.formattedNumber,
                                 style = MuxGridType.TabularNumber,
-                                color = MuxGridColors.AccentBlueLight,
+                                color = MuxGridColors.TextMuted,
                             )
                         }
                         if (isFavorite) {
@@ -737,14 +726,14 @@ private fun TvChannelCard(
                                 imageVector = MuxGridIcons.StarFilled,
                                 contentDescription = "Favorite",
                                 tint = MuxGridColors.AmberWarn,
-                                modifier = Modifier.size(15.dp),
+                                modifier = Modifier.size(14.dp),
                             )
                         }
                     }
                     Text(
                         text = channel.name,
                         style = MuxGridType.CardTitle,
-                        fontSize = 16.sp,
+                        fontSize = 15.5.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -809,7 +798,7 @@ private fun TvSettingsDialog(
                 .widthIn(min = 440.dp, max = 640.dp)
                 .clip(MuxGridShapes.Dialog)
                 .background(MuxGridColors.CardSurfaceElevated)
-                .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
+                .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
@@ -820,14 +809,14 @@ private fun TvSettingsDialog(
                 Icon(
                     imageVector = MuxGridIcons.Settings,
                     contentDescription = null,
-                    tint = MuxGridColors.AccentBlueLight,
+                    tint = MuxGridColors.AccentSoft,
                     modifier = Modifier.size(22.dp),
                 )
                 Text("Settings", style = MuxGridType.Title, fontSize = 20.sp)
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Video Decoder & Deinterlacer", style = MuxGridType.CardSubtitle, fontWeight = FontWeight.SemiBold)
+                Text("VIDEO DECODER & DEINTERLACER", style = MuxGridType.Eyebrow)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(
                         HwDecPreset.MEDIACODEC_ZERO_COPY to "Zero-Copy (TV Default)",
@@ -836,11 +825,12 @@ private fun TvSettingsDialog(
                         FilterChip(
                             selected = hwDecPreset == preset,
                             onClick = { onSelectPreset(preset) },
+                            shape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm),
                             colors = FilterChipDefaults.colors(
                                 containerColor = MuxGridColors.CardSurface,
                                 contentColor = MuxGridColors.TextPrimary,
-                                selectedContainerColor = MuxGridColors.AccentBlue,
-                                selectedContentColor = Color.White,
+                                selectedContainerColor = MuxGridColors.Accent,
+                                selectedContentColor = MuxGridColors.OnAccent,
                                 focusedContainerColor = MuxGridColors.FocusBorder,
                                 focusedContentColor = MuxGridColors.CanvasTv,
                                 focusedSelectedContainerColor = MuxGridColors.FocusBorder,
@@ -854,7 +844,7 @@ private fun TvSettingsDialog(
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Live Timeshift Cache Limit", style = MuxGridType.CardSubtitle, fontWeight = FontWeight.SemiBold)
+                Text("LIVE TIMESHIFT CACHE LIMIT", style = MuxGridType.Eyebrow)
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -863,11 +853,12 @@ private fun TvSettingsDialog(
                         FilterChip(
                             selected = timeshiftWindow == option,
                             onClick = { onSelectTimeshiftWindow(option) },
+                            shape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm),
                             colors = FilterChipDefaults.colors(
                                 containerColor = MuxGridColors.CardSurface,
                                 contentColor = MuxGridColors.TextPrimary,
-                                selectedContainerColor = MuxGridColors.AccentBlue,
-                                selectedContentColor = Color.White,
+                                selectedContainerColor = MuxGridColors.Accent,
+                                selectedContentColor = MuxGridColors.OnAccent,
                                 focusedContainerColor = MuxGridColors.FocusBorder,
                                 focusedContentColor = MuxGridColors.CanvasTv,
                                 focusedSelectedContainerColor = MuxGridColors.FocusBorder,
@@ -881,11 +872,12 @@ private fun TvSettingsDialog(
                 Text(
                     text = "${timeshiftWindow.description} · split pause/rewind · applies on next tune",
                     style = MuxGridType.TabularSmall,
-                    color = MuxGridColors.AccentBlueLight,
+                    color = MuxGridColors.AccentSoft,
                 )
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                MuxGridDivider()
                 Text(
                     text = "Server: ${profile.host}:${profile.htspPort} (HTTP ${profile.httpPort})",
                     style = MuxGridType.TabularSmall,
@@ -893,14 +885,16 @@ private fun TvSettingsDialog(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
                         onClick = onOpenServerSetup,
+                        shape = tvButtonShape(),
                         colors = tvPrimaryButtonColors(),
                     ) {
                         Icon(MuxGridIcons.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Edit Server Connection")
+                        Text("Edit Server Connection", fontWeight = FontWeight.SemiBold)
                     }
                     Button(
                         onClick = onDismiss,
+                        shape = tvButtonShape(),
                         colors = tvSecondaryButtonColors(),
                     ) {
                         Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))

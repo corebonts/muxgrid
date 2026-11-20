@@ -303,7 +303,7 @@ internal fun TvPlayerScreen(
 
         if (playbackState.status == PlaybackStatus.BUFFERING) {
             CircularProgressIndicator(
-                color = MuxGridColors.AccentBlueLight,
+                color = MuxGridColors.AccentSoft,
                 modifier = Modifier.align(Alignment.Center),
             )
         }
@@ -361,6 +361,7 @@ internal fun TvPlayerScreen(
                         Button(
                             onClick = onExit,
                             modifier = Modifier.focusRequester(okFocusRequester),
+                            shape = tvButtonShape(),
                             colors = tvPrimaryButtonColors(),
                         ) {
                             Text("OK", fontWeight = FontWeight.SemiBold)
@@ -382,9 +383,9 @@ internal fun TvPlayerScreen(
             Row(
                 modifier = Modifier
                     .widthIn(max = 500.dp)
-                    .clip(MuxGridShapes.CardLg)
+                    .clip(MuxGridShapes.Card)
                     .background(MuxGridColors.ScrimSurface)
-                    .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.CardLg)
+                    .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -394,7 +395,7 @@ internal fun TvPlayerScreen(
                         channelName = activeChannel.name,
                         piconModel = activeChannel.icon?.let { PiconModel(activeChannel.id, it) },
                         imageLoader = imageLoader,
-                        size = 54.dp,
+                        size = 52.dp,
                     )
                     Spacer(Modifier.width(14.dp))
                 }
@@ -409,7 +410,7 @@ internal fun TvPlayerScreen(
                     }
                     Text(
                         text = primaryTitle,
-                        color = MuxGridColors.OnAccent,
+                        color = Color.White,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
@@ -436,7 +437,7 @@ internal fun TvPlayerScreen(
                         Spacer(Modifier.height(6.dp))
                         LiveProgressBar(
                             progress = frac,
-                            fillColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.AccentBlueLight,
+                            fillColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.ProgressFill,
                             modifier = Modifier.fillMaxWidth(),
                         )
                     } else {
@@ -476,7 +477,7 @@ internal fun TvPlayerScreen(
                     .fillMaxWidth()
                     .clip(MuxGridShapes.Card)
                     .background(MuxGridColors.ScrimSurface)
-                    .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
+                    .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -495,7 +496,7 @@ internal fun TvPlayerScreen(
                         ) {
                             Text(
                                 text = playbackState.programTitle ?: "Recording",
-                                color = MuxGridColors.OnAccent,
+                                color = Color.White,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                             )
@@ -507,12 +508,12 @@ internal fun TvPlayerScreen(
                                     Icon(
                                         imageVector = if (lastSeekDirection < 0) MuxGridIcons.FastRewind else MuxGridIcons.FastForward,
                                         contentDescription = null,
-                                        tint = MuxGridColors.AccentBlueLight,
+                                        tint = MuxGridColors.AccentSoft,
                                         modifier = Modifier.size(16.dp),
                                     )
                                     Text(
                                         text = lastSeekStepLabel,
-                                        color = MuxGridColors.AccentBlueLight,
+                                        color = MuxGridColors.AccentSoft,
                                         style = MuxGridType.TabularSmall,
                                         fontWeight = FontWeight.Bold,
                                     )
@@ -534,7 +535,7 @@ internal fun TvPlayerScreen(
                     }
                     LiveProgressBar(
                         progress = (shownPosMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f),
-                        fillColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.AccentBlueLight,
+                        fillColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.Accent,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
@@ -554,7 +555,7 @@ internal fun TvPlayerScreen(
                         ) {
                             Text(
                                 text = playbackState.channelName ?: activeChannel?.name ?: "Live TV",
-                                color = MuxGridColors.OnAccent,
+                                color = Color.White,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                             )
@@ -566,12 +567,12 @@ internal fun TvPlayerScreen(
                                     Icon(
                                         imageVector = if (lastSeekDirection < 0) MuxGridIcons.FastRewind else MuxGridIcons.FastForward,
                                         contentDescription = null,
-                                        tint = MuxGridColors.AccentBlueLight,
+                                        tint = MuxGridColors.AccentSoft,
                                         modifier = Modifier.size(16.dp),
                                     )
                                     Text(
                                         text = lastSeekStepLabel,
-                                        color = MuxGridColors.AccentBlueLight,
+                                        color = MuxGridColors.AccentSoft,
                                         style = MuxGridType.TabularSmall,
                                         fontWeight = FontWeight.Bold,
                                     )
@@ -585,11 +586,12 @@ internal fun TvPlayerScreen(
                                 "LIVE · Buffer ${formatDurationSec(stableBufSec)}"
                             },
                             style = MuxGridType.TabularNumber,
-                            color = if (offsetMs >= 2_000L) MuxGridColors.AccentBlueLight else MuxGridColors.CoralLive,
+                            color = if (offsetMs >= 2_000L) MuxGridColors.AccentSoft else MuxGridColors.CoralLive,
                         )
                     }
                     LiveProgressBar(
                         progress = frac,
+                        fillColor = MuxGridColors.Accent,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -681,14 +683,14 @@ internal fun TvPlayerScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             LiveProgressBar(
                                 progress = (playbackState.positionMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f),
-                                fillColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.AccentBlueLight,
+                                fillColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.Accent,
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
-                                Text(formatDurationSec(stablePosSec), style = MuxGridType.TabularSmall, color = MuxGridColors.OnAccent)
+                                Text(formatDurationSec(stablePosSec), style = MuxGridType.TabularSmall, color = Color.White)
                                 Text(formatDurationSec(stableDurSec), style = MuxGridType.TabularSmall)
                             }
                         }
@@ -700,6 +702,7 @@ internal fun TvPlayerScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             LiveProgressBar(
                                 progress = frac,
+                                fillColor = MuxGridColors.Accent,
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             Row(
@@ -713,7 +716,7 @@ internal fun TvPlayerScreen(
                                         "LIVE"
                                     },
                                     style = MuxGridType.TabularSmall,
-                                    color = if (playbackState.isBehindLive) MuxGridColors.AccentBlueLight else MuxGridColors.CoralLive,
+                                    color = if (playbackState.isBehindLive) MuxGridColors.AccentSoft else MuxGridColors.CoralLive,
                                 )
                                 Text(
                                     text = "Timeshift buffer ${formatDurationSec(stableBufSec)}",
@@ -724,12 +727,13 @@ internal fun TvPlayerScreen(
                     }
 
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (canSeekTimeline) {
                             Button(
                                 onClick = { playbackEngine.seekBy(-30_000L) },
+                                shape = tvButtonShape(),
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Icon(
@@ -742,12 +746,8 @@ internal fun TvPlayerScreen(
                         Button(
                             onClick = { playbackEngine.togglePause() },
                             modifier = Modifier.focusRequester(playPauseFocusRequester),
-                            colors = ButtonDefaults.colors(
-                                containerColor = MuxGridColors.AccentBlue,
-                                contentColor = Color.White,
-                                focusedContainerColor = MuxGridColors.FocusBorder,
-                                focusedContentColor = MuxGridColors.CanvasTv,
-                            ),
+                            shape = tvButtonShape(),
+                            colors = tvPrimaryButtonColors(),
                         ) {
                             Icon(
                                 imageVector = if (playbackState.isPaused) MuxGridIcons.Play else MuxGridIcons.Pause,
@@ -755,11 +755,12 @@ internal fun TvPlayerScreen(
                                 modifier = Modifier.size(20.dp),
                             )
                             Spacer(Modifier.width(6.dp))
-                            Text(if (playbackState.isPaused) "Play" else "Pause")
+                            Text(if (playbackState.isPaused) "Play" else "Pause", fontWeight = FontWeight.SemiBold)
                         }
                         if (canSeekTimeline) {
                             Button(
                                 onClick = { playbackEngine.seekBy(30_000L) },
+                                shape = tvButtonShape(),
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Icon(
@@ -772,6 +773,7 @@ internal fun TvPlayerScreen(
                         if (playbackState.isBehindLive) {
                             Button(
                                 onClick = { playbackEngine.seekToLiveEdge() },
+                                shape = tvButtonShape(),
                                 colors = tvPrimaryButtonColors(),
                             ) {
                                 Icon(
@@ -780,12 +782,13 @@ internal fun TvPlayerScreen(
                                     modifier = Modifier.size(18.dp),
                                 )
                                 Spacer(Modifier.width(6.dp))
-                                Text("Back to Live")
+                                Text("Back to Live", fontWeight = FontWeight.SemiBold)
                             }
                         }
                         if (!playbackState.isRecordingPlayback && canZap) {
                             Button(
                                 onClick = { onZapDelta(-1) },
+                                shape = tvButtonShape(),
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Icon(
@@ -798,6 +801,7 @@ internal fun TvPlayerScreen(
                             }
                             Button(
                                 onClick = { onZapDelta(1) },
+                                shape = tvButtonShape(),
                                 colors = tvSecondaryButtonColors(),
                             ) {
                                 Text("Ch +")
@@ -811,6 +815,7 @@ internal fun TvPlayerScreen(
                         }
                         Button(
                             onClick = { trackPanelOpen = !trackPanelOpen },
+                            shape = tvButtonShape(),
                             colors = tvSecondaryButtonColors(),
                         ) {
                             Icon(
@@ -821,6 +826,7 @@ internal fun TvPlayerScreen(
                         }
                         Button(
                             onClick = onExit,
+                            shape = tvButtonShape(),
                             colors = tvSecondaryButtonColors(),
                         ) {
                             Icon(
@@ -836,7 +842,7 @@ internal fun TvPlayerScreen(
                     // Horizontal Quick Channel Strip underneath transport controls
                     if (!playbackState.isRecordingPlayback && channels.size > 1) {
                         LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             contentPadding = PaddingValues(vertical = 2.dp),
                         ) {
                             items(channels, key = { it.id }) { ch ->
@@ -848,30 +854,31 @@ internal fun TvPlayerScreen(
                                         hudVisible = false
                                     },
                                     modifier = Modifier.width(210.dp),
-                                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Badge),
+                                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
                                     colors = ClickableSurfaceDefaults.colors(
-                                        containerColor = if (isCurrent) MuxGridColors.AccentBlue.copy(alpha = 0.28f) else MuxGridColors.CardSurface,
+                                        containerColor = if (isCurrent) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface,
                                         contentColor = MuxGridColors.TextPrimary,
                                         focusedContainerColor = MuxGridColors.FocusBorder,
                                         focusedContentColor = MuxGridColors.CanvasTv,
                                     ),
                                     border = ClickableSurfaceDefaults.border(
-                                        border = Border(
-                                            border = BorderStroke(
-                                                MuxGridBorders.Hairline,
-                                                if (isCurrent) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
-                                            ),
-                                            shape = MuxGridShapes.Badge,
-                                        ),
+                                        border = if (isCurrent) {
+                                            Border(
+                                                border = BorderStroke(MuxGridBorders.Hairline, MuxGridColors.Accent),
+                                                shape = MuxGridShapes.Sm,
+                                            )
+                                        } else {
+                                            Border.None
+                                        },
                                         focusedBorder = Border(
                                             border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                                            shape = MuxGridShapes.Badge,
+                                            shape = MuxGridShapes.Sm,
                                         ),
                                     ),
-                                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+                                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(10.dp),
+                                        modifier = Modifier.padding(9.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     ) {

@@ -7,9 +7,11 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -47,11 +49,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
+import io.github.corebonts.muxgrid.core.designsystem.BroadcastUnderlineTab
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
@@ -76,7 +80,7 @@ internal fun MobileGuideScreen(
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     initialSelectedChannelId: Long?,
-    bottomContentPadding: Dp = 100.dp,
+    bottomContentPadding: Dp = 84.dp,
     onWatchChannel: (Channel) -> Unit,
     onPlayRecording: (DvrEntry, Channel?, Long) -> Unit,
     onScheduleRecording: suspend (Long) -> Result<Long>,
@@ -136,38 +140,38 @@ internal fun MobileGuideScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Search box
+        // Compact Search box
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp)
-                .clip(MuxGridShapes.Row)
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .clip(MuxGridShapes.Sm)
                 .background(MuxGridColors.CardSurface)
-                .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Row)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Sm)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
                 imageVector = MuxGridIcons.Search,
                 contentDescription = null,
                 tint = MuxGridColors.TextMuted,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.width(8.dp))
             Box(modifier = Modifier.weight(1f)) {
                 if (searchQuery.isEmpty()) {
                     Text(
-                        text = "Search upcoming programs across all channels…",
+                        text = "Search upcoming programs…",
                         color = MuxGridColors.TextMuted,
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                     )
                 }
                 BasicTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     singleLine = true,
-                    textStyle = TextStyle(color = MuxGridColors.TextPrimary, fontSize = 14.sp),
-                    cursorBrush = SolidColor(MuxGridColors.AccentBlueLight),
+                    textStyle = TextStyle(color = MuxGridColors.TextPrimary, fontSize = 13.sp),
+                    cursorBrush = SolidColor(MuxGridColors.AccentSoft),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -183,76 +187,57 @@ internal fun MobileGuideScreen(
                     Icon(
                         imageVector = MuxGridIcons.Close,
                         contentDescription = "Clear search",
-                        tint = MuxGridColors.AccentBlueLight,
-                        modifier = Modifier.size(16.dp),
+                        tint = MuxGridColors.AccentSoft,
+                        modifier = Modifier.size(15.dp),
                     )
                 }
             }
         }
 
         if (trimmedQuery.isEmpty()) {
-            // Day selector
+            // Day underline tabs
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 days.forEachIndexed { idx, day ->
-                    val selected = idx == selectedDayIndex
-                    Box(
-                        modifier = Modifier
-                            .clip(MuxGridShapes.Pill)
-                            .background(if (selected) MuxGridColors.AccentBlue else MuxGridColors.CardSurface)
-                            .border(
-                                MuxGridBorders.Hairline,
-                                if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
-                                MuxGridShapes.Pill,
-                            )
-                            .clickable { selectedDayIndex = idx }
-                            .padding(horizontal = 13.dp, vertical = 6.dp),
-                    ) {
-                        Text(
-                            text = formatDayLabel(day, nowEpochSec),
-                            color = if (selected) MuxGridColors.OnAccent else MuxGridColors.TextSecondary,
-                            fontSize = 12.sp,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                        )
-                    }
+                    BroadcastUnderlineTab(
+                        label = formatDayLabel(day, nowEpochSec),
+                        selected = idx == selectedDayIndex,
+                        onClick = { selectedDayIndex = idx },
+                    )
                 }
             }
+            MuxGridDivider()
 
-            // Channel selector strip
+            // Compact borderless channel strip
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 channels.forEach { ch ->
                     val selected = ch.id == effectiveChannelId
                     Row(
                         modifier = Modifier
-                            .clip(MuxGridShapes.Badge)
-                            .background(if (selected) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface)
-                            .border(
-                                MuxGridBorders.Hairline,
-                                if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
-                                MuxGridShapes.Badge,
-                            )
+                            .clip(MuxGridShapes.Sm)
+                            .background(if (selected) MuxGridColors.CardSurfaceElevated else Color.Transparent)
                             .clickable { selectedChannelId = ch.id }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
                     ) {
                         ChannelPiconBadge(
                             channelNumber = ch.formattedNumber,
                             channelName = ch.name,
                             piconModel = ch.icon?.let { PiconModel(ch.id, it) },
                             imageLoader = imageLoader,
-                            size = 24.dp,
+                            size = 22.dp,
                         )
                         Text(
                             text = ch.name,
@@ -264,6 +249,7 @@ internal fun MobileGuideScreen(
                     }
                 }
             }
+            MuxGridDivider()
         }
 
         if (agendaItems.isEmpty()) {
@@ -279,101 +265,122 @@ internal fun MobileGuideScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = bottomContentPadding),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(top = 2.dp, bottom = bottomContentPadding),
             ) {
                 items(agendaItems, key = { it.first.id }) { (event, channel) ->
                     val linkedDvr = findMatchingDvrEntry(event, dvrEntries)
                     val isLiveNow = nowEpochSec in event.startEpochSec until event.stopEpochSec
-                    val shape = MuxGridShapes.Row
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(shape)
-                            .background(if (isLiveNow) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface)
-                            .border(
-                                MuxGridBorders.Hairline,
-                                if (isLiveNow) MuxGridColors.AccentBlue.copy(alpha = 0.45f) else MuxGridColors.HairlineBorder,
-                                shape,
-                            )
-                            .clickable {
-                                actionError = null
-                                selectedEvent = event
+                    val isRecording = linkedDvr?.state == DvrState.RECORDING
+
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(IntrinsicSize.Min)
+                                .background(if (isLiveNow) MuxGridColors.CardSurface else Color.Transparent)
+                                .clickable {
+                                    actionError = null
+                                    selectedEvent = event
+                                },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (isLiveNow || isRecording) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(3.dp)
+                                        .fillMaxHeight()
+                                        .background(if (isRecording) MuxGridColors.CoralLive else MuxGridColors.Accent),
+                                )
                             }
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.width(64.dp)) {
-                            Text(
-                                text = formatEpochHm(event.startEpochSec),
-                                style = MuxGridType.TabularNumber,
-                                color = if (isLiveNow) MuxGridColors.AccentBlueLight else MuxGridColors.TextPrimary,
-                            )
-                            Text(
-                                text = formatEpochHm(event.stopEpochSec),
-                                style = MuxGridType.TabularSmall,
-                            )
-                            Text(
-                                text = formatDurationMinutes(event.startEpochSec, event.stopEpochSec),
-                                style = MuxGridType.TabularSmall,
-                                color = MuxGridColors.TextMuted,
-                            )
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(
+                                        start = if (isLiveNow || isRecording) 13.dp else 16.dp,
+                                        end = 16.dp,
+                                        top = 11.dp,
+                                        bottom = 11.dp,
+                                    ),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(
-                                    text = event.title,
-                                    style = MuxGridType.CardTitle,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                if (linkedDvr != null) {
-                                    Spacer(Modifier.width(8.dp))
-                                    DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
-                                } else if (isLiveNow) {
-                                    Spacer(Modifier.width(8.dp))
+                                Column(modifier = Modifier.width(56.dp)) {
                                     Text(
-                                        text = "ON NOW",
-                                        color = MuxGridColors.CoralLive,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
+                                        text = formatEpochHm(event.startEpochSec),
+                                        style = MuxGridType.TabularNumber,
+                                        color = if (isLiveNow) MuxGridColors.AccentSoft else MuxGridColors.TextPrimary,
+                                    )
+                                    Text(
+                                        text = formatEpochHm(event.stopEpochSec),
+                                        style = MuxGridType.TabularSmall,
+                                    )
+                                    Text(
+                                        text = formatDurationMinutes(event.startEpochSec, event.stopEpochSec),
+                                        style = MuxGridType.TabularSmall,
+                                        color = MuxGridColors.TextMuted,
                                     )
                                 }
-                            }
-                            if (trimmedQuery.isNotEmpty() && channel != null) {
-                                Text(
-                                    text = "${channel.name} · ${formatDayLabel(buildUpcomingDays(event.startEpochSec, 1).first(), nowEpochSec)}",
-                                    style = MuxGridType.TabularSmall,
-                                    color = MuxGridColors.AccentBlueLight,
-                                )
-                            } else if (!event.subtitle.isNullOrBlank()) {
-                                Text(
-                                    text = event.subtitle!!,
-                                    style = MuxGridType.CardSubtitle,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            } else if (!event.summary.isNullOrBlank()) {
-                                Text(
-                                    text = event.summary!!,
-                                    style = MuxGridType.CardSubtitle,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            if (isLiveNow) {
-                                Spacer(Modifier.height(6.dp))
-                                val dur = (event.stopEpochSec - event.startEpochSec).coerceAtLeast(1L)
-                                val frac = (nowEpochSec - event.startEpochSec).toFloat() / dur.toFloat()
-                                LiveProgressBar(progress = frac, modifier = Modifier.fillMaxWidth())
+                                Spacer(Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = event.title,
+                                            style = MuxGridType.CardTitle,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        if (linkedDvr != null) {
+                                            Spacer(Modifier.width(8.dp))
+                                            DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
+                                        } else if (isLiveNow) {
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                text = "ON NOW",
+                                                color = MuxGridColors.CoralLive,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                            )
+                                        }
+                                    }
+                                    if (trimmedQuery.isNotEmpty() && channel != null) {
+                                        Text(
+                                            text = "${channel.name} · ${formatDayLabel(buildUpcomingDays(event.startEpochSec, 1).first(), nowEpochSec)}",
+                                            style = MuxGridType.TabularSmall,
+                                            color = MuxGridColors.AccentSoft,
+                                        )
+                                    } else if (!event.subtitle.isNullOrBlank()) {
+                                        Text(
+                                            text = event.subtitle!!,
+                                            style = MuxGridType.CardSubtitle,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    } else if (!event.summary.isNullOrBlank()) {
+                                        Text(
+                                            text = event.summary!!,
+                                            style = MuxGridType.CardSubtitle,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    if (isLiveNow) {
+                                        Spacer(Modifier.height(6.dp))
+                                        val dur = (event.stopEpochSec - event.startEpochSec).coerceAtLeast(1L)
+                                        val frac = (nowEpochSec - event.startEpochSec).toFloat() / dur.toFloat()
+                                        LiveProgressBar(
+                                            progress = frac,
+                                            fillColor = if (isRecording) MuxGridColors.CoralLive else MuxGridColors.ProgressFill,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                    }
+                                }
                             }
                         }
+                        MuxGridDivider()
                     }
                 }
             }
@@ -389,6 +396,7 @@ internal fun MobileGuideScreen(
         ModalBottomSheet(
             onDismissRequest = { if (!actionBusy) selectedEvent = null },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            shape = MuxGridShapes.SheetTop,
             containerColor = MuxGridColors.CardSurfaceElevated,
             contentColor = MuxGridColors.TextPrimary,
         ) {
@@ -434,7 +442,7 @@ internal fun MobileGuideScreen(
                     Text(
                         text = detailEvent.subtitle!!,
                         style = MuxGridType.CardTitle,
-                        color = MuxGridColors.AccentBlueLight,
+                        color = MuxGridColors.AccentSoft,
                     )
                 }
 
@@ -466,15 +474,16 @@ internal fun MobileGuideScreen(
                                 selectedEvent = null
                                 onWatchChannel(detailChannel)
                             },
+                            shape = MuxGridShapes.Sm,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = MuxGridColors.AccentBlue,
-                                contentColor = Color.White,
+                                containerColor = MuxGridColors.Accent,
+                                contentColor = MuxGridColors.OnAccent,
                             ),
                             modifier = Modifier.weight(1f),
                         ) {
                             Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text(if (isLiveNow) "Watch Live" else "Watch Channel")
+                            Text(if (isLiveNow) "Watch Live" else "Watch Channel", fontWeight = FontWeight.SemiBold)
                         }
                     }
 
@@ -482,6 +491,7 @@ internal fun MobileGuideScreen(
                         DvrState.RECORDING -> {
                             OutlinedButton(
                                 enabled = !actionBusy,
+                                shape = MuxGridShapes.Sm,
                                 onClick = {
                                     selectedEvent = null
                                     val startSec = if (linkedDvr.hasResumePosition) linkedDvr.playPositionSec else 0L
@@ -489,12 +499,13 @@ internal fun MobileGuideScreen(
                                 },
                                 modifier = Modifier.weight(1f),
                             ) {
-                                Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.AccentBlueLight, modifier = Modifier.size(16.dp))
+                                Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.AccentSoft, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Watch from Start", color = MuxGridColors.AccentBlueLight)
+                                Text("Watch from Start", color = MuxGridColors.AccentSoft)
                             }
                             OutlinedButton(
                                 enabled = !actionBusy,
+                                shape = MuxGridShapes.Sm,
                                 onClick = {
                                     scope.launch {
                                         actionBusy = true
@@ -515,6 +526,7 @@ internal fun MobileGuideScreen(
                         DvrState.SCHEDULED -> {
                             OutlinedButton(
                                 enabled = !actionBusy,
+                                shape = MuxGridShapes.Sm,
                                 onClick = {
                                     scope.launch {
                                         actionBusy = true
@@ -535,6 +547,7 @@ internal fun MobileGuideScreen(
                         else -> {
                             OutlinedButton(
                                 enabled = !actionBusy,
+                                shape = MuxGridShapes.Sm,
                                 onClick = {
                                     scope.launch {
                                         actionBusy = true

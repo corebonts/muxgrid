@@ -122,13 +122,13 @@ fun OnboardingServerScreen(
 
     val canvas = if (isTv) MuxGridColors.CanvasTv else MuxGridColors.CanvasPhone
     val fieldColors = OutlinedTextFieldDefaults.colors(
-        focusedBorderColor = MuxGridColors.FocusBorder,
+        focusedBorderColor = MuxGridColors.Accent,
         unfocusedBorderColor = MuxGridColors.HairlineBorder,
         focusedTextColor = MuxGridColors.TextPrimary,
         unfocusedTextColor = MuxGridColors.TextPrimary,
-        focusedLabelColor = MuxGridColors.AccentBlueLight,
+        focusedLabelColor = MuxGridColors.AccentSoft,
         unfocusedLabelColor = MuxGridColors.TextSecondary,
-        cursorColor = MuxGridColors.AccentBlueLight,
+        cursorColor = MuxGridColors.AccentSoft,
     )
 
     val dpadFieldModifier = Modifier.onPreviewKeyEvent { ev ->
@@ -151,9 +151,9 @@ fun OnboardingServerScreen(
             modifier = Modifier
                 .widthIn(max = if (isTv) 680.dp else 540.dp)
                 .fillMaxWidth()
-                .clip(MuxGridShapes.Sheet)
+                .clip(MuxGridShapes.Dialog)
                 .background(MuxGridColors.CardSurface)
-                .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Sheet)
+                .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
                 .verticalScroll(rememberScrollState())
                 .padding(if (isTv) 20.dp else 24.dp),
             verticalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 14.dp),
@@ -165,7 +165,7 @@ fun OnboardingServerScreen(
                 Icon(
                     imageVector = MuxGridIcons.Dns,
                     contentDescription = null,
-                    tint = MuxGridColors.AccentBlueLight,
+                    tint = MuxGridColors.AccentSoft,
                     modifier = Modifier.size(24.dp),
                 )
                 Text(
@@ -343,6 +343,7 @@ fun OnboardingServerScreen(
                 if (canCancel) {
                     OutlinedButton(
                         onClick = onCancel,
+                        shape = MuxGridShapes.Sm,
                         colors = ButtonDefaults.outlinedButtonColors(
                             containerColor = if (cancelFocused) MuxGridColors.FocusBorder else MuxGridColors.CardSurface,
                             contentColor = if (cancelFocused) MuxGridColors.CanvasTv else MuxGridColors.TextPrimary,
@@ -379,6 +380,7 @@ fun OnboardingServerScreen(
                             testing = false
                         }
                     },
+                    shape = MuxGridShapes.Sm,
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = if (testFocused) MuxGridColors.FocusBorder else MuxGridColors.CardSurface,
                         contentColor = if (testFocused) MuxGridColors.CanvasTv else MuxGridColors.TextPrimary,
@@ -413,10 +415,11 @@ fun OnboardingServerScreen(
                             saving = false
                         }
                     },
+                    shape = MuxGridShapes.Sm,
                     border = if (saveFocused) BorderStroke(2.dp, MuxGridColors.FocusBorder) else null,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MuxGridColors.AccentBlue,
-                        contentColor = Color.White,
+                        containerColor = MuxGridColors.Accent,
+                        contentColor = MuxGridColors.OnAccent,
                     ),
                     modifier = Modifier
                         .weight(1.3f)

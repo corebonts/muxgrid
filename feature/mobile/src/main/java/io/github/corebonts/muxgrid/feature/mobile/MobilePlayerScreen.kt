@@ -352,14 +352,14 @@ internal fun MobilePlayerScreen(
                     }
                     Box(
                         modifier = Modifier
-                            .clip(MuxGridShapes.Pill)
-                            .background(MuxGridColors.AccentBlue.copy(alpha = 0.2f))
-                            .border(MuxGridBorders.Hairline, MuxGridColors.AccentBlueLight.copy(alpha = 0.5f), MuxGridShapes.Pill)
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                            .clip(MuxGridShapes.Sm)
+                            .background(MuxGridColors.Accent.copy(alpha = 0.16f))
+                            .border(MuxGridBorders.Divider, MuxGridColors.AccentSoft.copy(alpha = 0.45f), MuxGridShapes.Sm)
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
                     ) {
                         Text(
                             text = if (playbackState.isRadio) "LIVE RADIO" else "BACKGROUND AUDIO",
-                            color = MuxGridColors.AccentBlueLight,
+                            color = MuxGridColors.AccentSoft,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                         )
@@ -370,7 +370,7 @@ internal fun MobilePlayerScreen(
 
         if (playbackState.status == PlaybackStatus.BUFFERING && (!hudVisible || isInPip)) {
             CircularProgressIndicator(
-                color = MuxGridColors.AccentBlueLight,
+                color = MuxGridColors.AccentSoft,
                 modifier = Modifier.align(Alignment.Center),
             )
         }
@@ -379,17 +379,17 @@ internal fun MobilePlayerScreen(
             return@Box
         }
 
-        // Double-tap seek feedback pill
+        // Double-tap seek feedback badge
         seekFeedback?.let { fb ->
             val isForward = fb.deltaSec > 0
             Row(
                 modifier = Modifier
                     .align(if (isForward) Alignment.CenterEnd else Alignment.CenterStart)
                     .padding(horizontal = 36.dp)
-                    .clip(MuxGridShapes.Pill)
+                    .clip(MuxGridShapes.Sm)
                     .background(MuxGridColors.ScrimSurface)
-                    .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, MuxGridShapes.Pill)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, MuxGridShapes.Sm)
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -397,14 +397,14 @@ internal fun MobilePlayerScreen(
                     Icon(
                         imageVector = MuxGridIcons.FastRewind,
                         contentDescription = null,
-                        tint = MuxGridColors.OnAccent,
+                        tint = Color.White,
                         modifier = Modifier.size(18.dp),
                     )
                 }
                 Text(
                     text = if (isForward) "+${fb.deltaSec}s" else "${fb.deltaSec}s",
                     style = MuxGridType.TabularNumber,
-                    color = MuxGridColors.OnAccent,
+                    color = Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                 )
@@ -412,36 +412,36 @@ internal fun MobilePlayerScreen(
                     Icon(
                         imageVector = MuxGridIcons.FastForward,
                         contentDescription = null,
-                        tint = MuxGridColors.OnAccent,
+                        tint = Color.White,
                         modifier = Modifier.size(18.dp),
                     )
                 }
             }
         }
 
-        // Brightness / Volume vertical drag pill
+        // Brightness / Volume vertical drag indicator
         dragFeedback?.let { fb ->
             Row(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .padding(bottom = if (hudVisible) 150.dp else 0.dp)
-                    .clip(MuxGridShapes.Pill)
+                    .clip(MuxGridShapes.Sm)
                     .background(MuxGridColors.ScrimSurface)
-                    .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, MuxGridShapes.Pill)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, MuxGridShapes.Sm)
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Icon(
                     imageVector = if (fb.kind == DragFeedbackKind.BRIGHTNESS) MuxGridIcons.Brightness else MuxGridIcons.VolumeUp,
                     contentDescription = null,
-                    tint = MuxGridColors.OnAccent,
+                    tint = Color.White,
                     modifier = Modifier.size(18.dp),
                 )
                 Text(
                     text = "${fb.percent}%",
                     style = MuxGridType.TabularNumber,
-                    color = MuxGridColors.OnAccent,
+                    color = Color.White,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -466,6 +466,7 @@ internal fun MobilePlayerScreen(
         if (err != null) {
             AlertDialog(
                 onDismissRequest = onPlaybackCompleted,
+                shape = MuxGridShapes.Dialog,
                 containerColor = MuxGridColors.CardSurfaceElevated,
                 titleContentColor = MuxGridColors.TextPrimary,
                 textContentColor = MuxGridColors.TextSecondary,
@@ -477,7 +478,7 @@ internal fun MobilePlayerScreen(
                 },
                 confirmButton = {
                     TextButton(onClick = onPlaybackCompleted) {
-                        Text("OK", color = MuxGridColors.AccentBlueLight, fontWeight = FontWeight.SemiBold)
+                        Text("OK", color = MuxGridColors.AccentSoft, fontWeight = FontWeight.SemiBold)
                     }
                 },
             )
@@ -515,22 +516,12 @@ internal fun MobilePlayerScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f),
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(MuxGridColors.ScrimSurface)
-                                .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, CircleShape)
-                                .clickable(onClick = onExit),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = MuxGridIcons.ArrowBack,
-                                contentDescription = "Back",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
+                        TopHudIconButton(
+                            icon = MuxGridIcons.ArrowBack,
+                            contentDescription = "Back",
+                            iconSize = 20.dp,
+                            onClick = onExit,
+                        )
                         Spacer(Modifier.width(8.dp))
                         if (activeChannel != null) {
                             ChannelPiconBadge(
@@ -582,55 +573,22 @@ internal fun MobilePlayerScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (canEnterPip && !isAudioStage) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(MuxGridColors.ScrimSurface)
-                                    .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, CircleShape)
-                                    .clickable(onClick = onEnterPip),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    imageVector = MuxGridIcons.Pip,
-                                    contentDescription = "Picture-in-Picture",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(MuxGridColors.ScrimSurface)
-                                .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, CircleShape)
-                                .clickable(onClick = onMinimizeToAudio),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = MuxGridIcons.Headphones,
-                                contentDescription = if (playbackState.isRadio) "Mini Player" else "Background Audio",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp),
+                            TopHudIconButton(
+                                icon = MuxGridIcons.Pip,
+                                contentDescription = "Picture-in-Picture",
+                                onClick = onEnterPip,
                             )
                         }
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(MuxGridColors.ScrimSurface)
-                                .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, CircleShape)
-                                .clickable { trackPanelOpen = !trackPanelOpen },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = MuxGridIcons.Tracks,
-                                contentDescription = "Tracks",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
+                        TopHudIconButton(
+                            icon = MuxGridIcons.Headphones,
+                            contentDescription = if (playbackState.isRadio) "Mini Player" else "Background Audio",
+                            onClick = onMinimizeToAudio,
+                        )
+                        TopHudIconButton(
+                            icon = MuxGridIcons.Tracks,
+                            contentDescription = "Tracks",
+                            onClick = { trackPanelOpen = !trackPanelOpen },
+                        )
                     }
                 }
 
@@ -743,170 +701,11 @@ internal fun MobilePlayerScreen(
                         val stableDurSec = rememberStableDurationSec(playbackState.durationMs, playbackState.dvrEntryId)
                         val shownPosSec = if (isScrubbing) (displayPosMs + 500L) / 1000L else stablePosSec
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Slider(
-                                value = if (isScrubbing) sliderFraction else animatedFraction,
-                                onValueChange = { fraction ->
-                                    isScrubbing = true
-                                    scrubPositionMs = (fraction.coerceIn(0f, 1f) * durationMs).toLong()
-                                },
-                                onValueChangeFinished = {
-                                    isScrubbing = false
-                                    playbackEngine.seekTo(scrubPositionMs)
-                                },
-                                valueRange = 0f..1f,
-                                colors = SliderDefaults.colors(
-                                    thumbColor = MuxGridColors.OnAccent,
-                                    activeTrackColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.AccentBlueLight,
-                                    inactiveTrackColor = MuxGridColors.TrackBackground,
-                                ),
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = formatDurationSec(shownPosSec),
-                                    style = MuxGridType.TabularSmall,
-                                    color = MuxGridColors.OnAccent,
-                                )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    if (playbackState.isGrowingRecording) {
-                                        DvrStateBadge(state = DvrState.RECORDING)
-                                    }
-                                    if (playbackState.videoWidth > 0 && !isAudioStage) {
-                                        Text(
-                                            text = "${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}",
-                                            style = MuxGridType.TabularSmall,
-                                            color = MuxGridColors.OnAccent.copy(alpha = 0.78f),
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = formatDurationSec(stableDurSec),
-                                    style = MuxGridType.TabularSmall,
-                                    color = MuxGridColors.OnAccent.copy(alpha = 0.85f),
-                                )
-                            }
-                        }
-                    } else {
-                        // Live status + Back to Live pill + Channels drawer & Quick Zap buttons
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                if (playbackState.isBehindLive) {
-                                    val stableLiveOffsetSec = rememberStableDurationSec(
-                                        playbackState.liveEdgeOffsetMs,
-                                        playbackState.channelId,
-                                    )
-                                    Row(
-                                        modifier = Modifier
-                                            .clip(MuxGridShapes.Pill)
-                                            .background(MuxGridColors.AccentBlue.copy(alpha = 0.9f))
-                                            .border(MuxGridBorders.Hairline, MuxGridColors.AccentBlueLight, MuxGridShapes.Pill)
-                                            .clickable { playbackEngine.seekToLiveEdge() }
-                                            .padding(horizontal = 12.dp, vertical = 5.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    ) {
-                                        Icon(
-                                            imageVector = MuxGridIcons.Sensors,
-                                            contentDescription = null,
-                                            tint = MuxGridColors.OnAccent,
-                                            modifier = Modifier.size(15.dp),
-                                        )
-                                        Text(
-                                            text = "-${formatDurationSec(stableLiveOffsetSec)} · Back to Live",
-                                            style = MuxGridType.TabularSmall,
-                                            color = MuxGridColors.OnAccent,
-                                            fontWeight = FontWeight.SemiBold,
-                                        )
-                                    }
-                                } else {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .clip(CircleShape)
-                                                .background(MuxGridColors.CoralLive),
-                                        )
-                                        Text(
-                                            text = if (playbackState.isRadio) "RADIO" else "LIVE",
-                                            color = Color.White,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                    }
-                                }
-                                if (playbackState.videoWidth > 0 && !isAudioStage) {
-                                    Text(
-                                        text = "${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}",
-                                        style = MuxGridType.TabularSmall,
-                                        color = Color.White.copy(alpha = 0.8f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-
-                            if (canZap) {
-                                OutlinedButton(
-                                    onClick = { quickZapOpen = true },
-                                    colors = scrimBtnColors,
-                                    border = scrimBtnBorder,
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                ) {
-                                    Icon(
-                                        imageVector = MuxGridIcons.ChannelsList,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Channels", color = Color.White, fontSize = 12.sp)
-                                }
-                            }
-                        }
-
-                        if (playbackState.isTimeshiftSeekable) {
-                            val bufStart = playbackState.bufferStartMs
-                            val bufWindow = playbackState.bufferWindowMs.coerceAtLeast(1L)
-                            val bufEnd = playbackState.bufferEndMs.coerceAtLeast(bufStart + bufWindow)
-                            val displayPosMs = if (isScrubbing) {
-                                scrubPositionMs.coerceIn(bufStart, bufEnd)
-                            } else {
-                                playbackState.positionMs.coerceIn(bufStart, bufEnd)
-                            }
-                            val sliderFraction = ((displayPosMs - bufStart).toFloat() / bufWindow.toFloat()).coerceIn(0f, 1f)
-                            val animatedFraction by animateFloatAsState(
-                                targetValue = sliderFraction,
-                                animationSpec = tween(durationMillis = 220, easing = LinearEasing),
-                                label = "liveSliderProgress",
-                            )
-                            val displayOffsetMs = (bufEnd - displayPosMs).coerceAtLeast(0L)
-                            val stableOffsetSec = rememberStableDurationSec(displayOffsetMs, playbackState.channelId)
-                            val stableBufSec = rememberStableDurationSec(bufWindow, playbackState.channelId)
-                            val shownOffsetSec = if (isScrubbing) (displayOffsetMs + 500L) / 1000L else stableOffsetSec
-
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Slider(
                                     value = if (isScrubbing) sliderFraction else animatedFraction,
                                     onValueChange = { fraction ->
                                         isScrubbing = true
-                                        scrubPositionMs = bufStart + (fraction.coerceIn(0f, 1f) * bufWindow).toLong()
+                                        scrubPositionMs = (fraction.coerceIn(0f, 1f) * durationMs).toLong()
                                     },
                                     onValueChangeFinished = {
                                         isScrubbing = false
@@ -914,142 +713,183 @@ internal fun MobilePlayerScreen(
                                     },
                                     valueRange = 0f..1f,
                                     colors = SliderDefaults.colors(
-                                        thumbColor = MuxGridColors.OnAccent,
-                                        activeTrackColor = MuxGridColors.AccentBlueLight,
+                                        thumbColor = Color.White,
+                                        activeTrackColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.Accent,
                                         inactiveTrackColor = MuxGridColors.TrackBackground,
                                     ),
                                 )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(
-                                        text = if (displayOffsetMs >= 2_000L) "-${formatDurationSec(shownOffsetSec)}" else "Live edge",
+                                        text = formatDurationSec(shownPosSec),
                                         style = MuxGridType.TabularSmall,
-                                        color = MuxGridColors.OnAccent,
+                                        color = Color.White,
                                     )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        if (playbackState.isGrowingRecording) {
+                                            DvrStateBadge(state = DvrState.RECORDING)
+                                        }
+                                        if (playbackState.videoWidth > 0 && !isAudioStage) {
+                                            Text(
+                                                text = "${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}",
+                                                style = MuxGridType.TabularSmall,
+                                                color = Color.White.copy(alpha = 0.78f),
+                                            )
+                                        }
+                                    }
                                     Text(
-                                        text = "Buffer ${formatDurationSec(stableBufSec)}",
+                                        text = formatDurationSec(stableDurSec),
                                         style = MuxGridType.TabularSmall,
-                                        color = MuxGridColors.OnAccent.copy(alpha = 0.78f),
+                                        color = Color.White.copy(alpha = 0.85f),
                                     )
                                 }
                             }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Translucent Quick-Zap Channel Drawer over video (non-blurred dark scrim)
-        AnimatedVisibility(
-            visible = quickZapOpen,
-            enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
-            exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.45f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) { quickZapOpen = false },
-            ) {
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .fillMaxHeight()
-                        .widthIn(max = 330.dp)
-                        .fillMaxWidth(0.84f)
-                        .background(MuxGridColors.ScrimSurface)
-                        .border(1.dp, MuxGridColors.HairlineBorder)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) {}
-                        .statusBarsPadding()
-                        .navigationBarsPadding()
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("Quick Zap", style = MuxGridType.Title, fontSize = 17.sp)
-                        Box(
-                            modifier = Modifier
-                                .clip(MuxGridShapes.Sm)
-                                .clickable { quickZapOpen = false }
-                                .padding(4.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = MuxGridIcons.Close,
-                                contentDescription = "Close",
-                                tint = MuxGridColors.AccentBlueLight,
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    }
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(channels, key = { it.id }) { ch ->
-                            val isCurrent = ch.id == playbackState.channelId
-                            val chNow = nowNextMap[ch.id]
+                        } else {
+                            // Live status + Back to Live badge + Channels drawer button
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(MuxGridShapes.Badge)
-                                    .background(
-                                        if (isCurrent) MuxGridColors.AccentBlue.copy(alpha = 0.25f) else MuxGridColors.CardSurface,
-                                    )
-                                    .border(
-                                        MuxGridBorders.Hairline,
-                                        if (isCurrent) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
-                                        MuxGridShapes.Badge,
-                                    )
-                                    .clickable {
-                                        quickZapOpen = false
-                                        onSelectChannel(ch)
-                                    }
-                                    .padding(10.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                ChannelPiconBadge(
-                                    channelNumber = ch.formattedNumber,
-                                    channelName = ch.name,
-                                    piconModel = ch.icon?.let { PiconModel(ch.id, it) },
-                                    imageLoader = imageLoader,
-                                    size = 36.dp,
-                                )
-                                Spacer(Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = if (ch.number > 0) "${ch.formattedNumber} · ${ch.name}" else ch.name,
-                                        color = Color.White,
-                                        fontSize = 13.sp,
-                                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    chNow?.now?.let { nowEv ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    if (playbackState.isBehindLive) {
+                                        val stableLiveOffsetSec = rememberStableDurationSec(
+                                            playbackState.liveEdgeOffsetMs,
+                                            playbackState.channelId,
+                                        )
+                                        Row(
+                                            modifier = Modifier
+                                                .clip(MuxGridShapes.Sm)
+                                                .background(MuxGridColors.Accent)
+                                                .clickable { playbackEngine.seekToLiveEdge() }
+                                                .padding(horizontal = 11.dp, vertical = 5.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
+                                            Icon(
+                                                imageVector = MuxGridIcons.Sensors,
+                                                contentDescription = null,
+                                                tint = MuxGridColors.OnAccent,
+                                                modifier = Modifier.size(14.dp),
+                                            )
+                                            Text(
+                                                text = "-${formatDurationSec(stableLiveOffsetSec)} · Back to Live",
+                                                style = MuxGridType.TabularSmall,
+                                                color = MuxGridColors.OnAccent,
+                                                fontWeight = FontWeight.SemiBold,
+                                            )
+                                        }
+                                    } else {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(8.dp)
+                                                    .clip(CircleShape)
+                                                    .background(MuxGridColors.CoralLive),
+                                            )
+                                            Text(
+                                                text = if (playbackState.isRadio) "RADIO" else "LIVE",
+                                                color = Color.White,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                            )
+                                        }
+                                    }
+                                    if (playbackState.videoWidth > 0 && !isAudioStage) {
                                         Text(
-                                            text = nowEv.title,
-                                            color = MuxGridColors.TextSecondary,
-                                            fontSize = 11.sp,
+                                            text = "${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}",
+                                            style = MuxGridType.TabularSmall,
+                                            color = Color.White.copy(alpha = 0.8f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
-                                        Spacer(Modifier.height(4.dp))
-                                        LiveProgressBar(
-                                            progress = chNow.progressFraction(nowEpochSec),
-                                            modifier = Modifier.fillMaxWidth(),
+                                    }
+                                }
+
+                                if (canZap) {
+                                    OutlinedButton(
+                                        onClick = { quickZapOpen = true },
+                                        shape = MuxGridShapes.Sm,
+                                        colors = scrimBtnColors,
+                                        border = scrimBtnBorder,
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = MuxGridIcons.ChannelsList,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Channels", color = Color.White, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+
+                            if (playbackState.isTimeshiftSeekable) {
+                                val bufStart = playbackState.bufferStartMs
+                                val bufWindow = playbackState.bufferWindowMs.coerceAtLeast(1L)
+                                val bufEnd = playbackState.bufferEndMs.coerceAtLeast(bufStart + bufWindow)
+                                val displayPosMs = if (isScrubbing) {
+                                    scrubPositionMs.coerceIn(bufStart, bufEnd)
+                                } else {
+                                    playbackState.positionMs.coerceIn(bufStart, bufEnd)
+                                }
+                                val sliderFraction = ((displayPosMs - bufStart).toFloat() / bufWindow.toFloat()).coerceIn(0f, 1f)
+                                val animatedFraction by animateFloatAsState(
+                                    targetValue = sliderFraction,
+                                    animationSpec = tween(durationMillis = 220, easing = LinearEasing),
+                                    label = "liveSliderProgress",
+                                )
+                                val displayOffsetMs = (bufEnd - displayPosMs).coerceAtLeast(0L)
+                                val stableOffsetSec = rememberStableDurationSec(displayOffsetMs, playbackState.channelId)
+                                val stableBufSec = rememberStableDurationSec(bufWindow, playbackState.channelId)
+                                val shownOffsetSec = if (isScrubbing) (displayOffsetMs + 500L) / 1000L else stableOffsetSec
+
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Slider(
+                                        value = if (isScrubbing) sliderFraction else animatedFraction,
+                                        onValueChange = { fraction ->
+                                            isScrubbing = true
+                                            scrubPositionMs = bufStart + (fraction.coerceIn(0f, 1f) * bufWindow).toLong()
+                                        },
+                                        onValueChangeFinished = {
+                                            isScrubbing = false
+                                            playbackEngine.seekTo(scrubPositionMs)
+                                        },
+                                        valueRange = 0f..1f,
+                                        colors = SliderDefaults.colors(
+                                            thumbColor = Color.White,
+                                            activeTrackColor = MuxGridColors.Accent,
+                                            inactiveTrackColor = MuxGridColors.TrackBackground,
+                                        ),
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                    ) {
+                                        Text(
+                                            text = if (displayOffsetMs >= 2_000L) "-${formatDurationSec(shownOffsetSec)}" else "Live edge",
+                                            style = MuxGridType.TabularSmall,
+                                            color = Color.White,
+                                        )
+                                        Text(
+                                            text = "Buffer ${formatDurationSec(stableBufSec)}",
+                                            style = MuxGridType.TabularSmall,
+                                            color = Color.White.copy(alpha = 0.78f),
                                         )
                                     }
                                 }
@@ -1058,7 +898,120 @@ internal fun MobilePlayerScreen(
                     }
                 }
             }
-        }
+
+            // Translucent Quick-Zap Channel Drawer over video (non-blurred dark scrim)
+            AnimatedVisibility(
+                visible = quickZapOpen,
+                enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
+                exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { quickZapOpen = false },
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight()
+                            .widthIn(max = 330.dp)
+                            .fillMaxWidth(0.84f)
+                            .background(MuxGridColors.ScrimSurface)
+                            .border(MuxGridBorders.Divider, MuxGridColors.Divider)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) {}
+                            .statusBarsPadding()
+                            .navigationBarsPadding()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("Quick Zap", style = MuxGridType.Title, fontSize = 17.sp)
+                            Box(
+                                modifier = Modifier
+                                    .clip(MuxGridShapes.Sm)
+                                    .clickable { quickZapOpen = false }
+                                    .padding(4.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = MuxGridIcons.Close,
+                                    contentDescription = "Close",
+                                    tint = MuxGridColors.TextSecondary,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            items(channels, key = { it.id }) { ch ->
+                                val isCurrent = ch.id == playbackState.channelId
+                                val chNow = nowNextMap[ch.id]
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(MuxGridShapes.Sm)
+                                        .background(
+                                            if (isCurrent) MuxGridColors.Accent.copy(alpha = 0.18f) else MuxGridColors.CardSurface,
+                                        )
+                                        .clickable {
+                                            quickZapOpen = false
+                                            onSelectChannel(ch)
+                                        }
+                                        .padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    ChannelPiconBadge(
+                                        channelNumber = ch.formattedNumber,
+                                        channelName = ch.name,
+                                        piconModel = ch.icon?.let { PiconModel(ch.id, it) },
+                                        imageLoader = imageLoader,
+                                        size = 36.dp,
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = if (ch.number > 0) "${ch.formattedNumber} · ${ch.name}" else ch.name,
+                                            color = if (isCurrent) MuxGridColors.AccentSoft else Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        chNow?.now?.let { nowEv ->
+                                            Text(
+                                                text = nowEv.title,
+                                                color = MuxGridColors.TextSecondary,
+                                                fontSize = 11.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Spacer(Modifier.height(4.dp))
+                                            LiveProgressBar(
+                                                progress = chNow.progressFraction(nowEpochSec),
+                                                modifier = Modifier.fillMaxWidth(),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
         if (trackPanelOpen) {
             Box(
@@ -1086,6 +1039,31 @@ internal fun MobilePlayerScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun TopHudIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    iconSize: androidx.compose.ui.unit.Dp = 18.dp,
+) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(MuxGridShapes.Sm)
+            .background(MuxGridColors.ScrimSurface)
+            .border(MuxGridBorders.Divider, MuxGridColors.ScrimControlBorder, MuxGridShapes.Sm)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = Color.White,
+            modifier = Modifier.size(iconSize),
+        )
     }
 }
 

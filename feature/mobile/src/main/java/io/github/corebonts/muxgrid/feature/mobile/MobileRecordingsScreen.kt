@@ -1,14 +1,17 @@
 package io.github.corebonts.muxgrid.feature.mobile
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,10 +23,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,7 +39,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -41,12 +46,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
+import io.github.corebonts.muxgrid.core.designsystem.BroadcastUnderlineTab
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrSeriesGroup
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
-import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
@@ -66,13 +72,14 @@ private enum class RecordingsFilter(val label: String) {
     SCHEDULED("Scheduled"),
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MobileRecordingsScreen(
     dvrEntries: Map<Long, DvrEntry>,
     channels: List<Channel>,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
-    bottomContentPadding: Dp = 100.dp,
+    bottomContentPadding: Dp = 84.dp,
     onWatchLiveChannel: (Channel) -> Unit,
     onPlayRecording: (DvrEntry, Channel?, Long) -> Unit,
     onStopRecording: suspend (Long) -> Result<Unit>,
@@ -83,6 +90,7 @@ internal fun MobileRecordingsScreen(
     val scope = rememberCoroutineScope()
     var filter by remember { mutableStateOf(RecordingsFilter.ALL) }
     var expandedGroupKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var actionEntry by remember { mutableStateOf<DvrEntry?>(null) }
     var pendingDelete by remember { mutableStateOf<DvrEntry?>(null) }
     var actionFeedback by remember { mutableStateOf<String?>(null) }
 
@@ -104,43 +112,29 @@ internal fun MobileRecordingsScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Segmented filter pills
+        // Underline filter tabs matching Live & Guide
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             RecordingsFilter.entries.forEach { tab ->
-                val selected = filter == tab
-                Box(
-                    modifier = Modifier
-                        .clip(MuxGridShapes.Pill)
-                        .background(if (selected) MuxGridColors.AccentBlue else MuxGridColors.CardSurface)
-                        .border(
-                            MuxGridBorders.Hairline,
-                            if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
-                            MuxGridShapes.Pill,
-                        )
-                        .clickable { filter = tab }
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
-                ) {
-                    Text(
-                        text = tab.label,
-                        color = if (selected) Color.White else MuxGridColors.TextSecondary,
-                        fontSize = 13.sp,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                    )
-                }
+                BroadcastUnderlineTab(
+                    label = tab.label,
+                    selected = filter == tab,
+                    onClick = { filter = tab },
+                )
             }
         }
+        MuxGridDivider()
 
         actionFeedback?.let { msg ->
             Text(
                 text = msg,
                 color = MuxGridColors.CoralLive,
                 fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
             )
         }
 
@@ -162,12 +156,11 @@ internal fun MobileRecordingsScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = bottomContentPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(top = 6.dp, bottom = bottomContentPadding),
             ) {
                 if (showRecordingNow) {
                     item(key = "hdr_rec_now") {
-                        SectionHeader("Recording Now")
+                        SectionHeader("RECORDING NOW")
                     }
                     items(recordingNow, key = { "rec_${it.id}" }) { entry ->
                         val ch = channelById[entry.channelId]
@@ -180,7 +173,6 @@ internal fun MobileRecordingsScreen(
                                 val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
                                 onPlayRecording(entry, ch, startSec)
                             },
-                            onWatchLive = { if (ch != null) onWatchLiveChannel(ch) },
                             onStop = {
                                 scope.launch {
                                     actionFeedback = null
@@ -189,26 +181,19 @@ internal fun MobileRecordingsScreen(
                                     }
                                 }
                             },
-                            onAbort = {
-                                scope.launch {
-                                    actionFeedback = null
-                                    onCancelRecording(entry.id).onFailure {
-                                        actionFeedback = it.message ?: "Failed to abort recording"
-                                    }
-                                }
-                            },
+                            onOpenMenu = { actionEntry = entry },
                         )
                     }
                 }
 
                 if (showCompleted) {
                     item(key = "hdr_completed") {
-                        SectionHeader("Completed")
+                        SectionHeader("COMPLETED")
                     }
                     items(completedGroups, key = { "grp_${it.key}" }) { group ->
                         if (group.entries.size == 1) {
                             val entry = group.entries.first()
-                            CompletedRecordingCard(
+                            CompletedRecordingRow(
                                 entry = entry,
                                 channel = channelById[entry.channelId],
                                 nowEpochSec = nowEpochSec,
@@ -217,22 +202,12 @@ internal fun MobileRecordingsScreen(
                                     val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
                                     onPlayRecording(entry, channelById[entry.channelId], startSec)
                                 },
-                                onPlayFromStart = {
-                                    onPlayRecording(entry, channelById[entry.channelId], 0L)
-                                },
-                                onToggleWatched = {
-                                    scope.launch {
-                                        actionFeedback = null
-                                        onToggleWatched(entry.id, !entry.isWatched).onFailure {
-                                            actionFeedback = it.message ?: "Failed to update watched state"
-                                        }
-                                    }
-                                },
-                                onRequestDelete = { pendingDelete = entry },
+                                onOpenMenu = { actionEntry = entry },
                             )
+                            MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
                         } else {
                             val expanded = group.key in expandedGroupKeys
-                            SeriesGroupCard(
+                            SeriesGroupRow(
                                 group = group,
                                 expanded = expanded,
                                 channelById = channelById,
@@ -248,23 +223,19 @@ internal fun MobileRecordingsScreen(
                                 onPlayEntry = { entry, startSec ->
                                     onPlayRecording(entry, channelById[entry.channelId], startSec)
                                 },
-                                onToggleWatched = { entry ->
-                                    scope.launch {
-                                        onToggleWatched(entry.id, !entry.isWatched)
-                                    }
-                                },
-                                onRequestDelete = { pendingDelete = it },
+                                onOpenMenu = { actionEntry = it },
                             )
+                            MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
                         }
                     }
                 }
 
                 if (showScheduled) {
                     item(key = "hdr_scheduled") {
-                        SectionHeader("Scheduled")
+                        SectionHeader("SCHEDULED")
                     }
                     items(scheduled, key = { "sched_${it.id}" }) { entry ->
-                        ScheduledTimerCard(
+                        ScheduledTimerRow(
                             entry = entry,
                             channel = channelById[entry.channelId],
                             nowEpochSec = nowEpochSec,
@@ -278,21 +249,204 @@ internal fun MobileRecordingsScreen(
                                 }
                             },
                         )
+                        MuxGridDivider(modifier = Modifier.padding(start = 68.dp, end = 16.dp))
                     }
                 }
 
                 if (showFailed) {
                     item(key = "hdr_failed") {
-                        SectionHeader("Missed / Failed")
+                        SectionHeader("MISSED / FAILED")
                     }
                     items(failed, key = { "fail_${it.id}" }) { entry ->
-                        FailedRecordingCard(
+                        FailedRecordingRow(
                             entry = entry,
                             channel = channelById[entry.channelId],
                             nowEpochSec = nowEpochSec,
                             imageLoader = imageLoader,
                             onDelete = { pendingDelete = entry },
                         )
+                        MuxGridDivider(modifier = Modifier.padding(start = 68.dp, end = 16.dp))
+                    }
+                }
+            }
+        }
+    }
+
+    actionEntry?.let { entry ->
+        val ch = channelById[entry.channelId]
+        ModalBottomSheet(
+            onDismissRequest = { actionEntry = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            shape = MuxGridShapes.SheetTop,
+            containerColor = MuxGridColors.CardSurfaceElevated,
+            contentColor = MuxGridColors.TextPrimary,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (ch != null) {
+                        ChannelPiconBadge(
+                            channelNumber = ch.formattedNumber,
+                            channelName = ch.name,
+                            piconModel = ch.icon?.let { PiconModel(ch.id, it) },
+                            imageLoader = imageLoader,
+                            size = 40.dp,
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(entry.title, style = MuxGridType.Title, fontSize = 17.sp)
+                        val meta = listOfNotNull(
+                            ch?.name,
+                            formatEpochDayHm(entry.startEpochSec, nowEpochSec),
+                            formatDurationMinutes(entry.startEpochSec, entry.stopEpochSec),
+                        ).joinToString(" · ")
+                        Text(meta, style = MuxGridType.TabularSmall)
+                    }
+                }
+
+                if (entry.state == DvrState.RECORDING) {
+                    Button(
+                        onClick = {
+                            actionEntry = null
+                            val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
+                            onPlayRecording(entry, ch, startSec)
+                        },
+                        shape = MuxGridShapes.Sm,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MuxGridColors.Accent,
+                            contentColor = MuxGridColors.OnAccent,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            imageVector = if (entry.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (entry.hasResumePosition) "Resume Chase Play" else "Watch from Start", fontWeight = FontWeight.SemiBold)
+                    }
+                    if (ch != null) {
+                        OutlinedButton(
+                            onClick = {
+                                actionEntry = null
+                                onWatchLiveChannel(ch)
+                            },
+                            shape = MuxGridShapes.Sm,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(MuxGridIcons.Live, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Watch Live Channel", color = MuxGridColors.TextPrimary)
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            actionEntry = null
+                            scope.launch {
+                                actionFeedback = null
+                                onStopRecording(entry.id).onFailure {
+                                    actionFeedback = it.message ?: "Failed to stop recording"
+                                }
+                            }
+                        },
+                        shape = MuxGridShapes.Sm,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(MuxGridIcons.Stop, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Stop & Save", color = MuxGridColors.TextPrimary)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            actionEntry = null
+                            scope.launch {
+                                actionFeedback = null
+                                onCancelRecording(entry.id).onFailure {
+                                    actionFeedback = it.message ?: "Failed to abort recording"
+                                }
+                            }
+                        },
+                        shape = MuxGridShapes.Sm,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Abort Recording", color = MuxGridColors.CoralLive)
+                    }
+                } else {
+                    if (!entry.isFileMissing) {
+                        Button(
+                            onClick = {
+                                actionEntry = null
+                                val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
+                                onPlayRecording(entry, ch, startSec)
+                            },
+                            shape = MuxGridShapes.Sm,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MuxGridColors.Accent,
+                                contentColor = MuxGridColors.OnAccent,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (entry.hasResumePosition) "Resume" else "Play", fontWeight = FontWeight.SemiBold)
+                        }
+                        if (entry.hasResumePosition) {
+                            OutlinedButton(
+                                onClick = {
+                                    actionEntry = null
+                                    onPlayRecording(entry, ch, 0L)
+                                },
+                                shape = MuxGridShapes.Sm,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Start Over", color = MuxGridColors.TextPrimary)
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                actionEntry = null
+                                scope.launch {
+                                    actionFeedback = null
+                                    onToggleWatched(entry.id, !entry.isWatched).onFailure {
+                                        actionFeedback = it.message ?: "Failed to update watched state"
+                                    }
+                                }
+                            },
+                            shape = MuxGridShapes.Sm,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(MuxGridIcons.CheckCircle, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = if (entry.isWatched) "Mark as Unwatched" else "Mark as Watched",
+                                color = MuxGridColors.TextPrimary,
+                            )
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            actionEntry = null
+                            pendingDelete = entry
+                        },
+                        shape = MuxGridShapes.Sm,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(MuxGridIcons.Delete, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Delete Recording", color = MuxGridColors.CoralLive)
                     }
                 }
             }
@@ -302,6 +456,7 @@ internal fun MobileRecordingsScreen(
     pendingDelete?.let { entry ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
+            shape = MuxGridShapes.Dialog,
             containerColor = MuxGridColors.CardSurfaceElevated,
             titleContentColor = MuxGridColors.TextPrimary,
             textContentColor = MuxGridColors.TextSecondary,
@@ -325,7 +480,7 @@ internal fun MobileRecordingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) {
-                    Text("Cancel", color = MuxGridColors.AccentBlueLight)
+                    Text("Cancel", color = MuxGridColors.TextSecondary)
                 }
             },
         )
@@ -336,9 +491,8 @@ internal fun MobileRecordingsScreen(
 private fun SectionHeader(title: String) {
     Text(
         text = title,
-        style = MuxGridType.Title,
-        fontSize = 16.sp,
-        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+        style = MuxGridType.Eyebrow,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 6.dp),
     )
 }
 
@@ -349,237 +503,227 @@ private fun RecordingNowCard(
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     onWatchFromStart: () -> Unit,
-    onWatchLive: () -> Unit,
     onStop: () -> Unit,
-    onAbort: () -> Unit,
+    onOpenMenu: () -> Unit,
 ) {
     val shape = MuxGridShapes.Card
     val dur = entry.durationSec.coerceAtLeast(1L)
     val elapsed = (nowEpochSec - entry.startEpochSec).coerceIn(0L, dur)
     val progress = elapsed.toFloat() / dur.toFloat()
 
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .height(IntrinsicSize.Min)
             .clip(shape)
-            .background(MuxGridColors.CardSurfaceElevated)
-            .border(MuxGridBorders.Hairline, MuxGridColors.CoralLive.copy(alpha = 0.45f), shape)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .background(MuxGridColors.CardSurfaceElevated),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (channel != null) {
-                ChannelPiconBadge(
-                    channelNumber = channel.formattedNumber,
-                    channelName = channel.name,
-                    piconModel = channel.icon?.let { PiconModel(channel.id, it) },
-                    imageLoader = imageLoader,
-                    size = 44.dp,
-                )
-                Spacer(Modifier.width(12.dp))
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(entry.title, style = MuxGridType.CardTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    text = "${channel?.name ?: "Channel"} · ${formatDurationMs(elapsed * 1000L)} / ${formatDurationMs(dur * 1000L)}",
-                    style = MuxGridType.TabularSmall,
-                )
-            }
-            DvrStateBadge(state = entry.state)
-        }
-        LiveProgressBar(
-            progress = progress,
-            fillColor = MuxGridColors.CoralLive,
-            modifier = Modifier.fillMaxWidth(),
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .fillMaxHeight()
+                .background(MuxGridColors.CoralLive),
         )
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(13.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (channel != null) {
+                    ChannelPiconBadge(
+                        channelNumber = channel.formattedNumber,
+                        channelName = channel.name,
+                        piconModel = channel.icon?.let { PiconModel(channel.id, it) },
+                        imageLoader = imageLoader,
+                        size = 42.dp,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(entry.title, style = MuxGridType.CardTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        text = "${channel?.name ?: "Channel"} · ${formatDurationMs(elapsed * 1000L)} / ${formatDurationMs(dur * 1000L)}",
+                        style = MuxGridType.TabularSmall,
+                    )
+                }
+                DvrStateBadge(state = entry.state)
+            }
+            LiveProgressBar(
+                progress = progress,
+                fillColor = MuxGridColors.CoralLive,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Button(
                     onClick = onWatchFromStart,
-                    colors = ButtonDefaults.buttonColors(containerColor = MuxGridColors.AccentBlue, contentColor = Color.White),
-                    modifier = Modifier.weight(1f),
+                    shape = MuxGridShapes.Sm,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MuxGridColors.Accent,
+                        contentColor = MuxGridColors.OnAccent,
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 ) {
                     Icon(
                         imageVector = if (entry.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
                         contentDescription = null,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(15.dp),
                     )
-                    Spacer(Modifier.width(4.dp))
-                    Text(if (entry.hasResumePosition) "Resume" else "Watch from Start", fontSize = 12.sp, maxLines = 1)
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        text = if (entry.hasResumePosition) "Resume" else "Chase Play",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
                 }
-                if (channel != null) {
-                    OutlinedButton(onClick = onWatchLive, modifier = Modifier.weight(1f)) {
-                        Icon(MuxGridIcons.Live, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Watch Live", color = MuxGridColors.TextPrimary, fontSize = 12.sp, maxLines = 1)
-                    }
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) {
-                    Icon(MuxGridIcons.Stop, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
+                Button(
+                    onClick = onStop,
+                    shape = MuxGridShapes.Sm,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MuxGridColors.CardSurface,
+                        contentColor = MuxGridColors.TextPrimary,
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Icon(MuxGridIcons.Stop, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Stop & Save", color = MuxGridColors.TextPrimary, fontSize = 12.sp, maxLines = 1)
+                    Text("Stop", fontSize = 12.sp, maxLines = 1)
                 }
-                OutlinedButton(onClick = onAbort) {
-                    Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Abort", color = MuxGridColors.CoralLive, fontSize = 12.sp, maxLines = 1)
+                Spacer(Modifier.weight(1f))
+                Box(
+                    modifier = Modifier
+                        .clip(MuxGridShapes.Sm)
+                        .clickable(onClick = onOpenMenu)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        text = "•••",
+                        color = MuxGridColors.TextSecondary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CompletedRecordingCard(
+private fun CompletedRecordingRow(
     entry: DvrEntry,
     channel: Channel?,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     onResumeOrPlay: () -> Unit,
-    onPlayFromStart: () -> Unit,
-    onToggleWatched: () -> Unit,
-    onRequestDelete: () -> Unit,
+    onOpenMenu: () -> Unit,
+    startPadding: Dp = 16.dp,
 ) {
-    val shape = MuxGridShapes.Card
     val sizeLabel = formatFileSize(entry.dataSize)
     val metaParts = listOfNotNull(
         channel?.name,
         formatEpochDayHm(entry.startEpochSec, nowEpochSec),
-        formatDurationMinutes(entry.startEpochSec, entry.stopEpochSec),
+        if (entry.hasResumePosition && !entry.isFileMissing) {
+            val remaining = (entry.durationSec - entry.playPositionSec).coerceAtLeast(0L)
+            "${remaining / 60L}m left"
+        } else {
+            formatDurationMinutes(entry.startEpochSec, entry.stopEpochSec)
+        },
         sizeLabel.takeIf { it.isNotEmpty() },
         entry.error?.takeIf { it.isNotBlank() },
     )
 
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(MuxGridColors.CardSurface)
-            .border(
-                MuxGridBorders.Hairline,
-                if (entry.isFileMissing) MuxGridColors.CoralLive.copy(alpha = 0.4f) else MuxGridColors.HairlineBorder,
-                shape,
+            .combinedClickable(
+                onClick = { if (!entry.isFileMissing) onResumeOrPlay() else onOpenMenu() },
+                onLongClick = onOpenMenu,
             )
-            .then(if (!entry.isFileMissing) Modifier.clickable(onClick = onResumeOrPlay) else Modifier)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(start = startPadding, end = 16.dp, top = 11.dp, bottom = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (channel != null) {
-                ChannelPiconBadge(
-                    channelNumber = channel.formattedNumber,
-                    channelName = channel.name,
-                    piconModel = channel.icon?.let { PiconModel(channel.id, it) },
-                    imageLoader = imageLoader,
-                    size = 44.dp,
-                )
-                Spacer(Modifier.width(12.dp))
-            }
-            Column(modifier = Modifier.weight(1f)) {
+        if (channel != null) {
+            ChannelPiconBadge(
+                channelNumber = channel.formattedNumber,
+                channelName = channel.name,
+                piconModel = channel.icon?.let { PiconModel(channel.id, it) },
+                imageLoader = imageLoader,
+                size = 44.dp,
+            )
+            Spacer(Modifier.width(12.dp))
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text(
                     text = entry.title,
                     style = MuxGridType.CardTitle,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
-                if (!entry.subtitle.isNullOrBlank()) {
-                    Text(
-                        text = entry.subtitle!!,
-                        style = MuxGridType.CardSubtitle,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                if (entry.isFileMissing) {
+                    DvrStateBadge(state = DvrState.INVALID)
+                } else if (entry.isWatched) {
+                    DvrStateBadge(state = DvrState.COMPLETED, isWatched = true)
                 }
+            }
+            if (!entry.subtitle.isNullOrBlank()) {
                 Text(
-                    text = metaParts.joinToString(" · "),
-                    style = MuxGridType.TabularSmall,
+                    text = entry.subtitle!!,
+                    style = MuxGridType.CardSubtitle,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (entry.isFileMissing) {
-                Spacer(Modifier.width(8.dp))
-                DvrStateBadge(state = DvrState.INVALID)
-            } else if (entry.isWatched) {
-                Spacer(Modifier.width(8.dp))
-                DvrStateBadge(state = DvrState.COMPLETED, isWatched = true)
-            }
-        }
-
-        if (entry.hasResumePosition && !entry.isFileMissing) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = metaParts.joinToString(" · "),
+                style = MuxGridType.TabularSmall,
+                color = if (entry.isFileMissing) MuxGridColors.CoralLive else MuxGridColors.TextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (entry.hasResumePosition && !entry.isFileMissing) {
+                Spacer(Modifier.height(2.dp))
                 LiveProgressBar(
                     progress = entry.resumeProgressFraction(),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                val remaining = (entry.durationSec - entry.playPositionSec).coerceAtLeast(0L)
-                Text(
-                    text = "Resume at ${formatDurationMs(entry.playPositionSec * 1000L)} (${remaining / 60L}m left)",
-                    style = MuxGridType.TabularSmall,
-                    color = MuxGridColors.AccentBlueLight,
-                )
             }
         }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Spacer(Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .clip(MuxGridShapes.Sm)
+                .clickable(onClick = onOpenMenu)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            if (!entry.isFileMissing) {
-                Button(
-                    onClick = onResumeOrPlay,
-                    colors = ButtonDefaults.buttonColors(containerColor = MuxGridColors.AccentBlue, contentColor = Color.White),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                ) {
-                    Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(if (entry.hasResumePosition) "Resume" else "Play", fontSize = 12.sp)
-                }
-                if (entry.hasResumePosition) {
-                    OutlinedButton(
-                        onClick = onPlayFromStart,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                    ) {
-                        Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(15.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Start Over", color = MuxGridColors.TextPrimary, fontSize = 12.sp)
-                    }
-                }
-                OutlinedButton(
-                    onClick = onToggleWatched,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                ) {
-                    Icon(MuxGridIcons.CheckCircle, contentDescription = null, tint = MuxGridColors.TextSecondary, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = if (entry.isWatched) "Unwatched" else "Watched",
-                        color = MuxGridColors.TextSecondary,
-                        fontSize = 12.sp,
-                    )
-                }
-            } else {
-                Text(
-                    text = entry.error ?: "File missing on server",
-                    color = MuxGridColors.CoralLive,
-                    fontSize = 12.sp,
-                    modifier = Modifier.align(Alignment.CenterVertically),
-                )
-            }
-            Spacer(Modifier.weight(1f))
-            OutlinedButton(
-                onClick = onRequestDelete,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-            ) {
-                Icon(MuxGridIcons.Delete, contentDescription = "Delete", tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
-            }
+            Text(
+                text = "•••",
+                color = MuxGridColors.TextMuted,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
 }
 
 @Composable
-private fun SeriesGroupCard(
+private fun SeriesGroupRow(
     group: DvrSeriesGroup,
     expanded: Boolean,
     channelById: Map<Long, Channel>,
@@ -587,27 +731,18 @@ private fun SeriesGroupCard(
     imageLoader: ImageLoader,
     onToggleExpand: () -> Unit,
     onPlayEntry: (DvrEntry, Long) -> Unit,
-    onToggleWatched: (DvrEntry) -> Unit,
-    onRequestDelete: (DvrEntry) -> Unit,
+    onOpenMenu: (DvrEntry) -> Unit,
 ) {
-    val shape = MuxGridShapes.Card
     val latest = group.entries.first()
     val channel = channelById[latest.channelId]
     val unwatchedCount = group.entries.count { !it.isWatched }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(MuxGridColors.CardSurface)
-            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, shape)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onToggleExpand),
+                .clickable(onClick = onToggleExpand)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (channel != null) {
@@ -625,18 +760,19 @@ private fun SeriesGroupCard(
                 Text(
                     text = "${group.entries.size} recordings · Latest ${formatEpochDayHm(latest.startEpochSec, nowEpochSec)}",
                     style = MuxGridType.TabularSmall,
+                    color = MuxGridColors.TextMuted,
                 )
             }
             if (unwatchedCount > 0) {
                 Text(
                     text = "$unwatchedCount new",
-                    color = MuxGridColors.AccentBlueLight,
+                    color = MuxGridColors.AccentSoft,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier
-                        .clip(MuxGridShapes.Pill)
-                        .background(MuxGridColors.AccentBlue.copy(alpha = 0.16f))
-                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                        .clip(MuxGridShapes.Badge)
+                        .background(MuxGridColors.Accent.copy(alpha = 0.16f))
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
                 )
                 Spacer(Modifier.width(8.dp))
             }
@@ -649,41 +785,39 @@ private fun SeriesGroupCard(
         }
 
         if (expanded) {
-            group.entries.forEach { entry ->
-                CompletedRecordingCard(
-                    entry = entry,
-                    channel = channelById[entry.channelId],
-                    nowEpochSec = nowEpochSec,
-                    imageLoader = imageLoader,
-                    onResumeOrPlay = {
-                        val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
-                        onPlayEntry(entry, startSec)
-                    },
-                    onPlayFromStart = { onPlayEntry(entry, 0L) },
-                    onToggleWatched = { onToggleWatched(entry) },
-                    onRequestDelete = { onRequestDelete(entry) },
-                )
+            Column(modifier = Modifier.background(MuxGridColors.CardSurfaceAlt)) {
+                group.entries.forEach { entry ->
+                    MuxGridDivider(modifier = Modifier.padding(start = 28.dp, end = 16.dp))
+                    CompletedRecordingRow(
+                        entry = entry,
+                        channel = channelById[entry.channelId],
+                        nowEpochSec = nowEpochSec,
+                        imageLoader = imageLoader,
+                        startPadding = 28.dp,
+                        onResumeOrPlay = {
+                            val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
+                            onPlayEntry(entry, startSec)
+                        },
+                        onOpenMenu = { onOpenMenu(entry) },
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ScheduledTimerCard(
+private fun ScheduledTimerRow(
     entry: DvrEntry,
     channel: Channel?,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     onCancel: () -> Unit,
 ) {
-    val shape = MuxGridShapes.Row
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(MuxGridColors.CardSurface)
-            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, shape)
-            .padding(12.dp),
+            .padding(horizontal = 16.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (channel != null) {
@@ -701,36 +835,40 @@ private fun ScheduledTimerCard(
             Text(
                 text = "${channel?.name ?: "Channel"} · ${formatEpochDayHm(entry.startEpochSec, nowEpochSec)} (${formatDurationMinutes(entry.startEpochSec, entry.stopEpochSec)})",
                 style = MuxGridType.TabularSmall,
+                color = MuxGridColors.TextMuted,
             )
         }
         Spacer(Modifier.width(8.dp))
-        OutlinedButton(
-            onClick = onCancel,
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+        Box(
+            modifier = Modifier
+                .clip(MuxGridShapes.Sm)
+                .background(MuxGridColors.CardSurface)
+                .clickable(onClick = onCancel)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
-            Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(15.dp))
-            Spacer(Modifier.width(4.dp))
-            Text("Cancel", color = MuxGridColors.CoralLive, fontSize = 12.sp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(14.dp))
+                Text("Cancel", color = MuxGridColors.CoralLive, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
         }
     }
 }
 
 @Composable
-private fun FailedRecordingCard(
+private fun FailedRecordingRow(
     entry: DvrEntry,
     channel: Channel?,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     onDelete: () -> Unit,
 ) {
-    val shape = MuxGridShapes.Row
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(MuxGridColors.CardSurface)
-            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, shape)
-            .padding(12.dp),
+            .padding(horizontal = 16.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (channel != null) {
@@ -763,16 +901,19 @@ private fun FailedRecordingCard(
                     entry.error?.takeIf { it.isNotBlank() },
                 ).joinToString(" · "),
                 style = MuxGridType.TabularSmall,
+                color = MuxGridColors.TextMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
         Spacer(Modifier.width(8.dp))
-        OutlinedButton(
-            onClick = onDelete,
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+        Box(
+            modifier = Modifier
+                .clip(MuxGridShapes.Sm)
+                .clickable(onClick = onDelete)
+                .padding(8.dp),
         ) {
-            Icon(MuxGridIcons.Delete, contentDescription = "Remove", tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
+            Icon(MuxGridIcons.Delete, contentDescription = "Remove", tint = MuxGridColors.CoralLive, modifier = Modifier.size(18.dp))
         }
     }
 }

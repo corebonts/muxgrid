@@ -38,6 +38,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,21 +62,77 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 
 @Composable
+fun MuxGridDivider(
+    modifier: Modifier = Modifier,
+    color: Color = MuxGridColors.Divider,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(MuxGridBorders.Divider)
+            .background(color),
+    )
+}
+
+@Composable
+fun BroadcastUnderlineTab(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    leadingIcon: ImageVector? = null,
+) {
+    Column(
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .padding(top = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            modifier = Modifier.padding(bottom = 8.dp),
+        ) {
+            if (leadingIcon != null) {
+                Icon(
+                    imageVector = leadingIcon,
+                    contentDescription = null,
+                    tint = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextMuted,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+            Text(
+                text = label,
+                color = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextMuted,
+                fontSize = 12.5.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .width(if (selected) 28.dp else 0.dp)
+                .height(2.dp)
+                .background(if (selected) MuxGridColors.Accent else Color.Transparent),
+        )
+    }
+}
+
+@Composable
 fun ChannelPiconBadge(
     channelNumber: String,
     channelName: String,
     piconModel: Any?,
     imageLoader: ImageLoader,
     modifier: Modifier = Modifier,
-    size: Dp = 48.dp,
+    size: Dp = 46.dp,
 ) {
-    val shape = MuxGridShapes.Badge
+    val shape = MuxGridShapes.Sm
     Box(
         modifier = modifier
             .size(size)
             .clip(shape)
-            .background(MuxGridColors.PiconSurface)
-            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, shape),
+            .background(MuxGridColors.PiconSurface),
         contentAlignment = Alignment.Center,
     ) {
         if (piconModel != null) {
@@ -86,7 +143,7 @@ fun ChannelPiconBadge(
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(6.dp),
+                    .padding(5.dp),
                 error = {
                     PiconFallbackLabel(channelNumber, channelName)
                 },
@@ -133,7 +190,7 @@ fun rememberStableDurationSec(ms: Long, resetKey: Any? = null): Long {
 fun LiveProgressBar(
     progress: Float,
     modifier: Modifier = Modifier,
-    fillColor: Color = MuxGridColors.AccentBlueLight,
+    fillColor: Color = MuxGridColors.ProgressFill,
 ) {
     val clamped = progress.coerceIn(0f, 1f)
     val animatedProgress by animateFloatAsState(
@@ -143,8 +200,8 @@ fun LiveProgressBar(
     )
     Box(
         modifier = modifier
-            .height(3.dp)
-            .clip(MuxGridShapes.Pill)
+            .height(2.dp)
+            .clip(MuxGridShapes.Progress)
             .background(MuxGridColors.TrackBackground),
     ) {
         if (animatedProgress > 0f) {
@@ -152,7 +209,7 @@ fun LiveProgressBar(
                 modifier = Modifier
                     .fillMaxWidth(animatedProgress)
                     .fillMaxHeight()
-                    .clip(MuxGridShapes.Pill)
+                    .clip(MuxGridShapes.Progress)
                     .background(fillColor),
             )
         }
@@ -173,22 +230,22 @@ fun ConnectionStatusBadge(
     }
     Row(
         modifier = modifier
-            .clip(MuxGridShapes.Pill)
+            .clip(MuxGridShapes.Sm)
             .background(MuxGridColors.CardSurface)
-            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Pill)
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Sm)
+            .padding(horizontal = 9.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .size(7.dp)
+                .size(6.dp)
                 .clip(CircleShape)
                 .background(dotColor),
         )
         Spacer(Modifier.width(6.dp))
         Text(
             text = label,
-            fontSize = 12.sp,
+            fontSize = 11.5.sp,
             fontWeight = FontWeight.Medium,
             color = MuxGridColors.TextSecondary,
             maxLines = 1,
@@ -268,9 +325,9 @@ fun TrackAndPresetPanel(
     Column(
         modifier = modifier
             .heightIn(max = 460.dp)
-            .clip(MuxGridShapes.CardLg)
+            .clip(MuxGridShapes.Dialog)
             .background(MuxGridColors.ScrimSurface)
-            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.CardLg)
+            .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -287,7 +344,7 @@ fun TrackAndPresetPanel(
                 Icon(
                     imageVector = MuxGridIcons.Tracks,
                     contentDescription = null,
-                    tint = MuxGridColors.AccentBlueLight,
+                    tint = MuxGridColors.AccentSoft,
                     modifier = Modifier.size(20.dp),
                 )
                 Text("Tracks & Decoder", style = MuxGridType.Title, fontSize = 17.sp)
@@ -306,12 +363,12 @@ fun TrackAndPresetPanel(
                 Icon(
                     imageVector = MuxGridIcons.Close,
                     contentDescription = "Close",
-                    tint = if (closeFocused) MuxGridColors.CanvasTv else MuxGridColors.AccentBlueLight,
+                    tint = if (closeFocused) MuxGridColors.CanvasTv else MuxGridColors.TextSecondary,
                     modifier = Modifier.size(16.dp),
                 )
                 Text(
                     text = "Close",
-                    color = if (closeFocused) MuxGridColors.CanvasTv else MuxGridColors.AccentBlueLight,
+                    color = if (closeFocused) MuxGridColors.CanvasTv else MuxGridColors.TextSecondary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -325,15 +382,15 @@ fun TrackAndPresetPanel(
             Icon(
                 imageVector = MuxGridIcons.AudioTrack,
                 contentDescription = null,
-                tint = MuxGridColors.TextSecondary,
-                modifier = Modifier.size(16.dp),
+                tint = MuxGridColors.TextMuted,
+                modifier = Modifier.size(15.dp),
             )
-            Text("Audio", style = MuxGridType.CardSubtitle, fontWeight = FontWeight.SemiBold)
+            Text("AUDIO", style = MuxGridType.Eyebrow)
         }
         if (audioTracks.isEmpty()) {
             Text("No audio tracks detected yet", style = MuxGridType.TabularSmall)
         } else {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 audioTracks.forEach { track ->
                     val selected = track.id == selectedAudioId || track.isSelected
                     SelectableOptionRow(
@@ -352,12 +409,12 @@ fun TrackAndPresetPanel(
             Icon(
                 imageVector = MuxGridIcons.Subtitles,
                 contentDescription = null,
-                tint = MuxGridColors.TextSecondary,
-                modifier = Modifier.size(16.dp),
+                tint = MuxGridColors.TextMuted,
+                modifier = Modifier.size(15.dp),
             )
-            Text("Subtitles (DVB / Text)", style = MuxGridType.CardSubtitle, fontWeight = FontWeight.SemiBold)
+            Text("SUBTITLES (DVB / TEXT)", style = MuxGridType.Eyebrow)
         }
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             SelectableOptionRow(
                 label = "Off",
                 selected = selectedSubtitleId == null,
@@ -380,12 +437,12 @@ fun TrackAndPresetPanel(
             Icon(
                 imageVector = MuxGridIcons.Settings,
                 contentDescription = null,
-                tint = MuxGridColors.TextSecondary,
-                modifier = Modifier.size(16.dp),
+                tint = MuxGridColors.TextMuted,
+                modifier = Modifier.size(15.dp),
             )
-            Text("Hardware Decode & Deinterlacer", style = MuxGridType.CardSubtitle, fontWeight = FontWeight.SemiBold)
+            Text("HARDWARE DECODE & DEINTERLACER", style = MuxGridType.Eyebrow)
         }
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             SelectableOptionRow(
                 label = "Hardware Zero-Copy (mediacodec — TV Default)",
                 selected = hwDecPreset == HwDecPreset.MEDIACODEC_ZERO_COPY,
@@ -406,10 +463,10 @@ fun TrackAndPresetPanel(
                 Icon(
                     imageVector = MuxGridIcons.AspectRatio,
                     contentDescription = null,
-                    tint = MuxGridColors.TextSecondary,
-                    modifier = Modifier.size(16.dp),
+                    tint = MuxGridColors.TextMuted,
+                    modifier = Modifier.size(15.dp),
                 )
-                Text("Aspect & Zoom", style = MuxGridType.CardSubtitle, fontWeight = FontWeight.SemiBold)
+                Text("ASPECT & ZOOM", style = MuxGridType.Eyebrow)
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -421,12 +478,7 @@ fun TrackAndPresetPanel(
                         modifier = Modifier
                             .weight(1f)
                             .clip(MuxGridShapes.Control)
-                            .background(if (selected) MuxGridColors.AccentBlue else MuxGridColors.CardSurface)
-                            .border(
-                                MuxGridBorders.Hairline,
-                                if (selected) MuxGridColors.AccentBlueLight else MuxGridColors.HairlineBorder,
-                                MuxGridShapes.Control,
-                            )
+                            .background(if (selected) MuxGridColors.Accent else MuxGridColors.CardSurface)
                             .clickable { onSelectAspectMode(mode) }
                             .padding(vertical = 8.dp),
                         contentAlignment = Alignment.Center,
@@ -454,13 +506,8 @@ private fun SelectableOptionRow(
     var focused by remember { mutableStateOf(false) }
     val bg = when {
         focused -> MuxGridColors.CardSurfaceElevated
-        selected -> MuxGridColors.AccentBlue.copy(alpha = 0.25f)
+        selected -> MuxGridColors.Accent.copy(alpha = 0.16f)
         else -> MuxGridColors.CardSurface
-    }
-    val borderColor = when {
-        focused -> MuxGridColors.FocusBorder
-        selected -> MuxGridColors.AccentBlueLight
-        else -> MuxGridColors.HairlineBorder
     }
     Row(
         modifier = Modifier
@@ -468,7 +515,13 @@ private fun SelectableOptionRow(
             .onFocusChanged { focused = it.isFocused }
             .clip(MuxGridShapes.Control)
             .background(bg)
-            .border(if (focused) MuxGridBorders.Focused else MuxGridBorders.Hairline, borderColor, MuxGridShapes.Control)
+            .then(
+                if (focused) {
+                    Modifier.border(MuxGridBorders.Focused, MuxGridColors.FocusBorder, MuxGridShapes.Control)
+                } else {
+                    Modifier
+                },
+            )
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 9.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -476,7 +529,7 @@ private fun SelectableOptionRow(
     ) {
         Text(
             text = label,
-            color = MuxGridColors.TextPrimary,
+            color = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextSecondary,
             fontSize = 13.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             modifier = Modifier.weight(1f),
@@ -486,7 +539,7 @@ private fun SelectableOptionRow(
             Icon(
                 imageVector = MuxGridIcons.Check,
                 contentDescription = "Active",
-                tint = MuxGridColors.AccentBlueLight,
+                tint = MuxGridColors.AccentSoft,
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -541,7 +594,7 @@ fun DvrStateBadge(
 ) {
     val (color, label) = when {
         state == DvrState.RECORDING -> MuxGridColors.CoralLive to "REC"
-        state == DvrState.SCHEDULED -> MuxGridColors.AccentBlueLight to "Scheduled"
+        state == DvrState.SCHEDULED -> MuxGridColors.AccentSoft to "Scheduled"
         state == DvrState.COMPLETED && isWatched -> MuxGridColors.EmeraldOk to "Watched"
         state == DvrState.MISSED -> MuxGridColors.AmberWarn to "Missed"
         state == DvrState.INVALID -> MuxGridColors.CoralLive to "Failed"
@@ -549,12 +602,11 @@ fun DvrStateBadge(
     }
     Row(
         modifier = modifier
-            .clip(MuxGridShapes.Pill)
+            .clip(MuxGridShapes.Badge)
             .background(color.copy(alpha = 0.16f))
-            .border(MuxGridBorders.Hairline, color.copy(alpha = 0.42f), MuxGridShapes.Pill)
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .padding(horizontal = 7.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         when {
             state == DvrState.RECORDING -> {
@@ -570,7 +622,7 @@ fun DvrStateBadge(
                     imageVector = MuxGridIcons.Schedule,
                     contentDescription = null,
                     tint = color,
-                    modifier = Modifier.size(12.dp),
+                    modifier = Modifier.size(11.dp),
                 )
             }
             state == DvrState.COMPLETED && isWatched -> {
@@ -578,7 +630,7 @@ fun DvrStateBadge(
                     imageVector = MuxGridIcons.CheckCircle,
                     contentDescription = null,
                     tint = color,
-                    modifier = Modifier.size(12.dp),
+                    modifier = Modifier.size(11.dp),
                 )
             }
             state == DvrState.MISSED || state == DvrState.INVALID -> {
@@ -586,14 +638,14 @@ fun DvrStateBadge(
                     imageVector = MuxGridIcons.Warning,
                     contentDescription = null,
                     tint = color,
-                    modifier = Modifier.size(12.dp),
+                    modifier = Modifier.size(11.dp),
                 )
             }
         }
         Text(
             text = label,
             color = color,
-            fontSize = 11.sp,
+            fontSize = 10.5.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
         )
@@ -607,10 +659,10 @@ fun TimeshiftNoticeBanner(
 ) {
     Row(
         modifier = modifier
-            .clip(MuxGridShapes.Pill)
+            .clip(MuxGridShapes.Sm)
             .background(MuxGridColors.ScrimSurface)
-            .border(MuxGridBorders.Hairline, MuxGridColors.AmberWarn.copy(alpha = 0.55f), MuxGridShapes.Pill)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .border(MuxGridBorders.Hairline, MuxGridColors.AmberWarn.copy(alpha = 0.55f), MuxGridShapes.Sm)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -618,7 +670,7 @@ fun TimeshiftNoticeBanner(
             imageVector = MuxGridIcons.Schedule,
             contentDescription = null,
             tint = MuxGridColors.AmberWarn,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(15.dp),
         )
         Text(
             text = notice,

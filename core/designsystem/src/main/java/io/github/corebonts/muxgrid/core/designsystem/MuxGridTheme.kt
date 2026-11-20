@@ -1,6 +1,7 @@
 package io.github.corebonts.muxgrid.core.designsystem
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
@@ -9,9 +10,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
 private val MuxGridDarkScheme = darkColorScheme(
-    primary = MuxGridColors.AccentBlue,
-    onPrimary = MuxGridColors.TextPrimary,
-    secondary = MuxGridColors.AccentBlueLight,
+    primary = MuxGridColors.Accent,
+    onPrimary = MuxGridColors.OnAccent,
+    secondary = MuxGridColors.AccentSoft,
+    onSecondary = MuxGridColors.OnAccent,
     background = MuxGridColors.CanvasPhone,
     onBackground = MuxGridColors.TextPrimary,
     surface = MuxGridColors.CardSurface,
@@ -19,12 +21,56 @@ private val MuxGridDarkScheme = darkColorScheme(
     surfaceVariant = MuxGridColors.CardSurfaceElevated,
     onSurfaceVariant = MuxGridColors.TextSecondary,
     error = MuxGridColors.CoralLive,
+    onError = MuxGridColors.TextPrimary,
     outline = MuxGridColors.HairlineBorder,
+    outlineVariant = MuxGridColors.Divider,
+)
+
+private val MuxGridMaterialShapes = Shapes(
+    extraSmall = MuxGridShapes.Xs,
+    small = MuxGridShapes.Sm,
+    medium = MuxGridShapes.Card,
+    large = MuxGridShapes.Dialog,
+    extraLarge = MuxGridShapes.Sheet,
 )
 
 object MuxGridType {
+    val ScreenTitle = TextStyle(
+        fontSize = 24.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = (-0.5).sp,
+        color = MuxGridColors.TextPrimary,
+    )
+
+    val Title = TextStyle(
+        fontSize = 19.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = (-0.35).sp,
+        color = MuxGridColors.TextPrimary,
+    )
+
+    val Eyebrow = TextStyle(
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.9.sp,
+        color = MuxGridColors.TextMuted,
+    )
+
+    val CardTitle = TextStyle(
+        fontSize = 14.5.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = (-0.1).sp,
+        color = MuxGridColors.TextPrimary,
+    )
+
+    val CardSubtitle = TextStyle(
+        fontSize = 12.5.sp,
+        fontWeight = FontWeight.Normal,
+        color = MuxGridColors.TextSecondary,
+    )
+
     val TabularSmall = TextStyle(
-        fontSize = 12.sp,
+        fontSize = 11.5.sp,
         fontWeight = FontWeight.Medium,
         fontFeatureSettings = "tnum",
         color = MuxGridColors.TextSecondary,
@@ -36,26 +82,15 @@ object MuxGridType {
         fontFeatureSettings = "tnum",
         color = MuxGridColors.TextPrimary,
     )
-
-    val Title = TextStyle(
-        fontSize = 20.sp,
-        fontWeight = FontWeight.SemiBold,
-        letterSpacing = (-0.02).sp,
-        color = MuxGridColors.TextPrimary,
-    )
-
-    val CardTitle = TextStyle(
-        fontSize = 15.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = MuxGridColors.TextPrimary,
-    )
-
-    val CardSubtitle = TextStyle(
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Normal,
-        color = MuxGridColors.TextSecondary,
-    )
 }
+
+private val MuxGridTypography = Typography(
+    headlineSmall = MuxGridType.ScreenTitle,
+    titleLarge = MuxGridType.Title,
+    titleMedium = MuxGridType.CardTitle,
+    bodyMedium = MuxGridType.CardSubtitle,
+    labelMedium = MuxGridType.TabularSmall,
+)
 
 @Composable
 fun MuxGridTheme(
@@ -69,7 +104,8 @@ fun MuxGridTheme(
     }
     MaterialTheme(
         colorScheme = scheme,
-        typography = Typography(),
+        shapes = MuxGridMaterialShapes,
+        typography = MuxGridTypography,
         content = content,
     )
 }
