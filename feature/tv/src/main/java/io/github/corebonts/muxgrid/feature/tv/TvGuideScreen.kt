@@ -106,6 +106,7 @@ import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
 import io.github.corebonts.muxgrid.core.designsystem.rememberTimelineScrollState
 import io.github.corebonts.muxgrid.core.designsystem.scrollItemIntoViewport
 import io.github.corebonts.muxgrid.core.designsystem.searchEpgEvents
+import io.github.corebonts.muxgrid.core.designsystem.timelineStickyTextOffset
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.DvrEntry
@@ -898,7 +899,9 @@ internal fun TvGuideScreen(
                                             verticalArrangement = Arrangement.SpaceBetween,
                                         ) {
                                             Row(
-                                                modifier = Modifier.fillMaxWidth(),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .timelineStickyTextOffset(cell.startEpochSec, cell.stopEpochSec, timelineScrollState),
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically,
                                             ) {
@@ -922,6 +925,7 @@ internal fun TvGuideScreen(
                                                 color = MuxGridColors.TextMuted,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.timelineStickyTextOffset(cell.startEpochSec, cell.stopEpochSec, timelineScrollState),
                                             )
                                         }
                                     }
