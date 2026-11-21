@@ -34,6 +34,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * [PlaybackEngine] backed by `libmpv` (`mpv-android-lib`) and [LocalMediaProxy].
@@ -190,6 +191,13 @@ class MpvPlaybackEngine(
             setOptionString("force-window", "no")
             setOptionString("idle", "yes")
             setPropertyString("idle", "yes")
+            // Prevent mpv's built-in ytdl_hook from spawning yt-dlp subprocesses via clone/fork
+            // on HTTP error responses (e.g. 503 on TunerBusy), which corrupts Android fdsan state.
+            setOptionString("ytdl", "no")
+            setPropertyString("ytdl", "no")
+            setOptionString("load-scripts", "no")
+            setPropertyString("load-scripts", "no")
+            setOptionString("script-opts-append", "ytdl_hook-exclude=.")
             setOptionString("pause", "no")
             setPropertyBoolean("pause", false)
 
@@ -248,8 +256,8 @@ class MpvPlaybackEngine(
         Log.i(TAG, "playChannel id=${channel.id} (${channel.name}) timeshift=$requestedWindow mode=live")
         mpvExecutor.execute {
             val instance = ensureMpvLocked() ?: return@execute
-            instance.command("stop")
             liveStrategy.stopActive()
+            instance.command("stop")
             applyPresetOnInstance(instance, preset)
             applyAspectModeLocked(instance, currentAspectMode)
             configureLiveTimeshiftLocked(instance, requestedWindow)
@@ -327,8 +335,8 @@ class MpvPlaybackEngine(
         Log.i(TAG, "playDvrEntry id=${entry.id} (${entry.title}) mode=$mode start=${resumeSec}s")
         mpvExecutor.execute {
             val instance = ensureMpvLocked() ?: return@execute
-            instance.command("stop")
             proxy.stopActiveStream()
+            instance.command("stop")
             applyPresetOnInstance(instance, preset)
             applyAspectModeLocked(instance, currentAspectMode)
             configureDvrCacheLocked(instance, isGrowing)
@@ -564,16 +572,23 @@ class MpvPlaybackEngine(
     }
 
     override fun detachSurface() {
-        mpvExecutor.execute {
-            if (!hasSurface) return@execute
-            hasSurface = false
-            val instance = mpv ?: return@execute
-            if (!instance.isInitialized) return@execute
-            // Disable video decode while backgrounded / audio-only so CPU & battery stay low
-            instance.setPropertyString("vid", "no")
-            instance.setPropertyString("vo", "null")
-            instance.setPropertyString("force-window", "no")
-            instance.detachSurface()
+        // SurfaceHolder.Callback.surfaceDestroyed requires the Surface to stop being used
+        // before returning; wait briefly for mpv to disable vo=gpu and detach the ANativeWindow.
+        val task = runCatching {
+            mpvExecutor.submit {
+                if (!hasSurface) return@submit
+                hasSurface = false
+                val instance = mpv ?: return@submit
+                if (!instance.isInitialized) return@submit
+                // Disable video decode while backgrounded / audio-only so CPU & battery stay low
+                instance.setPropertyString("vid", "no")
+                instance.setPropertyString("vo", "null")
+                instance.setPropertyString("force-window", "no")
+                instance.detachSurface()
+            }
+        }.getOrNull() ?: return
+        runCatching {
+            task.get(SURFACE_DETACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         }
     }
 
@@ -977,7 +992,11 @@ class MpvPlaybackEngine(
             }
             MPV.mpvEvent.MPV_EVENT_START_FILE -> {
                 _state.update { current ->
-                    if (explicitlyStopped) current else current.copy(status = PlaybackStatus.BUFFERING, error = null)
+                    if (explicitlyStopped || current.status == PlaybackStatus.ERROR) {
+                        current
+                    } else {
+                        current.copy(status = PlaybackStatus.BUFFERING, error = null)
+                    }
                 }
             }
             MPV.mpvEvent.MPV_EVENT_FILE_LOADED,
@@ -1167,5 +1186,6 @@ class MpvPlaybackEngine(
         private const val DISK_SAFETY_RESERVE_BYTES = 512L * 1024L * 1024L
         private const val GROWING_WRITE_HEAD_SAFETY_MS = 2_000L
         private const val LIVE_EDGE_SAFETY_MS = 1_500L
+        private const val SURFACE_DETACH_TIMEOUT_MS = 1_500L
     }
 }

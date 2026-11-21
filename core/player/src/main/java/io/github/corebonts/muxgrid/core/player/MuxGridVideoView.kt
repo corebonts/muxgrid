@@ -12,7 +12,8 @@ class MuxGridVideoView(
     private val playbackEngine: PlaybackEngine,
 ) : SurfaceView(context), SurfaceHolder.Callback {
 
-    init {
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
         holder.addCallback(this)
     }
 

@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.content.res.Configuration
 import android.media.AudioManager
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -40,7 +41,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -172,20 +172,21 @@ internal fun MobilePlayerScreen(
 
     val canSeekTimeline = playbackState.isRecordingPlayback || playbackState.isTimeshiftSeekable
     val isAudioStage = playbackState.isRadio || playbackState.isAudioOnly
+    val hasError = playbackState.error != null
 
     // Immersive system bars on phone player
-    DisposableEffect(hudVisible, isInPip, trackPanelOpen, quickZapOpen) {
-        val window = activity?.window
-        if (window != null) {
-            val controller = WindowCompat.getInsetsController(window, view)
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            if (!hudVisible && !isInPip && !trackPanelOpen && !quickZapOpen) {
-                controller.hide(WindowInsetsCompat.Type.systemBars())
-            } else {
-                controller.show(WindowInsetsCompat.Type.systemBars())
-            }
+    LaunchedEffect(hudVisible, isInPip, trackPanelOpen, quickZapOpen, hasError) {
+        val window = activity?.window ?: return@LaunchedEffect
+        val controller = WindowCompat.getInsetsController(window, view)
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (!hudVisible && !isInPip && !trackPanelOpen && !quickZapOpen && !hasError) {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
         }
+    }
+    DisposableEffect(activity, view) {
         onDispose {
             activity?.window?.let { w ->
                 WindowCompat.getInsetsController(w, view).show(WindowInsetsCompat.Type.systemBars())
@@ -462,28 +463,6 @@ internal fun MobilePlayerScreen(
                         start = 16.dp,
                         end = 16.dp,
                     ),
-            )
-        }
-
-        val err = playbackState.error
-        if (err != null) {
-            AlertDialog(
-                onDismissRequest = onPlaybackCompleted,
-                shape = MuxGridShapes.Dialog,
-                containerColor = MuxGridColors.CardSurfaceElevated,
-                titleContentColor = MuxGridColors.TextPrimary,
-                textContentColor = MuxGridColors.TextSecondary,
-                title = {
-                    Text(if (err is PlaybackError.TunerBusy) "Tuner Busy" else "Playback Error")
-                },
-                text = {
-                    Text(err.message)
-                },
-                confirmButton = {
-                    TextButton(onClick = onPlaybackCompleted) {
-                        Text("OK", color = MuxGridColors.AccentSoft, fontWeight = FontWeight.SemiBold)
-                    }
-                },
             )
         }
 
@@ -1046,6 +1025,79 @@ internal fun MobilePlayerScreen(
                     onClose = { trackPanelOpen = false },
                     modifier = Modifier.widthIn(max = 540.dp).fillMaxWidth(),
                 )
+            }
+        }
+
+        // Render error modal in-window instead of a separate Dialog window so showing/dismissing
+        // over SurfaceView does not trigger WindowManagerImpl.updateViewLayout on HyperOS 4.
+        val err = playbackState.error
+        if (err != null) {
+            BackHandler(onBack = onPlaybackCompleted)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MuxGridColors.OverlayBackdrop)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onPlaybackCompleted,
+                    )
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .widthIn(min = 280.dp, max = 420.dp)
+                        .fillMaxWidth()
+                        .clip(MuxGridShapes.Dialog)
+                        .background(MuxGridColors.CardSurfaceElevated)
+                        .border(
+                            width = MuxGridBorders.Hairline,
+                            color = MuxGridColors.CoralLive.copy(alpha = 0.55f),
+                            shape = MuxGridShapes.Dialog,
+                        )
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                        )
+                        .padding(22.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = if (err is PlaybackError.TunerBusy) "Tuner Busy" else "Playback Error",
+                        style = MuxGridType.Title,
+                        fontSize = 18.sp,
+                        color = MuxGridColors.TextPrimary,
+                    )
+                    Text(
+                        text = err.message,
+                        style = MuxGridType.CardSubtitle,
+                        fontSize = 14.sp,
+                        color = MuxGridColors.TextSecondary,
+                    )
+                    if (err is PlaybackError.TunerBusy) {
+                        Text(
+                            text = "The single tuner is currently busy recording on another mux.",
+                            style = MuxGridType.TabularSmall,
+                            color = MuxGridColors.TextMuted,
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = onPlaybackCompleted) {
+                            Text(
+                                text = "OK",
+                                color = MuxGridColors.AccentSoft,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
