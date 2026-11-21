@@ -3,6 +3,7 @@ package io.github.corebonts.muxgrid.core.designsystem
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.corebonts.muxgrid.core.model.ConnectionTestResult
@@ -160,20 +162,45 @@ fun OnboardingServerScreen(
             verticalArrangement = Arrangement.spacedBy(if (isTv) 10.dp else 14.dp),
         ) {
             Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Icon(
-                    imageVector = MuxGridIcons.Dns,
-                    contentDescription = null,
-                    tint = MuxGridColors.AccentSoft,
-                    modifier = Modifier.size(24.dp),
-                )
-                Text(
-                    text = "Connect to Tvheadend",
-                    style = MuxGridType.Title,
-                    fontSize = if (isTv) 20.sp else 22.sp,
-                )
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(
+                        imageVector = MuxGridIcons.Dns,
+                        contentDescription = null,
+                        tint = MuxGridColors.AccentSoft,
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Text(
+                        text = "Connect to Tvheadend",
+                        style = MuxGridType.Title,
+                        fontSize = if (isTv) 20.sp else 22.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (!isTv && canCancel) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(MuxGridShapes.Sm)
+                            .clickable(onClick = onCancel),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = MuxGridIcons.Close,
+                            contentDescription = "Cancel",
+                            tint = MuxGridColors.TextSecondary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
             }
             Text(
                 text = "Uses HTSP (control, EPG, auth) and HTTP pass-through for instant broadcast playback.",
@@ -486,62 +513,30 @@ fun OnboardingServerScreen(
                             softWrap = false,
                         )
                     }
-                    Row(
+                    OutlinedButton(
+                        onClick = doTest,
+                        shape = MuxGridShapes.Sm,
+                        contentPadding = btnPadding,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = MuxGridColors.CardSurfaceElevated,
+                            contentColor = MuxGridColors.TextPrimary,
+                        ),
+                        border = BorderStroke(1.dp, MuxGridColors.HairlineBorder),
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        OutlinedButton(
-                            onClick = doTest,
-                            shape = MuxGridShapes.Sm,
-                            contentPadding = btnPadding,
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = MuxGridColors.CardSurfaceElevated,
-                                contentColor = MuxGridColors.TextPrimary,
-                            ),
-                            border = BorderStroke(1.dp, MuxGridColors.HairlineBorder),
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(
-                                imageVector = MuxGridIcons.Refresh,
-                                contentDescription = null,
-                                tint = MuxGridColors.TextPrimary,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = if (testing) "Testing…" else "Test",
-                                color = MuxGridColors.TextPrimary,
-                                maxLines = 1,
-                                softWrap = false,
-                            )
-                        }
-                        if (canCancel) {
-                            OutlinedButton(
-                                onClick = onCancel,
-                                shape = MuxGridShapes.Sm,
-                                contentPadding = btnPadding,
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = MuxGridColors.CardSurfaceElevated,
-                                    contentColor = MuxGridColors.TextSecondary,
-                                ),
-                                border = BorderStroke(1.dp, MuxGridColors.HairlineBorder),
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Icon(
-                                    imageVector = MuxGridIcons.Close,
-                                    contentDescription = null,
-                                    tint = MuxGridColors.TextSecondary,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = "Cancel",
-                                    color = MuxGridColors.TextSecondary,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                )
-                            }
-                        }
+                        Icon(
+                            imageVector = MuxGridIcons.Refresh,
+                            contentDescription = null,
+                            tint = MuxGridColors.TextPrimary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = if (testing) "Testing…" else "Test",
+                            color = MuxGridColors.TextPrimary,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
                     }
                 }
             }
