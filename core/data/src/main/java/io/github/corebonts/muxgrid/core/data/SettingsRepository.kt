@@ -20,6 +20,7 @@ import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LocalDvrProgress
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import io.github.corebonts.muxgrid.core.model.StartScreen
+import io.github.corebonts.muxgrid.core.model.SubtitlePreference
 import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import kotlinx.coroutines.flow.Flow
@@ -80,6 +81,13 @@ class SettingsRepository(
 
     val themeMode: Flow<ThemeMode> = context.muxGridDataStore.data.map { prefs ->
         ThemeMode.fromPersisted(prefs[KEY_THEME_MODE], formFactor)
+    }
+
+    val subtitlePreference: Flow<SubtitlePreference> = context.muxGridDataStore.data.map { prefs ->
+        SubtitlePreference(
+            enabled = prefs[KEY_SUBTITLE_ENABLED] ?: true,
+            preferredLanguage = SubtitlePreference.sanitizeLanguage(prefs[KEY_SUBTITLE_LANG]),
+        )
     }
 
     val localDvrProgress: Flow<Map<Long, LocalDvrProgress>> = context.muxGridDataStore.data.map { prefs ->
@@ -176,6 +184,18 @@ class SettingsRepository(
         }
     }
 
+    suspend fun setSubtitlePreference(preference: SubtitlePreference) {
+        context.muxGridDataStore.edit { prefs ->
+            prefs[KEY_SUBTITLE_ENABLED] = preference.enabled
+            val lang = preference.sanitizedLanguage
+            if (lang != null) {
+                prefs[KEY_SUBTITLE_LANG] = lang
+            } else {
+                prefs.remove(KEY_SUBTITLE_LANG)
+            }
+        }
+    }
+
     private fun createOrRecoverAead(): Aead? = runCatching {
         AeadConfig.register()
         AndroidKeysetManager.Builder()
@@ -219,6 +239,8 @@ class SettingsRepository(
         private val KEY_PIP_ENABLED = booleanPreferencesKey("pip_enabled")
         private val KEY_START_SCREEN = stringPreferencesKey("start_screen")
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
+        private val KEY_SUBTITLE_ENABLED = booleanPreferencesKey("subtitle_enabled")
+        private val KEY_SUBTITLE_LANG = stringPreferencesKey("subtitle_preferred_lang")
         private val KEY_LOCAL_DVR_PROGRESS = stringSetPreferencesKey("dvr_local_progress")
 
         private const val KEYSET_NAME = "muxgrid_master_keyset"

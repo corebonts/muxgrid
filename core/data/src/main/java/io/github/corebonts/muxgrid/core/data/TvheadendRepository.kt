@@ -20,6 +20,7 @@ import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import io.github.corebonts.muxgrid.core.model.StartScreen
 import io.github.corebonts.muxgrid.core.model.StreamTicket
+import io.github.corebonts.muxgrid.core.model.SubtitlePreference
 import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import kotlinx.coroutines.CancellationException
@@ -108,6 +109,9 @@ class TvheadendRepository(
 
     val themeMode: StateFlow<ThemeMode> = settings.themeMode
         .stateIn(scope, SharingStarted.Eagerly, ThemeMode.defaultFor(formFactor))
+
+    val subtitlePreference: StateFlow<SubtitlePreference> = settings.subtitlePreference
+        .stateIn(scope, SharingStarted.Eagerly, SubtitlePreference())
 
     val imageLoader: ImageLoader = PiconFetcher.createImageLoader(
         context = context.applicationContext,
@@ -312,6 +316,10 @@ class TvheadendRepository(
 
     suspend fun setThemeMode(mode: ThemeMode) {
         settings.setThemeMode(mode)
+    }
+
+    suspend fun setSubtitlePreference(preference: SubtitlePreference) {
+        settings.setSubtitlePreference(preference)
     }
 
     suspend fun openGrowingDvrFile(dvrId: Long): GrowingDvrFile =

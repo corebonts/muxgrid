@@ -6,6 +6,7 @@ import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.PlaybackDiagnostics
 import io.github.corebonts.muxgrid.core.model.PlaybackState
+import io.github.corebonts.muxgrid.core.model.SubtitlePreference
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.model.VideoAspectMode
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +30,7 @@ interface PlaybackEngine {
     fun setSubtitleTrack(trackId: Int?)
     fun applyPreset(preset: HwDecPreset)
     fun setTimeshiftWindow(window: TimeshiftWindow)
+    fun setSubtitlePreference(preference: SubtitlePreference)
     fun setAudioOnly(audioOnly: Boolean)
     fun setVideoAspectMode(mode: VideoAspectMode)
     fun setDiagnosticsEnabled(enabled: Boolean)
