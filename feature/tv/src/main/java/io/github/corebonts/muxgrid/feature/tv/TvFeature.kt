@@ -560,6 +560,7 @@ private fun TvContent(
                                 TvLiveChannelsTab(
                                     connectionState = connectionState,
                                     channels = filteredChannels,
+                                    hasAnyChannels = channels.isNotEmpty(),
                                     filters = remember(tags) { buildLiveFilters(tags) },
                                     activeFilter = activeFilter,
                                     favorites = favorites,
@@ -587,6 +588,7 @@ private fun TvContent(
                                 val nowEpochSec = rememberNowEpochSec(offsetMs)
                                 TvGuideScreen(
                                     channels = channels,
+                                    connectionState = connectionState,
                                     epgByChannel = epgByChannel,
                                     dvrEntries = dvrEntries,
                                     nowEpochSec = nowEpochSec,
@@ -632,6 +634,7 @@ private fun TvContent(
                                 TvRecordingsScreen(
                                     dvrEntries = dvrEntries,
                                     channels = channels,
+                                    connectionState = connectionState,
                                     nowEpochSec = nowEpochSec,
                                     imageLoader = repository.imageLoader,
                                     listState = recordingsListState,
@@ -923,6 +926,7 @@ private fun TvRailItem(
 private fun TvLiveChannelsTab(
     connectionState: ConnectionState,
     channels: List<Channel>,
+    hasAnyChannels: Boolean,
     filters: List<LiveFilter>,
     activeFilter: LiveFilter,
     favorites: Set<Long>,
@@ -1043,9 +1047,13 @@ private fun TvLiveChannelsTab(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
-                val emptyText = when (connectionState) {
-                    is ConnectionState.Connecting, is ConnectionState.Syncing -> "Syncing channels from Tvheadend…"
-                    else -> "No channels match this filter"
+                val emptyText = when {
+                    hasAnyChannels -> "No channels match this filter"
+                    connectionState is ConnectionState.Connecting ||
+                        connectionState is ConnectionState.Syncing -> "Syncing channels from Tvheadend…"
+                    connectionState is ConnectionState.Disconnected -> "Connecting to Tvheadend…"
+                    connectionState is ConnectionState.Error -> connectionState.message
+                    else -> "No channels synced yet"
                 }
                 Text(emptyText, style = MuxGridType.CardSubtitle, fontSize = 16.sp)
             }

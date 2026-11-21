@@ -29,10 +29,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
@@ -51,7 +52,7 @@ class TvheadendRepository(
     private val scope: CoroutineScope,
 ) {
     private val settings = SettingsRepository(context.applicationContext, formFactor)
-    private val htspClient = HtspClient(scope = scope)
+    private val htspClient = HtspClient(scope = scope, awaitConsumerSyncAck = true)
     private val vfsClient = HtspVfsClient(profileProvider = { serverProfile.value ?: ServerProfile(host = "") })
     private val epgDiskCache = EpgDiskCache(File(context.applicationContext.filesDir, "epg_cache.dat"))
     private var backgroundDisconnectJob: Job? = null
@@ -62,16 +63,16 @@ class TvheadendRepository(
         },
     )
 
+    private val dvrMergeLock = Any()
+    private var latestLocalDvrProgress: Map<Long, LocalDvrProgress> = emptyMap()
+    private val _dvrEntries = MutableStateFlow<Map<Long, DvrEntry>>(emptyMap())
+
     val connectionState: StateFlow<ConnectionState> = htspClient.connectionState
     val channels: StateFlow<List<Channel>> = store.channels
     val tags: StateFlow<List<ChannelTag>> = store.tags
     val nowNextByChannel: StateFlow<Map<Long, NowNextProgram>> = store.nowNextByChannel
     val epgByChannel: StateFlow<Map<Long, List<EpgEvent>>> = store.epgByChannel
-    val dvrEntries: StateFlow<Map<Long, DvrEntry>> = combine(
-        store.dvrEntries,
-        settings.localDvrProgress,
-        ::mergeDvrEntriesWithLocalProgress,
-    ).stateIn(scope, SharingStarted.Eagerly, emptyMap())
+    val dvrEntries: StateFlow<Map<Long, DvrEntry>> = _dvrEntries.asStateFlow()
 
     val serverProfile: StateFlow<ServerProfile?> = settings.serverProfile
         .stateIn(scope, SharingStarted.Eagerly, null)
@@ -110,8 +111,20 @@ class TvheadendRepository(
         scope.coroutineContext[Job]?.invokeOnCompletion {
             vfsClient.close()
         }
+        scope.launch {
+            settings.localDvrProgress.collect { localProgress ->
+                synchronized(dvrMergeLock) {
+                    latestLocalDvrProgress = localProgress
+                    _dvrEntries.value = mergeDvrEntriesWithLocalProgress(
+                        serverMap = store.dvrEntries.value,
+                        localFallback = localProgress,
+                    )
+                }
+            }
+        }
         scope.launch(Dispatchers.Default) {
             val pendingEpgBatch = ArrayList<HtspPushEvent>()
+            val pendingShadowBatch = ArrayList<HtspPushEvent>()
             var flushJob: Job? = null
             var syncGeneration = 0L
             val batchLock = Any()
@@ -123,6 +136,7 @@ class TvheadendRepository(
                         inShadowSync = true
                         flushJob?.cancel()
                         flushJob = null
+                        pendingShadowBatch.clear()
                         synchronized(batchLock) {
                             syncGeneration++
                             pendingEpgBatch.clear()
@@ -133,10 +147,21 @@ class TvheadendRepository(
                         inShadowSync = false
                         flushJob?.cancel()
                         flushJob = null
-                        synchronized(batchLock) {
-                            syncGeneration++
-                            pendingEpgBatch.clear()
-                            store.applyEvent(event)
+                        try {
+                            synchronized(batchLock) {
+                                syncGeneration++
+                                pendingEpgBatch.clear()
+                                if (pendingShadowBatch.isNotEmpty()) {
+                                    pendingShadowBatch.add(event)
+                                    store.applyEvents(pendingShadowBatch)
+                                    pendingShadowBatch.clear()
+                                } else {
+                                    store.applyEvent(event)
+                                }
+                            }
+                            syncMergedDvrEntries()
+                        } finally {
+                            htspClient.acknowledgeInitialSync()
                         }
                     }
                     is HtspPushEvent.EventAdd,
@@ -144,9 +169,7 @@ class TvheadendRepository(
                     is HtspPushEvent.EventDelete,
                     -> {
                         if (inShadowSync) {
-                            synchronized(batchLock) {
-                                store.applyEvent(event)
-                            }
+                            pendingShadowBatch.add(event)
                         } else {
                             val scheduledGen = synchronized(batchLock) {
                                 pendingEpgBatch.add(event)
@@ -179,10 +202,9 @@ class TvheadendRepository(
                                 }
                                 store.applyEvent(event)
                             }
+                            syncMergedDvrEntries()
                         } else {
-                            synchronized(batchLock) {
-                                store.applyEvent(event)
-                            }
+                            pendingShadowBatch.add(event)
                         }
                     }
                 }
@@ -425,6 +447,15 @@ class TvheadendRepository(
                 dvrId = dvrId,
                 playPositionSec = targetPos,
                 playCount = targetCount ?: existingCount,
+            )
+        }
+    }
+
+    private fun syncMergedDvrEntries() {
+        synchronized(dvrMergeLock) {
+            _dvrEntries.value = mergeDvrEntriesWithLocalProgress(
+                serverMap = store.dvrEntries.value,
+                localFallback = latestLocalDvrProgress,
             )
         }
     }
