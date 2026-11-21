@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -1575,7 +1576,9 @@ private fun TvUnderlineOption(
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier = Modifier
+                .width(IntrinsicSize.Max)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
@@ -1588,7 +1591,7 @@ private fun TvUnderlineOption(
             Spacer(Modifier.height(5.dp))
             Box(
                 modifier = Modifier
-                    .width(if (selected) 28.dp else 0.dp)
+                    .fillMaxWidth()
                     .height(2.dp)
                     .background(if (selected) MuxGridColors.Accent else Color.Transparent),
             )
