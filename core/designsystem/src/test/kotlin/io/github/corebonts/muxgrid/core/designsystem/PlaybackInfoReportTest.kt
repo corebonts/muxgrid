@@ -89,9 +89,47 @@ class PlaybackInfoReportTest {
         assertTrue(report.contains("Dropped Frames: 1 VO · 0 dec"))
         assertTrue(report.contains("Network Rate: 5.80 Mbps"))
         assertTrue(report.contains("Data Received: 88.0 MB"))
-        assertTrue(report.contains("Cache Used: 32.0 MB / 1.0 GB"))
-        assertTrue(report.contains("Ahead / Rewind: 20.0 MB / 12.0 MB"))
+        assertTrue(report.contains("Disk Cache: 34.0 MB / 1.0 GB"))
+        assertTrue(report.contains("RAM Hot Cache: 32.0 MB"))
+        assertTrue(report.contains("RAM Ahead / Rewind: 20.0 MB / 12.0 MB"))
         assertTrue(report.contains("App CPU: 12.5% (8 cores)"))
         assertTrue(report.contains("Process Memory: 164 MB PSS (native 92 MB)"))
+    }
+
+    @Test
+    fun `formatPlaybackInfoReport distinguishes ahead time from ring buffer window and handles RAM cache mode`() {
+        val state = PlaybackState(
+            status = PlaybackStatus.PAUSED,
+            channelId = 4L,
+            channelNumber = "4",
+            channelName = "M4 Sport HD",
+            bufferWindowMs = 62_000L,
+        )
+        val diag = PlaybackDiagnostics(
+            cacheOnDisk = true,
+            cacheUsedBytes = 1_500_000L,
+            cacheBudgetPerDirBytes = 2L * 1024L * 1024L * 1024L,
+            diskCacheBytes = 0L,
+            cacheDurationSec = 22.0,
+        )
+        val diskReport = formatPlaybackInfoReport(state, diag, HwDecPreset.MEDIACODEC_ZERO_COPY)
+        assertTrue(diskReport.contains("Disk Cache: Active (budget 4.0 GB)"))
+        assertTrue(diskReport.contains("Buffered Time: 00:22 ahead · 01:02 window"))
+
+        val ramReport = formatPlaybackInfoReport(
+            playbackState = state.copy(bufferWindowMs = 0L),
+            diagnostics = diag.copy(
+                cacheOnDisk = false,
+                cacheUsedBytes = 32L * 1024L * 1024L,
+                cacheForwardBytes = 20L * 1024L * 1024L,
+                cacheBackBytes = 12L * 1024L * 1024L,
+                cacheBudgetPerDirBytes = 64L * 1024L * 1024L,
+                cacheDurationSec = 42.0,
+            ),
+            hwDecPreset = HwDecPreset.MEDIACODEC_ZERO_COPY,
+        )
+        assertTrue(ramReport.contains("Cache Used: 32.0 MB / 128.0 MB"))
+        assertTrue(ramReport.contains("Ahead / Rewind: 20.0 MB / 12.0 MB"))
+        assertTrue(ramReport.contains("Buffered Time: 00:42"))
     }
 }
