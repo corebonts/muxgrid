@@ -271,4 +271,73 @@ class MuxGridGuideFormattersTest {
             computeDayJumpWindowStart(tomorrow, today, todayHalfHour, mapOf(1L to listOf(lateEvent)), windowSec, zone),
         )
     }
+
+    @Test
+    fun `buildContinuousTimelineCells preserves true event bounds and inserts gaps`() {
+        val rangeStart = today.atStartOfDay(zone).toEpochSecond() + 18L * 3600L
+        val rangeEnd = rangeStart + 4L * 3600L
+        val e1 = EpgEvent(id = 1L, channelId = 1L, startEpochSec = rangeStart - 1800L, stopEpochSec = rangeStart + 3600L, title = "Early")
+        val e2 = EpgEvent(id = 2L, channelId = 1L, startEpochSec = rangeStart + 5400L, stopEpochSec = rangeEnd + 1800L, title = "Late")
+
+        val cells = buildContinuousTimelineCells(1L, listOf(e1, e2), rangeStart, rangeEnd)
+        assertEquals(3, cells.size)
+        assertEquals(rangeStart - 1800L, cells[0].startEpochSec)
+        assertEquals(rangeStart + 3600L, cells[0].stopEpochSec)
+        assertNull(cells[1].event)
+        assertEquals(rangeStart + 3600L, cells[1].startEpochSec)
+        assertEquals(rangeStart + 5400L, cells[1].stopEpochSec)
+        assertEquals(2L, cells[2].event?.id)
+        assertEquals(rangeEnd + 1800L, cells[2].stopEpochSec)
+    }
+
+    @Test
+    fun `findAdjacentEpgEvent walks forward and backward within timeline bounds`() {
+        val base = today.atStartOfDay(zone).toEpochSecond() + 12L * 3600L
+        val e1 = EpgEvent(id = 1L, channelId = 1L, startEpochSec = base, stopEpochSec = base + 3600L, title = "A")
+        val e2 = EpgEvent(id = 2L, channelId = 1L, startEpochSec = base + 7200L, stopEpochSec = base + 10_800L, title = "B")
+        val e3 = EpgEvent(id = 3L, channelId = 1L, startEpochSec = base + 10_800L, stopEpochSec = base + 14_400L, title = "C")
+        val list = listOf(e1, e2, e3)
+
+        assertEquals(2L, findAdjacentEpgEvent(list, 1L, +1, base, base + 14_400L)?.id)
+        assertEquals(1L, findAdjacentEpgEvent(list, 2L, -1, base, base + 14_400L)?.id)
+        assertNull(findAdjacentEpgEvent(list, 1L, -1, base, base + 14_400L))
+        assertNull(findAdjacentEpgEvent(list, 3L, +1, base, base + 14_400L))
+    }
+
+    @Test
+    fun `computeEnsureVisibleScrollPx scrolls minimally to reveal focused events`() {
+        // Already visible -> no movement
+        assertEquals(
+            200f,
+            computeEnsureVisibleScrollPx(
+                startPx = 250f,
+                stopPx = 450f,
+                currentScrollPx = 200f,
+                viewportWidthPx = 600f,
+                maxScrollPx = 2000f,
+            ),
+        )
+        // Partially off right -> scroll right with trailing margin
+        assertEquals(
+            324f,
+            computeEnsureVisibleScrollPx(
+                startPx = 700f,
+                stopPx = 900f,
+                currentScrollPx = 200f,
+                viewportWidthPx = 600f,
+                maxScrollPx = 2000f,
+            ),
+        )
+        // Wider than viewport -> align start with leading margin
+        assertEquals(
+            476f,
+            computeEnsureVisibleScrollPx(
+                startPx = 500f,
+                stopPx = 1500f,
+                currentScrollPx = 200f,
+                viewportWidthPx = 600f,
+                maxScrollPx = 2000f,
+            ),
+        )
+    }
 }
