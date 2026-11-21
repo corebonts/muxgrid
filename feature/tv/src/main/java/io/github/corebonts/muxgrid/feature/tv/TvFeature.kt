@@ -55,7 +55,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
@@ -1291,7 +1293,9 @@ private fun TvSettingsTab(
                     verticalAlignment = Alignment.Top,
                 ) {
                     Column(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clampVerticalFocusExit(blockUp = true, blockDown = true),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         TvServerSettingsCard(
@@ -1312,7 +1316,9 @@ private fun TvSettingsTab(
                         )
                     }
                     Column(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clampVerticalFocusExit(blockUp = false, blockDown = true),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         TvDecoderTimeshiftSettingsCard(
@@ -1749,6 +1755,19 @@ private fun TvAppInfoSettingsCard(
         )
     }
 }
+
+private fun Modifier.clampVerticalFocusExit(
+    blockUp: Boolean,
+    blockDown: Boolean,
+): Modifier = focusProperties {
+    onExit = {
+        if ((blockUp && requestedFocusDirection == FocusDirection.Up) ||
+            (blockDown && requestedFocusDirection == FocusDirection.Down)
+        ) {
+            cancelFocusChange()
+        }
+    }
+}.focusGroup()
 
 @Composable
 private fun TvIconButton(
