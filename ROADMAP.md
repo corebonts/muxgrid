@@ -3,7 +3,6 @@
 Planned improvements and upcoming milestones for **MuxGrid**:
 
 ## Near-Term (Next Release)
-- **Automated Signed Release Builds:** Wire CI workflow to produce signed `arm64-v8a` and `armeabi-v7a` GitHub Release APKs from repository secrets, alongside GPLv3 binary attribution notes.
 - **In-App About & Open-Source Licenses:** Add a compact About / Third-Party Notices section in Settings displaying app version, build ABI, and open-source attributions (`NOTICE` / `mpv-android-lib` GPLv3 source pointers).
 - **On-Device Hardware Verification Matrix:** Complete and document multi-hour soak tests for background audio, PiP transitions, and Android TV remote ergonomics across target devices.
 

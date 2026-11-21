@@ -40,6 +40,15 @@ See **[docs/SERVER_SETUP.md](./docs/SERVER_SETUP.md)** for a complete step-by-st
 - Server-side vs. local timeshift, single-tuner considerations, and VPN remote access
 - Verification commands (`curl`, `nc`) and troubleshooting
 
+## Download & Install
+
+Prebuilt signed APKs are published on **[GitHub Releases](https://github.com/corebonts/muxgrid/releases)** (`minSdk 28` / Android 9+):
+
+- **Phone / Tablet / 64-bit Android TV (`arm64-v8a`):** `muxgrid-vX.Y.Z-arm64-v8a.apk`
+- **32-bit Android TV (`armeabi-v7a`):** `muxgrid-vX.Y.Z-armeabi-v7a.apk`
+
+Each release includes a `SHA256SUMS.txt` file for verifying APK integrity.
+
 ## Build & Install from Source
 
 ### Prerequisites

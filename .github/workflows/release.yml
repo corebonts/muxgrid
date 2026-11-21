@@ -1,0 +1,174 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing git tag to build and publish (e.g. v0.6.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      KEYSTORE_FILE: ${{ runner.temp }}/muxgrid-release.jks
+
+    steps:
+      - name: Validate release tag format
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid release tag '$RELEASE_TAG'. Expected format: vX.Y.Z"
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Verify tag matches versionName
+        run: |
+          VERSION_NAME="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' app/build.gradle.kts | head -n 1)"
+          if [[ -z "$VERSION_NAME" ]]; then
+            echo "::error::Could not extract versionName from app/build.gradle.kts"
+            exit 1
+          fi
+          TAG_VERSION="${RELEASE_TAG#v}"
+          if [[ "$TAG_VERSION" != "$VERSION_NAME" && "$TAG_VERSION" != "$VERSION_NAME"-* ]]; then
+            echo "::error::Tag '$RELEASE_TAG' does not match versionName '$VERSION_NAME' in app/build.gradle.kts"
+            exit 1
+          fi
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+
+      - name: Decode release keystore
+        env:
+          MUXGRID_KEYSTORE_BASE64: ${{ secrets.MUXGRID_KEYSTORE_BASE64 }}
+          MUXGRID_KEYSTORE_PASSWORD: ${{ secrets.MUXGRID_KEYSTORE_PASSWORD }}
+          MUXGRID_KEY_ALIAS: ${{ secrets.MUXGRID_KEY_ALIAS }}
+          MUXGRID_KEY_PASSWORD: ${{ secrets.MUXGRID_KEY_PASSWORD }}
+        run: |
+          for var in MUXGRID_KEYSTORE_BASE64 MUXGRID_KEYSTORE_PASSWORD MUXGRID_KEY_ALIAS MUXGRID_KEY_PASSWORD; do
+            if [[ -z "${!var}" ]]; then
+              echo "::error::Missing required repository secret: $var"
+              exit 1
+            fi
+          done
+          printf '%s' "$MUXGRID_KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > "$KEYSTORE_FILE"
+          chmod 600 "$KEYSTORE_FILE"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Accept Android SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run unit tests and build signed release APKs
+        env:
+          MUXGRID_KEYSTORE_PATH: ${{ env.KEYSTORE_FILE }}
+          MUXGRID_KEYSTORE_PASSWORD: ${{ secrets.MUXGRID_KEYSTORE_PASSWORD }}
+          MUXGRID_KEY_ALIAS: ${{ secrets.MUXGRID_KEY_ALIAS }}
+          MUXGRID_KEY_PASSWORD: ${{ secrets.MUXGRID_KEY_PASSWORD }}
+        run: ./gradlew test assembleRelease
+
+      - name: Verify signatures and prepare release assets
+        run: |
+          APK_DIR="app/build/outputs/apk/release"
+          ARM64_SRC="$APK_DIR/app-arm64-v8a-release.apk"
+          ARM32_SRC="$APK_DIR/app-armeabi-v7a-release.apk"
+
+          for apk in "$ARM64_SRC" "$ARM32_SRC"; do
+            if [[ ! -f "$apk" ]]; then
+              echo "::error::Expected signed APK not found: $apk"
+              ls -la "$APK_DIR" || true
+              exit 1
+            fi
+          done
+
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -name apksigner | sort -V | tail -n 1)"
+          if [[ -n "$APKSIGNER" ]]; then
+            "$APKSIGNER" verify --verbose "$ARM64_SRC"
+            "$APKSIGNER" verify --verbose "$ARM32_SRC"
+          fi
+
+          mkdir -p release-assets
+          cp "$ARM64_SRC" "release-assets/muxgrid-${RELEASE_TAG}-arm64-v8a.apk"
+          cp "$ARM32_SRC" "release-assets/muxgrid-${RELEASE_TAG}-armeabi-v7a.apk"
+          (
+            cd release-assets
+            sha256sum "muxgrid-${RELEASE_TAG}-arm64-v8a.apk" "muxgrid-${RELEASE_TAG}-armeabi-v7a.apk" > SHA256SUMS.txt
+          )
+          cat release-assets/SHA256SUMS.txt
+
+      - name: Generate release notes
+        run: |
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          CHANGELOG_SECTION="$(awk -v ver="$VERSION_NAME" '
+            $0 ~ "^## \\[" ver "\\]" { in_section = 1; next }
+            in_section && /^## \[/ { exit }
+            in_section { print }
+          ' CHANGELOG.md)"
+
+          {
+            if [[ -n "$CHANGELOG_SECTION" ]]; then
+              printf '%s\n\n' "$CHANGELOG_SECTION"
+            fi
+            cat <<EOF
+          ### Downloads
+
+          | File | Target Devices |
+          | :--- | :--- |
+          | \`muxgrid-${RELEASE_TAG}-arm64-v8a.apk\` | Android phones, tablets, and 64-bit Android TV / Google TV (Android 9+) |
+          | \`muxgrid-${RELEASE_TAG}-armeabi-v7a.apk\` | 32-bit Android TV / Google TV devices (Android 9+) |
+          | \`SHA256SUMS.txt\` | SHA-256 checksums for verifying downloaded APKs |
+
+          ### License & Binary Attribution
+          While MuxGrid's source code is licensed under Apache-2.0, these compiled APKs bundle prebuilt \`libmpv\` and \`FFmpeg\` native libraries via \`mpv-android-lib\` (built with \`--enable-gpl --enable-version3\`) and are therefore distributed under the **GNU General Public License v3.0 or later (GPL-3.0-or-later)**.
+
+          Upstream source code and build scripts for the bundled native libraries are available at [abdallahmehiz/mpv-android](https://github.com/abdallahmehiz/mpv-android), [mpv-player/mpv](https://github.com/mpv-player/mpv), and [FFmpeg/FFmpeg](https://github.com/FFmpeg/FFmpeg). See [NOTICE](https://github.com/${GITHUB_REPOSITORY}/blob/${RELEASE_TAG}/NOTICE) for full third-party attributions.
+          EOF
+          } > "$NOTES_FILE"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          PRERELEASE_FLAG=""
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "release-assets/muxgrid-${RELEASE_TAG}-arm64-v8a.apk" \
+              "release-assets/muxgrid-${RELEASE_TAG}-armeabi-v7a.apk" \
+              "release-assets/SHA256SUMS.txt" \
+              --clobber
+            gh release edit "$RELEASE_TAG" --title "MuxGrid ${RELEASE_TAG}" --notes-file "$NOTES_FILE"
+          else
+            gh release create "$RELEASE_TAG" \
+              "release-assets/muxgrid-${RELEASE_TAG}-arm64-v8a.apk" \
+              "release-assets/muxgrid-${RELEASE_TAG}-armeabi-v7a.apk" \
+              "release-assets/SHA256SUMS.txt" \
+              --title "MuxGrid ${RELEASE_TAG}" \
+              --notes-file "$NOTES_FILE" \
+              $PRERELEASE_FLAG
+          fi
+
+      - name: Clean up temporary keystore
+        if: always()
+        run: rm -f "$KEYSTORE_FILE"
