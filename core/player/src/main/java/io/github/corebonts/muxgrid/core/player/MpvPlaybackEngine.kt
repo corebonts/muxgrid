@@ -5,6 +5,8 @@ import android.os.Debug
 import android.os.Process
 import android.os.StatFs
 import android.os.SystemClock
+import android.system.Os
+import android.system.OsConstants
 import android.util.Log
 import android.view.Surface
 import io.github.corebonts.muxgrid.core.model.Channel
@@ -1415,6 +1417,8 @@ class MpvPlaybackEngine(
         val cacheUnderrun = runCatching { cacheMap?.get("underrun")?.asBoolean() }.getOrNull() ?: false
         val cacheDurationSec = runCatching { cacheMap?.get("cache-duration")?.asDouble() }.getOrNull()
             ?: runCatching { instance.getPropertyDouble("demuxer-cache-duration") }.getOrNull()
+        val mpvFileCacheBytes = runCatching { cacheMap?.get("file-cache-bytes")?.asInt() }.getOrNull()
+            ?.takeIf { it > 0L }
 
         val cpuCores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
         val nowCpuMs = Process.getElapsedCpuTime()
@@ -1433,10 +1437,15 @@ class MpvPlaybackEngine(
             lastMemorySampleElapsedMs = nowElapsed
             cachedMemoryStats = sampleMemoryStats()
         }
-        if (currentCacheOnDisk && (cachedDiskCacheBytes == null || nowElapsed - lastDiskCacheSampleElapsedMs >= 2_000L)) {
-            lastDiskCacheSampleElapsedMs = nowElapsed
-            cachedDiskCacheBytes = runCatching { directorySizeBytes(mpvCacheDir) }.getOrNull()
-        } else if (!currentCacheOnDisk) {
+        if (currentCacheOnDisk) {
+            if (mpvFileCacheBytes != null) {
+                cachedDiskCacheBytes = mpvFileCacheBytes
+                lastDiskCacheSampleElapsedMs = nowElapsed
+            } else if (cachedDiskCacheBytes == null || nowElapsed - lastDiskCacheSampleElapsedMs >= 2_000L) {
+                lastDiskCacheSampleElapsedMs = nowElapsed
+                cachedDiskCacheBytes = runCatching { measureDiskCacheBytes(mpvCacheDir) }.getOrNull()
+            }
+        } else {
             cachedDiskCacheBytes = null
         }
 
@@ -1508,21 +1517,46 @@ class MpvPlaybackEngine(
         )
     }
 
-    private fun directorySizeBytes(root: File): Long {
-        if (!root.exists() || Files.isSymbolicLink(root.toPath())) return 0L
-        if (root.isFile) return root.length().coerceAtLeast(0L)
+    /**
+     * Measures disk space used by mpv's cache directory, including unlinked temporary files
+     * held open via `/proc/self/fd` (mpv unlinks `cache-on-disk` files immediately on creation).
+     */
+    private fun measureDiskCacheBytes(root: File): Long {
+        val seenInodes = HashSet<Pair<Long, Long>>()
         var total = 0L
-        val stack = ArrayDeque<File>()
-        stack.addLast(root)
-        while (stack.isNotEmpty()) {
-            val current = stack.removeLast()
-            val children = current.listFiles() ?: continue
-            for (child in children) {
-                if (Files.isSymbolicLink(child.toPath())) continue
-                if (child.isDirectory) {
-                    stack.addLast(child)
-                } else if (child.isFile) {
-                    total += child.length().coerceAtLeast(0L)
+        if (root.exists() && !Files.isSymbolicLink(root.toPath())) {
+            val stack = ArrayDeque<File>()
+            stack.addLast(root)
+            while (stack.isNotEmpty()) {
+                val current = stack.removeLast()
+                val children = current.listFiles() ?: continue
+                for (child in children) {
+                    if (Files.isSymbolicLink(child.toPath())) continue
+                    if (child.isDirectory) {
+                        stack.addLast(child)
+                    } else if (child.isFile) {
+                        val st = runCatching { Os.stat(child.absolutePath) }.getOrNull()
+                        if (st != null) {
+                            if (seenInodes.add(st.st_dev to st.st_ino)) {
+                                total += st.st_size.coerceAtLeast(0L)
+                            }
+                        } else {
+                            total += child.length().coerceAtLeast(0L)
+                        }
+                    }
+                }
+            }
+        }
+        val cachePrefix = root.absolutePath.trimEnd('/') + "/"
+        val fdDir = File("/proc/self/fd")
+        val fds = runCatching { fdDir.listFiles() }.getOrNull()
+        if (fds != null) {
+            for (fd in fds) {
+                val target = runCatching { Os.readlink(fd.absolutePath) }.getOrNull() ?: continue
+                if (!target.startsWith(cachePrefix)) continue
+                val st = runCatching { Os.stat(fd.absolutePath) }.getOrNull() ?: continue
+                if (OsConstants.S_ISREG(st.st_mode) && seenInodes.add(st.st_dev to st.st_ino)) {
+                    total += st.st_size.coerceAtLeast(0L)
                 }
             }
         }

@@ -545,9 +545,14 @@ private fun buildPlaybackInfoSections(
     // 4. Network & Cache
     // mpv applies cacheBudgetPerDirBytes independently to forward (demuxer-max-bytes) and rewind (demuxer-max-back-bytes).
     val totalCacheBudgetBytes = (diag.cacheBudgetPerDirBytes * 2L).coerceAtLeast(0L)
-    val cacheUsed = diag.cacheUsedBytes
-    val bufferFill = if (totalCacheBudgetBytes > 0L && cacheUsed != null) {
-        (cacheUsed.toFloat() / totalCacheBudgetBytes.toFloat()).coerceIn(0f, 1f)
+    val ramCacheUsed = diag.cacheUsedBytes
+    val diskBytes = diag.diskCacheBytes
+    val effectiveCacheUsed = when {
+        diag.cacheOnDisk && diskBytes != null && diskBytes > 0L -> maxOf(ramCacheUsed ?: 0L, diskBytes)
+        else -> ramCacheUsed
+    }
+    val bufferFill = if (totalCacheBudgetBytes > 0L && effectiveCacheUsed != null) {
+        (effectiveCacheUsed.toFloat() / totalCacheBudgetBytes.toFloat()).coerceIn(0f, 1f)
     } else {
         null
     }
@@ -560,25 +565,46 @@ private fun buildPlaybackInfoSections(
         }
         add(InfoRow("Data Received", formatByteCount(diag.totalBytesReceived)))
         add(InfoRow("Cache Mode", if (diag.cacheOnDisk) "Disk Ring Buffer" else "RAM Buffer"))
-        if (cacheUsed != null) {
+        if (diag.cacheOnDisk) {
+            val diskText = when {
+                diskBytes != null && diskBytes > 0L -> {
+                    val budgetText = if (totalCacheBudgetBytes > 0L) " / ${formatByteCount(totalCacheBudgetBytes)}" else ""
+                    "${formatByteCount(diskBytes)}$budgetText"
+                }
+                state.bufferWindowMs > 0L -> {
+                    val budgetText = if (totalCacheBudgetBytes > 0L) " (budget ${formatByteCount(totalCacheBudgetBytes)})" else ""
+                    "Active$budgetText"
+                }
+                else -> "0 B"
+            }
+            add(InfoRow("Disk Cache", diskText))
+            if (ramCacheUsed != null) {
+                add(InfoRow("RAM Hot Cache", formatByteCount(ramCacheUsed)))
+            }
+        } else if (ramCacheUsed != null) {
             val budgetText = if (totalCacheBudgetBytes > 0L) " / ${formatByteCount(totalCacheBudgetBytes)}" else ""
-            add(InfoRow("Cache Used", "${formatByteCount(cacheUsed)}$budgetText"))
+            add(InfoRow("Cache Used", "${formatByteCount(ramCacheUsed)}$budgetText"))
         }
         if (diag.cacheForwardBytes != null || diag.cacheBackBytes != null) {
             val ahead = diag.cacheForwardBytes?.let { formatByteCount(it) } ?: "0 B"
             val rewind = diag.cacheBackBytes?.let { formatByteCount(it) } ?: "0 B"
-            add(InfoRow("Ahead / Rewind", "$ahead / $rewind"))
+            val label = if (diag.cacheOnDisk) "RAM Ahead / Rewind" else "Ahead / Rewind"
+            add(InfoRow(label, "$ahead / $rewind"))
         }
-        val diskBytes = diag.diskCacheBytes
-        if (diag.cacheOnDisk && diskBytes != null) {
-            add(InfoRow("Disk Cache File", formatByteCount(diskBytes)))
+        val aheadSec = diag.cacheDurationSec?.toLong()?.coerceAtLeast(0L)
+        val windowSec = (state.bufferWindowMs / 1000L).takeIf { it > 0L }
+        val bufferedTimeText = when {
+            aheadSec != null && windowSec != null && kotlin.math.abs(windowSec - aheadSec) > 1L ->
+                "${formatDurationSec(aheadSec)} ahead · ${formatDurationSec(windowSec)} window"
+            aheadSec != null -> formatDurationSec(aheadSec)
+            windowSec != null -> formatDurationSec(windowSec)
+            else -> null
         }
-        val cachedSec = diag.cacheDurationSec ?: if (state.bufferWindowMs > 0L) state.bufferWindowMs / 1000.0 else null
-        cachedSec?.let { sec ->
+        bufferedTimeText?.let { text ->
             add(
                 InfoRow(
                     label = "Buffered Time",
-                    value = formatDurationSec(sec.toLong().coerceAtLeast(0L)),
+                    value = text,
                     tone = if (diag.cacheUnderrun) InfoTone.BAD else InfoTone.NORMAL,
                 ),
             )
