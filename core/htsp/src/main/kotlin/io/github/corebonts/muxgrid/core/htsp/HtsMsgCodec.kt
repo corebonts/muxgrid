@@ -19,6 +19,7 @@ object HtsMsgCodec {
     const val TYPE_UUID: Int = 8
 
     private const val MAX_FRAME_BYTES = 64 * 1024 * 1024 // 64 MiB safety cap
+    internal const val MAX_NESTING_DEPTH = 64
 
     fun encodeFrame(map: HtsMap): ByteArray {
         val body = encodeMapBody(map)
@@ -46,15 +47,21 @@ object HtsMsgCodec {
         return decodeMapBody(payload, 0, payload.size)
     }
 
-    fun decodeMapBody(bytes: ByteArray, offset: Int = 0, length: Int = bytes.size - offset): HtsMap {
+    fun decodeMapBody(bytes: ByteArray, offset: Int = 0, length: Int = bytes.size - offset): HtsMap =
+        decodeMapBodyInternal(bytes, offset, length, depth = 0)
+
+    private fun decodeMapBodyInternal(bytes: ByteArray, offset: Int, length: Int, depth: Int): HtsMap {
+        if (depth > MAX_NESTING_DEPTH) {
+            throw HtsCodecException("HTSP message exceeds maximum nesting depth ($MAX_NESTING_DEPTH)")
+        }
+        if (offset < 0 || offset > bytes.size || length < 0 || length > bytes.size - offset) {
+            throw HtsCodecException("Buffer bounds out of range: offset=$offset len=$length size=${bytes.size}")
+        }
         val result = LinkedHashMap<String, HtsValue>()
         var pos = offset
         val end = offset + length
-        if (end > bytes.size || offset < 0 || length < 0) {
-            throw HtsCodecException("Buffer bounds out of range: offset=$offset len=$length size=${bytes.size}")
-        }
         while (pos < end) {
-            if (pos + 6 > end) {
+            if (end - pos < 6) {
                 throw HtsCodecException("Truncated HTSP field header at offset $pos")
             }
             val type = bytes[pos].toInt() and 0xFF
@@ -62,7 +69,7 @@ object HtsMsgCodec {
             val dataLen = readU32BE(bytes, pos + 2)
             pos += 6
 
-            if (dataLen < 0 || pos + nameLen + dataLen > end) {
+            if (dataLen < 0 || nameLen > end - pos || dataLen > end - pos - nameLen) {
                 throw HtsCodecException("Invalid field bounds: type=$type nameLen=$nameLen dataLen=$dataLen remaining=${end - pos}")
             }
             val name = if (nameLen > 0) {
@@ -72,7 +79,7 @@ object HtsMsgCodec {
             }
             pos += nameLen
 
-            val value = decodeFieldValue(type, bytes, pos, dataLen)
+            val value = decodeFieldValue(type, bytes, pos, dataLen, depth)
             pos += dataLen
             if (value != null) {
                 result[name] = value
@@ -81,12 +88,18 @@ object HtsMsgCodec {
         return HtsMap(result)
     }
 
-    private fun decodeListBody(bytes: ByteArray, offset: Int, length: Int): List<HtsValue> {
+    private fun decodeListBody(bytes: ByteArray, offset: Int, length: Int, depth: Int): List<HtsValue> {
+        if (depth > MAX_NESTING_DEPTH) {
+            throw HtsCodecException("HTSP message exceeds maximum nesting depth ($MAX_NESTING_DEPTH)")
+        }
+        if (offset < 0 || offset > bytes.size || length < 0 || length > bytes.size - offset) {
+            throw HtsCodecException("List buffer bounds out of range: offset=$offset len=$length size=${bytes.size}")
+        }
         val items = ArrayList<HtsValue>()
         var pos = offset
         val end = offset + length
         while (pos < end) {
-            if (pos + 6 > end) {
+            if (end - pos < 6) {
                 throw HtsCodecException("Truncated HTSP list field header at offset $pos")
             }
             val type = bytes[pos].toInt() and 0xFF
@@ -94,11 +107,11 @@ object HtsMsgCodec {
             val dataLen = readU32BE(bytes, pos + 2)
             pos += 6
 
-            if (dataLen < 0 || pos + nameLen + dataLen > end) {
-                throw HtsCodecException("Invalid list field bounds: type=$type nameLen=$nameLen dataLen=$dataLen")
+            if (dataLen < 0 || nameLen > end - pos || dataLen > end - pos - nameLen) {
+                throw HtsCodecException("Invalid list field bounds: type=$type nameLen=$nameLen dataLen=$dataLen remaining=${end - pos}")
             }
             pos += nameLen // List entries are nameless, skip if non-zero
-            val value = decodeFieldValue(type, bytes, pos, dataLen)
+            val value = decodeFieldValue(type, bytes, pos, dataLen, depth)
             pos += dataLen
             if (value != null) {
                 items.add(value)
@@ -107,13 +120,13 @@ object HtsMsgCodec {
         return items
     }
 
-    private fun decodeFieldValue(type: Int, bytes: ByteArray, offset: Int, dataLen: Int): HtsValue? =
+    private fun decodeFieldValue(type: Int, bytes: ByteArray, offset: Int, dataLen: Int, depth: Int): HtsValue? =
         when (type) {
-            TYPE_MAP -> HtsValue.MapVal(decodeMapBody(bytes, offset, dataLen))
+            TYPE_MAP -> HtsValue.MapVal(decodeMapBodyInternal(bytes, offset, dataLen, depth + 1))
             TYPE_S64 -> HtsValue.S64(decodeS64(bytes, offset, dataLen))
             TYPE_STR -> HtsValue.Str(String(bytes, offset, dataLen, StandardCharsets.UTF_8))
             TYPE_BIN -> HtsValue.Bin(bytes.copyOfRange(offset, offset + dataLen))
-            TYPE_LIST -> HtsValue.ListVal(decodeListBody(bytes, offset, dataLen))
+            TYPE_LIST -> HtsValue.ListVal(decodeListBody(bytes, offset, dataLen, depth + 1))
             TYPE_BOOL -> HtsValue.Bool(dataLen >= 1 && bytes[offset] != 0.toByte())
             TYPE_UUID -> {
                 if (dataLen != 16) {

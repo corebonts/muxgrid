@@ -3,6 +3,7 @@ package io.github.corebonts.muxgrid.core.htsp
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.ByteArrayInputStream
@@ -118,5 +119,91 @@ class HtsMsgCodecTest {
         assertEquals("ok", decoded.getString("a"))
         assertEquals(77L, decoded.getLong("b"))
         assertFalse(decoded.containsKey("future"))
+    }
+
+    @Test
+    fun `rejects signed Int overflow in decodeMapBody offset and length`() {
+        val payload = ByteArray(16)
+        assertThrows(HtsCodecException::class.java) {
+            HtsMsgCodec.decodeMapBody(payload, offset = 10, length = Int.MAX_VALUE)
+        }
+        assertThrows(HtsCodecException::class.java) {
+            HtsMsgCodec.decodeMapBody(payload, offset = 17, length = 0)
+        }
+    }
+
+    @Test
+    fun `rejects signed Int overflow in map and list field dataLen`() {
+        // Map field with nameLen = 1, dataLen = Int.MAX_VALUE (0x7FFFFFFF) -> pos + nameLen + dataLen overflows
+        val mapOverflow = byteArrayOf(
+            HtsMsgCodec.TYPE_BIN.toByte(),
+            1,
+            0x7F,
+            0xFF.toByte(),
+            0xFF.toByte(),
+            0xFF.toByte(),
+            'x'.code.toByte(),
+        )
+        assertThrows(HtsCodecException::class.java) {
+            HtsMsgCodec.decodeMapBody(mapOverflow)
+        }
+
+        // Unknown field type with dataLen = Int.MAX_VALUE -> previously wrapped pos negative
+        val unknownOverflow = byteArrayOf(
+            99,
+            1,
+            0x7F,
+            0xFF.toByte(),
+            0xFF.toByte(),
+            0xFF.toByte(),
+            'x'.code.toByte(),
+        )
+        assertThrows(HtsCodecException::class.java) {
+            HtsMsgCodec.decodeMapBody(unknownOverflow)
+        }
+
+        // List containing a field with dataLen = Int.MAX_VALUE
+        val listPayload = byteArrayOf(
+            HtsMsgCodec.TYPE_STR.toByte(),
+            0,
+            0x7F,
+            0xFF.toByte(),
+            0xFF.toByte(),
+            0xFF.toByte(),
+        )
+        val outerMap = byteArrayOf(
+            HtsMsgCodec.TYPE_LIST.toByte(),
+            1,
+            0,
+            0,
+            0,
+            listPayload.size.toByte(),
+            'l'.code.toByte(),
+        ) + listPayload
+        assertThrows(HtsCodecException::class.java) {
+            HtsMsgCodec.decodeMapBody(outerMap)
+        }
+    }
+
+    @Test
+    fun `rejects excessively nested maps and lists without StackOverflowError`() {
+        // Wrap a payload in MAX_NESTING_DEPTH + 2 nested TYPE_MAP headers
+        var bytes = byteArrayOf()
+        repeat(HtsMsgCodec.MAX_NESTING_DEPTH + 2) {
+            val len = bytes.size
+            val header = byteArrayOf(
+                HtsMsgCodec.TYPE_MAP.toByte(),
+                1,
+                ((len ushr 24) and 0xFF).toByte(),
+                ((len ushr 16) and 0xFF).toByte(),
+                ((len ushr 8) and 0xFF).toByte(),
+                (len and 0xFF).toByte(),
+                'm'.code.toByte(),
+            )
+            bytes = header + bytes
+        }
+        assertThrows(HtsCodecException::class.java) {
+            HtsMsgCodec.decodeMapBody(bytes)
+        }
     }
 }

@@ -17,22 +17,14 @@ import coil3.request.bitmapConfig
 import io.github.corebonts.muxgrid.core.htsp.HtspClient
 import io.github.corebonts.muxgrid.core.htsp.HtspNoAccessException
 import io.github.corebonts.muxgrid.core.model.ServerProfile
-import okhttp3.Authenticator
-import okhttp3.Credentials
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.Response
-import okhttp3.Route
 import okio.Buffer
 import okio.FileSystem
 import okio.Path.Companion.toOkioPath
 import java.io.File
 import java.io.IOException
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
-import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
 
 data class PiconModel(
     val channelId: Long,
@@ -258,101 +250,5 @@ class PiconFetcher(
                 }
                 .build()
         }
-    }
-}
-
-/**
- * Supports Tvheadend 4.3's default HTTP Digest (MD5 / SHA-256) and Basic auth fallback.
- */
-internal class TvheadendDigestAuthenticator(
-    private val profileProvider: () -> ServerProfile,
-) : Authenticator {
-    private val ncCounter = AtomicInteger(1)
-    private val random = SecureRandom()
-
-    override fun authenticate(route: Route?, response: Response): Request? {
-        if (responseCount(response) >= 2) return null
-        val profile = profileProvider()
-        if (profile.username.isBlank() && profile.password.isBlank()) return null
-
-        val challenges = response.challenges()
-        val digestChallenge = challenges.firstOrNull { it.scheme.equals("Digest", ignoreCase = true) }
-        if (digestChallenge != null) {
-            val authParams = digestChallenge.authParams
-            val realm = authParams["realm"] ?: return null
-            val nonce = authParams["nonce"] ?: return null
-            val qopRaw = authParams["qop"]
-            val opaque = authParams["opaque"]
-            val algo = authParams["algorithm"] ?: "MD5"
-            val hashAlg = when {
-                algo.equals("SHA-256", ignoreCase = true) -> "SHA-256"
-                else -> "MD5"
-            }
-
-            val uri = response.request.url.encodedPath +
-                (response.request.url.encodedQuery?.let { "?$it" } ?: "")
-            val method = response.request.method
-            val ha1 = hashHex(hashAlg, "${profile.username}:$realm:${profile.password}")
-            val ha2 = hashHex(hashAlg, "$method:$uri")
-
-            val headerValue = if (qopRaw != null && qopRaw.split(',').any { it.trim() == "auth" }) {
-                val nc = "%08x".format(ncCounter.getAndIncrement())
-                val cnonceBytes = ByteArray(8).also { random.nextBytes(it) }
-                val cnonce = cnonceBytes.joinToString("") { "%02x".format(it) }
-                val respDigest = hashHex(hashAlg, "$ha1:$nonce:$nc:$cnonce:auth:$ha2")
-                buildString {
-                    append("Digest username=\"${profile.username}\", ")
-                    append("realm=\"$realm\", ")
-                    append("nonce=\"$nonce\", ")
-                    append("uri=\"$uri\", ")
-                    append("algorithm=$algo, ")
-                    append("qop=auth, ")
-                    append("nc=$nc, ")
-                    append("cnonce=\"$cnonce\", ")
-                    append("response=\"$respDigest\"")
-                    if (!opaque.isNullOrEmpty()) append(", opaque=\"$opaque\"")
-                }
-            } else {
-                val respDigest = hashHex(hashAlg, "$ha1:$nonce:$ha2")
-                buildString {
-                    append("Digest username=\"${profile.username}\", ")
-                    append("realm=\"$realm\", ")
-                    append("nonce=\"$nonce\", ")
-                    append("uri=\"$uri\", ")
-                    append("algorithm=$algo, ")
-                    append("response=\"$respDigest\"")
-                    if (!opaque.isNullOrEmpty()) append(", opaque=\"$opaque\"")
-                }
-            }
-
-            return response.request.newBuilder()
-                .header("Authorization", headerValue)
-                .build()
-        }
-
-        val basicChallenge = challenges.firstOrNull { it.scheme.equals("Basic", ignoreCase = true) }
-        if (basicChallenge != null) {
-            return response.request.newBuilder()
-                .header("Authorization", Credentials.basic(profile.username, profile.password))
-                .build()
-        }
-
-        return null
-    }
-
-    private fun hashHex(algorithm: String, input: String): String {
-        val digest = MessageDigest.getInstance(algorithm)
-            .digest(input.toByteArray(StandardCharsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }
-    }
-
-    private fun responseCount(response: Response): Int {
-        var count = 1
-        var prior = response.priorResponse
-        while (prior != null) {
-            count++
-            prior = prior.priorResponse
-        }
-        return count
     }
 }

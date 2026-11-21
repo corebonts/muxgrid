@@ -13,6 +13,7 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.ServerSocket
+import java.net.Socket
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CountDownLatch
@@ -423,6 +424,110 @@ class LocalMediaProxyTest {
             assertFalse(disabled.isTimeshiftSeekable)
         } finally {
             proxy.close()
+        }
+    }
+
+    @Test
+    fun `sanitizes CRLF in HTTP error status line from exception messages`() {
+        val proxy = LocalMediaProxy(
+            serverBaseUrlProvider = { "http://127.0.0.1:9981" },
+            ticketProvider = { throw RuntimeException("bad\r\nX-Injected: evil") },
+        )
+        try {
+            Socket("127.0.0.1", proxy.port).use { sock ->
+                val out = sock.getOutputStream()
+                out.write(
+                    "GET /${proxy.sessionToken}/live/1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+                        .toByteArray(StandardCharsets.US_ASCII),
+                )
+                out.flush()
+
+                val reader = BufferedReader(InputStreamReader(sock.getInputStream(), StandardCharsets.US_ASCII))
+                val statusLine = reader.readLine()!!
+                assertTrue(statusLine.startsWith("HTTP/1.1 502 "))
+                val headers = mutableListOf<String>()
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    if (line.isEmpty()) break
+                    headers.add(line)
+                }
+                assertFalse(headers.any { it.startsWith("X-Injected:", ignoreCase = true) })
+            }
+        } finally {
+            proxy.close()
+        }
+    }
+
+    @Test
+    fun `rejects oversized request header lines and excessive header count`() {
+        val proxy = LocalMediaProxy(
+            serverBaseUrlProvider = { null },
+            ticketProvider = { StreamTicket("", "") },
+        )
+        try {
+            // 1. Oversized header line (> MAX_HEADER_LINE_BYTES)
+            Socket("127.0.0.1", proxy.port).use { sock ->
+                val bigVal = "A".repeat(LocalMediaProxy.MAX_HEADER_LINE_BYTES + 64)
+                val out = sock.getOutputStream()
+                out.write(
+                    "GET /${proxy.sessionToken}/live/1 HTTP/1.1\r\nX-Big: $bigVal\r\n\r\n"
+                        .toByteArray(StandardCharsets.US_ASCII),
+                )
+                out.flush()
+                val reader = BufferedReader(InputStreamReader(sock.getInputStream(), StandardCharsets.US_ASCII))
+                val statusLine = reader.readLine()!!
+                assertTrue(statusLine.startsWith("HTTP/1.1 431 "), "Unexpected status: $statusLine")
+            }
+
+            // 2. Too many headers (> MAX_HEADER_COUNT)
+            Socket("127.0.0.1", proxy.port).use { sock ->
+                val req = buildString {
+                    append("GET /${proxy.sessionToken}/live/1 HTTP/1.1\r\n")
+                    repeat(LocalMediaProxy.MAX_HEADER_COUNT + 2) { idx ->
+                        append("X-H-$idx: 1\r\n")
+                    }
+                    append("\r\n")
+                }
+                val out = sock.getOutputStream()
+                out.write(req.toByteArray(StandardCharsets.US_ASCII))
+                out.flush()
+                val reader = BufferedReader(InputStreamReader(sock.getInputStream(), StandardCharsets.US_ASCII))
+                val statusLine = reader.readLine()!!
+                assertTrue(statusLine.startsWith("HTTP/1.1 431 "), "Unexpected status: $statusLine")
+            }
+        } finally {
+            proxy.close()
+        }
+    }
+
+    @Test
+    fun `rejects upstream response with excessive headers`() {
+        ServerSocket(0, 4, InetAddress.getByName("127.0.0.1")).use { upstream ->
+            val thread = Thread {
+                upstream.accept().use { sock ->
+                    val reader = BufferedReader(InputStreamReader(sock.getInputStream()))
+                    reader.readLine()
+                    val out = sock.getOutputStream()
+                    out.write("HTTP/1.1 200 OK\r\n".toByteArray(StandardCharsets.US_ASCII))
+                    repeat(LocalMediaProxy.MAX_HEADER_COUNT + 5) { idx ->
+                        out.write("X-Extra-$idx: val\r\n".toByteArray(StandardCharsets.US_ASCII))
+                    }
+                    out.write("\r\n".toByteArray(StandardCharsets.US_ASCII))
+                    out.flush()
+                }
+            }.apply { start() }
+
+            val proxy = LocalMediaProxy(
+                serverBaseUrlProvider = { "http://127.0.0.1:${upstream.localPort}" },
+                ticketProvider = { chId -> StreamTicket("/stream/channelid/$chId", "T1") },
+            )
+            try {
+                val conn = URL(proxy.liveStreamUrl(1L)).openConnection() as HttpURLConnection
+                assertEquals(503, conn.responseCode)
+            } finally {
+                proxy.close()
+                thread.join(2_000)
+            }
         }
     }
 
