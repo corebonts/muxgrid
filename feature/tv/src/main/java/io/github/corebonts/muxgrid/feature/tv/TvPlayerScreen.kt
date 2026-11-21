@@ -870,7 +870,7 @@ internal fun TvPlayerScreen(
                         ) {
                             Icon(
                                 imageVector = MuxGridIcons.Tracks,
-                                contentDescription = "Tracks",
+                                contentDescription = "Display Options",
                                 modifier = Modifier.size(20.dp),
                             )
                         }

@@ -3,6 +3,7 @@ package io.github.corebonts.muxgrid.feature.mobile
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.res.Configuration
 import android.media.AudioManager
 import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
@@ -62,6 +63,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -145,6 +147,7 @@ internal fun MobilePlayerScreen(
 ) {
     val context = LocalContext.current
     val view = LocalView.current
+    val isPortrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
     val activity = remember(context) { context.findActivity() }
     val audioManager = remember(context) {
         context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -706,12 +709,8 @@ internal fun MobilePlayerScreen(
                             } else {
                                 Spacer(Modifier.width(1.dp))
                             }
-                            MuxGridCompactButton(
-                                text = "Tracks",
-                                leadingIcon = MuxGridIcons.Tracks,
-                                containerColor = MuxGridColors.ScrimSurface,
-                                contentColor = Color.White,
-                                borderColor = Color.White.copy(alpha = 0.22f),
+                            OptionsHudButton(
+                                showLabel = !isPortrait,
                                 onClick = { trackPanelOpen = !trackPanelOpen },
                             )
                         }
@@ -810,22 +809,10 @@ internal fun MobilePlayerScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(MuxGridShapes.Sm)
-                                        .background(MuxGridColors.ScrimSurface)
-                                        .border(MuxGridBorders.Hairline, Color.White.copy(alpha = 0.22f), MuxGridShapes.Sm)
-                                        .clickable { trackPanelOpen = !trackPanelOpen },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        imageVector = MuxGridIcons.Tracks,
-                                        contentDescription = "Tracks",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                }
+                                OptionsHudButton(
+                                    showLabel = !isPortrait,
+                                    onClick = { trackPanelOpen = !trackPanelOpen },
+                                )
                                 if (canZap) {
                                     MuxGridCompactButton(
                                         text = "Channels",
@@ -1083,6 +1070,40 @@ private fun TopHudIconButton(
             tint = Color.White,
             modifier = Modifier.size(iconSize),
         )
+    }
+}
+
+@Composable
+private fun OptionsHudButton(
+    showLabel: Boolean,
+    onClick: () -> Unit,
+) {
+    if (showLabel) {
+        MuxGridCompactButton(
+            text = "Options",
+            leadingIcon = MuxGridIcons.Tracks,
+            containerColor = MuxGridColors.ScrimSurface,
+            contentColor = Color.White,
+            borderColor = Color.White.copy(alpha = 0.22f),
+            onClick = onClick,
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(MuxGridShapes.Sm)
+                .background(MuxGridColors.ScrimSurface)
+                .border(MuxGridBorders.Hairline, Color.White.copy(alpha = 0.22f), MuxGridShapes.Sm)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = MuxGridIcons.Tracks,
+                contentDescription = "Display Options",
+                tint = Color.White,
+                modifier = Modifier.size(16.dp),
+            )
+        }
     }
 }
 

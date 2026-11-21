@@ -529,7 +529,7 @@ fun TrackAndPresetPanel(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "Tracks & Decoder",
+                text = "Display Options",
                 style = MuxGridType.Title,
                 fontSize = 18.sp,
                 modifier = Modifier.padding(horizontal = 2.dp),
