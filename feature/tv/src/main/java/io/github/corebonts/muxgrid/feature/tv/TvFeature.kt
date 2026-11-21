@@ -14,6 +14,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -1249,319 +1250,113 @@ private fun TvSettingsTab(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
+    val onOpenGithub: () -> Unit = {
+        runCatching {
+            uriHandler.openUri(appInfo.githubUrl)
+        }.onFailure {
+            Toast.makeText(context, appInfo.githubUrl, Toast.LENGTH_LONG).show()
+        }
+    }
+    val onOpenDebugInfo: () -> Unit = {
+        scope.launch {
+            debugReport = withContext(Dispatchers.IO) {
+                formatDebugInfoReport(
+                    collectDebugEnvironmentSnapshot(
+                        context = context,
+                        appInfo = appInfo,
+                        isTv = true,
+                        connectionState = connectionState,
+                        hwDecPreset = hwDecPreset,
+                        timeshiftWindow = timeshiftWindow,
+                        themeMode = themeMode,
+                    ),
+                )
+            }
+        }
+    }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val useTwoColumns = maxWidth >= 680.dp
         Column(
             modifier = Modifier
-                .widthIn(max = 760.dp)
-                .fillMaxWidth()
-                .clip(MuxGridShapes.Card)
-                .background(MuxGridColors.CardSurface)
-                .border(
-                    width = if (isServerError) MuxGridBorders.Hairline else MuxGridBorders.Divider,
-                    color = if (isServerError) MuxGridColors.CoralLive.copy(alpha = MuxGridAlphas.BorderSubtle) else MuxGridColors.HairlineBorder,
-                    shape = MuxGridShapes.Card,
-                )
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                text = "TVHEADEND SERVER",
-                style = MuxGridType.Eyebrow,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        text = serverHeadline(profile, connectionState),
-                        style = MuxGridType.TabularNumber,
-                        fontSize = 15.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = connectionStatusText(profile, connectionState),
-                        style = MuxGridType.TabularSmall,
-                        color = connectionStatusColor(connectionState),
-                        maxLines = if (isServerError) 3 else 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+            if (useTwoColumns) {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.Top,
                 ) {
-                    if (canRetryConnect) {
-                        TvIconButton(
-                            onClick = onRetryConnect,
-                            modifier = Modifier.focusRequester(reconnectFocusRequester),
-                            size = 44.dp,
-                            containerColor = MuxGridColors.CardSurfaceElevated,
-                            contentColor = MuxGridColors.AccentSoft,
-                        ) {
-                            Icon(
-                                imageVector = MuxGridIcons.Refresh,
-                                contentDescription = "Reconnect",
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    }
-                    TvIconButton(
-                        onClick = onOpenServerSetup,
-                        modifier = Modifier.focusRequester(editServerFocusRequester),
-                        size = 44.dp,
-                        containerColor = MuxGridColors.CardSurfaceElevated,
-                        contentColor = MuxGridColors.TextPrimary,
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        Icon(
-                            imageVector = MuxGridIcons.Edit,
-                            contentDescription = "Edit Server",
-                            modifier = Modifier.size(20.dp),
+                        TvServerSettingsCard(
+                            profile = profile,
+                            connectionState = connectionState,
+                            isServerError = isServerError,
+                            canRetryConnect = canRetryConnect,
+                            reconnectFocusRequester = reconnectFocusRequester,
+                            editServerFocusRequester = editServerFocusRequester,
+                            onRetryConnect = onRetryConnect,
+                            onOpenServerSetup = onOpenServerSetup,
+                        )
+                        TvGeneralSettingsCard(
+                            startScreen = startScreen,
+                            themeMode = themeMode,
+                            onSelectStartScreen = onSelectStartScreen,
+                            onSelectThemeMode = onSelectThemeMode,
+                        )
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        TvDecoderTimeshiftSettingsCard(
+                            hwDecPreset = hwDecPreset,
+                            timeshiftWindow = timeshiftWindow,
+                            onSelectPreset = onSelectPreset,
+                            onSelectTimeshiftWindow = onSelectTimeshiftWindow,
+                        )
+                        TvAppInfoSettingsCard(
+                            appInfo = appInfo,
+                            onOpenGithub = onOpenGithub,
+                            onOpenDebugInfo = onOpenDebugInfo,
                         )
                     }
                 }
-            }
-        }
-
-        Column(
-            modifier = Modifier
-                .widthIn(max = 760.dp)
-                .fillMaxWidth()
-                .clip(MuxGridShapes.Card)
-                .background(MuxGridColors.CardSurface)
-                .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text(
-                text = "GENERAL",
-                style = MuxGridType.Eyebrow,
-            )
-
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "Start Screen",
-                    style = MuxGridType.CardSubtitle,
-                    fontSize = 13.sp,
+            } else {
+                TvServerSettingsCard(
+                    profile = profile,
+                    connectionState = connectionState,
+                    isServerError = isServerError,
+                    canRetryConnect = canRetryConnect,
+                    reconnectFocusRequester = reconnectFocusRequester,
+                    editServerFocusRequester = editServerFocusRequester,
+                    onRetryConnect = onRetryConnect,
+                    onOpenServerSetup = onOpenServerSetup,
                 )
-                Row(
-                    modifier = Modifier
-                        .focusGroup()
-                        .focusRestorer()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    StartScreen.entries.forEach { option ->
-                        TvUnderlineOption(
-                            label = option.label,
-                            selected = startScreen == option,
-                            onClick = { onSelectStartScreen(option) },
-                        )
-                    }
-                }
-                Text(
-                    text = startScreen.description,
-                    style = MuxGridType.TabularSmall,
-                    color = MuxGridColors.TextMuted,
+                TvGeneralSettingsCard(
+                    startScreen = startScreen,
+                    themeMode = themeMode,
+                    onSelectStartScreen = onSelectStartScreen,
+                    onSelectThemeMode = onSelectThemeMode,
+                )
+                TvDecoderTimeshiftSettingsCard(
+                    hwDecPreset = hwDecPreset,
+                    timeshiftWindow = timeshiftWindow,
+                    onSelectPreset = onSelectPreset,
+                    onSelectTimeshiftWindow = onSelectTimeshiftWindow,
+                )
+                TvAppInfoSettingsCard(
+                    appInfo = appInfo,
+                    onOpenGithub = onOpenGithub,
+                    onOpenDebugInfo = onOpenDebugInfo,
                 )
             }
-
-            MuxGridDivider()
-
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "Theme",
-                    style = MuxGridType.CardSubtitle,
-                    fontSize = 13.sp,
-                )
-                Row(
-                    modifier = Modifier
-                        .focusGroup()
-                        .focusRestorer(),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    ThemeMode.entries.forEach { option ->
-                        TvUnderlineOption(
-                            label = option.label,
-                            selected = themeMode == option,
-                            onClick = { onSelectThemeMode(option) },
-                        )
-                    }
-                }
-                Text(
-                    text = themeMode.description,
-                    style = MuxGridType.TabularSmall,
-                    color = MuxGridColors.TextMuted,
-                )
-            }
-        }
-
-        Column(
-            modifier = Modifier
-                .widthIn(max = 760.dp)
-                .fillMaxWidth()
-                .clip(MuxGridShapes.Card)
-                .background(MuxGridColors.CardSurface)
-                .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text(
-                text = "VIDEO DECODER & TIMESHIFT",
-                style = MuxGridType.Eyebrow,
-            )
-
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "Hardware Decode Preset",
-                    style = MuxGridType.CardSubtitle,
-                    fontSize = 13.sp,
-                )
-                Row(
-                    modifier = Modifier
-                        .focusGroup()
-                        .focusRestorer(),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    listOf(
-                        HwDecPreset.MEDIACODEC_ZERO_COPY to "Zero-Copy (TV Default)",
-                        HwDecPreset.MEDIACODEC_COPY_BWDIF to "Copy + bwdif",
-                    ).forEach { (preset, label) ->
-                        TvUnderlineOption(
-                            label = label,
-                            selected = hwDecPreset == preset,
-                            onClick = { onSelectPreset(preset) },
-                        )
-                    }
-                }
-            }
-
-            MuxGridDivider()
-
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "Live Timeshift Cache Limit",
-                    style = MuxGridType.CardSubtitle,
-                    fontSize = 13.sp,
-                )
-                Row(
-                    modifier = Modifier
-                        .focusGroup()
-                        .focusRestorer()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    TimeshiftWindow.entries.forEach { option ->
-                        TvUnderlineOption(
-                            label = option.shortLabel,
-                            selected = timeshiftWindow == option,
-                            onClick = { onSelectTimeshiftWindow(option) },
-                        )
-                    }
-                }
-                Text(
-                    text = "${timeshiftWindow.description} · split pause/rewind · applies on next tune",
-                    style = MuxGridType.TabularSmall,
-                    color = MuxGridColors.TextMuted,
-                )
-            }
-        }
-
-        Column(
-            modifier = Modifier
-                .widthIn(max = 760.dp)
-                .fillMaxWidth()
-                .clip(MuxGridShapes.Card)
-                .background(MuxGridColors.CardSurface)
-                .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text(
-                text = "APP INFO",
-                style = MuxGridType.Eyebrow,
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(32.dp),
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = "Version",
-                        style = MuxGridType.CardSubtitle,
-                        fontSize = 12.5.sp,
-                    )
-                    Text(
-                        text = appInfo.versionDisplay,
-                        style = MuxGridType.TabularNumber,
-                        fontSize = 14.5.sp,
-                    )
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = "Build SHA",
-                        style = MuxGridType.CardSubtitle,
-                        fontSize = 12.5.sp,
-                    )
-                    Text(
-                        text = appInfo.shortSha,
-                        style = MuxGridType.TabularNumber,
-                        fontSize = 14.5.sp,
-                    )
-                }
-            }
-
-            MuxGridDivider()
-
-            TvSettingsActionRow(
-                title = "GitHub",
-                subtitle = appInfo.githubDisplayUrl,
-                contentDescription = "Open GitHub",
-                onClick = {
-                    runCatching {
-                        uriHandler.openUri(appInfo.githubUrl)
-                    }.onFailure {
-                        Toast.makeText(context, appInfo.githubUrl, Toast.LENGTH_LONG).show()
-                    }
-                },
-            )
-
-            TvSettingsActionRow(
-                title = "Debug Info",
-                subtitle = "Device, OS, and playback environment",
-                contentDescription = "Show Debug Info",
-                onClick = {
-                    scope.launch {
-                        debugReport = withContext(Dispatchers.IO) {
-                            formatDebugInfoReport(
-                                collectDebugEnvironmentSnapshot(
-                                    context = context,
-                                    appInfo = appInfo,
-                                    isTv = true,
-                                    connectionState = connectionState,
-                                    hwDecPreset = hwDecPreset,
-                                    timeshiftWindow = timeshiftWindow,
-                                    themeMode = themeMode,
-                                ),
-                            )
-                        }
-                    }
-                },
-            )
         }
     }
 
@@ -1631,6 +1426,327 @@ private fun TvSettingsTab(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TvServerSettingsCard(
+    profile: ServerProfile,
+    connectionState: ConnectionState,
+    isServerError: Boolean,
+    canRetryConnect: Boolean,
+    reconnectFocusRequester: FocusRequester,
+    editServerFocusRequester: FocusRequester,
+    onRetryConnect: () -> Unit,
+    onOpenServerSetup: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MuxGridShapes.Card)
+            .background(MuxGridColors.CardSurface)
+            .border(
+                width = if (isServerError) MuxGridBorders.Hairline else MuxGridBorders.Divider,
+                color = if (isServerError) MuxGridColors.CoralLive.copy(alpha = MuxGridAlphas.BorderSubtle) else MuxGridColors.HairlineBorder,
+                shape = MuxGridShapes.Card,
+            )
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = "TVHEADEND SERVER",
+            style = MuxGridType.Eyebrow,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = serverHeadline(profile, connectionState),
+                    style = MuxGridType.TabularNumber,
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = connectionStatusText(profile, connectionState),
+                    style = MuxGridType.TabularSmall,
+                    color = connectionStatusColor(connectionState),
+                    maxLines = if (isServerError) 3 else 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (canRetryConnect) {
+                    TvIconButton(
+                        onClick = onRetryConnect,
+                        modifier = Modifier.focusRequester(reconnectFocusRequester),
+                        size = 44.dp,
+                        containerColor = MuxGridColors.CardSurfaceElevated,
+                        contentColor = MuxGridColors.AccentSoft,
+                    ) {
+                        Icon(
+                            imageVector = MuxGridIcons.Refresh,
+                            contentDescription = "Reconnect",
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+                TvIconButton(
+                    onClick = onOpenServerSetup,
+                    modifier = Modifier.focusRequester(editServerFocusRequester),
+                    size = 44.dp,
+                    containerColor = MuxGridColors.CardSurfaceElevated,
+                    contentColor = MuxGridColors.TextPrimary,
+                ) {
+                    Icon(
+                        imageVector = MuxGridIcons.Edit,
+                        contentDescription = "Edit Server",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun TvGeneralSettingsCard(
+    startScreen: StartScreen,
+    themeMode: ThemeMode,
+    onSelectStartScreen: (StartScreen) -> Unit,
+    onSelectThemeMode: (ThemeMode) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MuxGridShapes.Card)
+            .background(MuxGridColors.CardSurface)
+            .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(
+            text = "GENERAL",
+            style = MuxGridType.Eyebrow,
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "Start Screen",
+                style = MuxGridType.CardSubtitle,
+                fontSize = 13.sp,
+            )
+            Row(
+                modifier = Modifier
+                    .focusGroup()
+                    .focusRestorer()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                StartScreen.entries.forEach { option ->
+                    TvUnderlineOption(
+                        label = option.label,
+                        selected = startScreen == option,
+                        onClick = { onSelectStartScreen(option) },
+                    )
+                }
+            }
+            Text(
+                text = startScreen.description,
+                style = MuxGridType.TabularSmall,
+                color = MuxGridColors.TextMuted,
+            )
+        }
+
+        MuxGridDivider()
+
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "Theme",
+                style = MuxGridType.CardSubtitle,
+                fontSize = 13.sp,
+            )
+            Row(
+                modifier = Modifier
+                    .focusGroup()
+                    .focusRestorer()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                ThemeMode.entries.forEach { option ->
+                    TvUnderlineOption(
+                        label = option.label,
+                        selected = themeMode == option,
+                        onClick = { onSelectThemeMode(option) },
+                    )
+                }
+            }
+            Text(
+                text = themeMode.description,
+                style = MuxGridType.TabularSmall,
+                color = MuxGridColors.TextMuted,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun TvDecoderTimeshiftSettingsCard(
+    hwDecPreset: HwDecPreset,
+    timeshiftWindow: TimeshiftWindow,
+    onSelectPreset: (HwDecPreset) -> Unit,
+    onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MuxGridShapes.Card)
+            .background(MuxGridColors.CardSurface)
+            .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(
+            text = "VIDEO DECODER & TIMESHIFT",
+            style = MuxGridType.Eyebrow,
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "Hardware Decode Preset",
+                style = MuxGridType.CardSubtitle,
+                fontSize = 13.sp,
+            )
+            Row(
+                modifier = Modifier
+                    .focusGroup()
+                    .focusRestorer()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                listOf(
+                    HwDecPreset.MEDIACODEC_ZERO_COPY to "Zero-Copy (TV Default)",
+                    HwDecPreset.MEDIACODEC_COPY_BWDIF to "Copy + bwdif",
+                ).forEach { (preset, label) ->
+                    TvUnderlineOption(
+                        label = label,
+                        selected = hwDecPreset == preset,
+                        onClick = { onSelectPreset(preset) },
+                    )
+                }
+            }
+        }
+
+        MuxGridDivider()
+
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "Live Timeshift Cache Limit",
+                style = MuxGridType.CardSubtitle,
+                fontSize = 13.sp,
+            )
+            Row(
+                modifier = Modifier
+                    .focusGroup()
+                    .focusRestorer()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                TimeshiftWindow.entries.forEach { option ->
+                    TvUnderlineOption(
+                        label = option.shortLabel,
+                        selected = timeshiftWindow == option,
+                        onClick = { onSelectTimeshiftWindow(option) },
+                    )
+                }
+            }
+            Text(
+                text = "${timeshiftWindow.description} · split pause/rewind · applies on next tune",
+                style = MuxGridType.TabularSmall,
+                color = MuxGridColors.TextMuted,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TvAppInfoSettingsCard(
+    appInfo: AppBuildInfo,
+    onOpenGithub: () -> Unit,
+    onOpenDebugInfo: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MuxGridShapes.Card)
+            .background(MuxGridColors.CardSurface)
+            .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Text(
+            text = "APP INFO",
+            style = MuxGridType.Eyebrow,
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(32.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "Version",
+                    style = MuxGridType.CardSubtitle,
+                    fontSize = 12.5.sp,
+                )
+                Text(
+                    text = appInfo.versionDisplay,
+                    style = MuxGridType.TabularNumber,
+                    fontSize = 14.5.sp,
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "Build SHA",
+                    style = MuxGridType.CardSubtitle,
+                    fontSize = 12.5.sp,
+                )
+                Text(
+                    text = appInfo.shortSha,
+                    style = MuxGridType.TabularNumber,
+                    fontSize = 14.5.sp,
+                )
+            }
+        }
+
+        MuxGridDivider()
+
+        TvSettingsActionRow(
+            title = "GitHub",
+            subtitle = appInfo.githubDisplayUrl,
+            contentDescription = "Open GitHub",
+            onClick = onOpenGithub,
+        )
+
+        TvSettingsActionRow(
+            title = "Debug Info",
+            subtitle = "Device, OS, and playback environment",
+            contentDescription = "Show Debug Info",
+            onClick = onOpenDebugInfo,
+        )
     }
 }
 
