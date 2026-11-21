@@ -97,7 +97,39 @@ data class PlaybackState(
 
     val isBehindLive: Boolean
         get() = !isRecordingPlayback && isTimeshiftSeekable &&
-            (liveEdgeOffsetMs >= 5_000L || (isPaused && liveEdgeOffsetMs >= 2_000L))
+            (liveEdgeOffsetMs >= 5_000L || (isPaused && liveEdgeOffsetMs >= PlaybackSeekDefaults.LIVE_EDGE_DISPLAY_THRESHOLD_MS))
+
+    /**
+     * Clamps a requested seek target in milliseconds to valid, non-stalling bounds for the
+     * current playback mode (growing DVR write head, completed recording, or live timeshift buffer).
+     */
+    fun clampSeekPositionMs(requestedMs: Long): Long {
+        val nonNeg = requestedMs.coerceAtLeast(0L)
+        return when {
+            isGrowingRecording -> {
+                val maxSafe = (durationMs - PlaybackSeekDefaults.GROWING_WRITE_HEAD_SAFETY_MS).coerceAtLeast(0L)
+                nonNeg.coerceAtMost(maxSafe)
+            }
+            isRecordingPlayback && durationMs > 0L -> {
+                nonNeg.coerceAtMost(durationMs)
+            }
+            !isRecordingPlayback && isTimeshiftSeekable -> {
+                val minStart = bufferStartMs.coerceAtLeast(0L)
+                val maxEnd = (bufferEndMs - PlaybackSeekDefaults.LIVE_EDGE_SAFETY_MS).coerceAtLeast(minStart)
+                nonNeg.coerceIn(minStart, maxEnd)
+            }
+            else -> nonNeg
+        }
+    }
+}
+
+object PlaybackSeekDefaults {
+    const val SEEK_BACK_STEP_MS = 10_000L
+    const val SEEK_FORWARD_STEP_MS = 30_000L
+    const val GROWING_WRITE_HEAD_SAFETY_MS = 2_000L
+    const val LIVE_EDGE_SAFETY_MS = 1_500L
+    const val LIVE_EDGE_SAFETY_SEC = LIVE_EDGE_SAFETY_MS / 1000.0
+    const val LIVE_EDGE_DISPLAY_THRESHOLD_MS = 2_000L
 }
 
 data class PlaybackDiagnostics(

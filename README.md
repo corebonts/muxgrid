@@ -46,7 +46,7 @@ Built as a **single unified codebase** producing ABI-split APKs for Android phon
   - Persistent mini-player bar, `vid=no` audio-only backgrounding for radio and live TV, and automatic/manual Picture-in-Picture (PiP).
 - **Tailored Mobile & 10-ft TV Controls:**
   - **Mobile:** Double-tap seek (`-10s` / `+30s`), vertical edge drags for brightness and volume, aspect ratio selector, Quick-Zap channel drawer, adaptive tablet/landscape layout, and Haze backdrop blur on non-video chrome.
-  - **Android TV:** Collapsible left Navigation Rail (`androidx.tv:tv-material`), instant `Ch+`/`Ch-` / D-pad Up/Down zapping with minimal OSD, progressive D-pad seeking (`10s → 30s → 1m → 5m`), and an overlay Quick Channel Strip.
+  - **Android TV:** Collapsible left Navigation Rail (`androidx.tv:tv-material`), instant `Ch+`/`Ch-` / D-pad Up/Down zapping with minimal OSD, progressive D-pad seeking (`10s → 30s → 1m → 5m → 10m` tap ladder with gear-locked continuous hold capped at `30s`), and an overlay Quick Channel Strip.
 
 ## Server Setup (Tvheadend)
 

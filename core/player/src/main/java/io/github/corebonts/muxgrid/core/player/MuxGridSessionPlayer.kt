@@ -13,6 +13,7 @@ import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import io.github.corebonts.muxgrid.core.model.PlaybackSeekDefaults
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import kotlinx.coroutines.CoroutineScope
@@ -140,8 +141,8 @@ internal class MuxGridSessionPlayer(
             .setPlaybackState(media3State)
             .setPlayWhenReady(playWhenReady, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
             .setIsLoading(st.status == PlaybackStatus.BUFFERING)
-            .setSeekBackIncrementMs(10_000L)
-            .setSeekForwardIncrementMs(30_000L)
+            .setSeekBackIncrementMs(PlaybackSeekDefaults.SEEK_BACK_STEP_MS)
+            .setSeekForwardIncrementMs(PlaybackSeekDefaults.SEEK_FORWARD_STEP_MS)
             .setAudioAttributes(audioAttributes)
 
         st.error?.let { err ->
@@ -240,8 +241,8 @@ internal class MuxGridSessionPlayer(
             Player.COMMAND_SEEK_TO_PREVIOUS,
             Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
             -> onZapPrevious()
-            Player.COMMAND_SEEK_BACK -> playbackEngine.seekBy(-10_000L)
-            Player.COMMAND_SEEK_FORWARD -> playbackEngine.seekBy(30_000L)
+            Player.COMMAND_SEEK_BACK -> playbackEngine.seekBy(-PlaybackSeekDefaults.SEEK_BACK_STEP_MS)
+            Player.COMMAND_SEEK_FORWARD -> playbackEngine.seekBy(PlaybackSeekDefaults.SEEK_FORWARD_STEP_MS)
             else -> {
                 if (positionMs != C.TIME_UNSET) {
                     playbackEngine.seekTo(positionMs)

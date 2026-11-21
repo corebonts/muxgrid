@@ -17,6 +17,7 @@ import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.MediaTrack
 import io.github.corebonts.muxgrid.core.model.PlaybackDiagnostics
 import io.github.corebonts.muxgrid.core.model.PlaybackError
+import io.github.corebonts.muxgrid.core.model.PlaybackSeekDefaults
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.model.StreamTicket
@@ -136,6 +137,13 @@ class MpvPlaybackEngine(
 
     private val destroyed = AtomicBoolean(false)
     private val playbackGeneration = AtomicLong(0L)
+    private val seekRequestSeq = AtomicLong(0L)
+
+    @Volatile
+    private var completedSeekSeq: Long = 0L
+
+    @Volatile
+    private var seekGuardUntilElapsedMs: Long = 0L
 
     @Volatile
     private var pendingLoadGeneration: Long = 0L
@@ -331,6 +339,8 @@ class MpvPlaybackEngine(
         lastObservedMpvDurationMs = 0L
         lastPositionEmitElapsedMs = 0L
         lastEmittedPosMs = -1L
+        seekGuardUntilElapsedMs = 0L
+        completedSeekSeq = seekRequestSeq.incrementAndGet()
         lastGrowingServerSec = 0L
         lastGrowingTickElapsedMs = 0L
         timeshiftSmoother.reset()
@@ -405,6 +415,8 @@ class MpvPlaybackEngine(
         lastObservedMpvDurationMs = 0L
         lastPositionEmitElapsedMs = 0L
         lastEmittedPosMs = -1L
+        seekGuardUntilElapsedMs = 0L
+        completedSeekSeq = seekRequestSeq.incrementAndGet()
         lastGrowingServerSec = 0L
         lastGrowingTickElapsedMs = 0L
         timeshiftSmoother.reset()
@@ -490,6 +502,8 @@ class MpvPlaybackEngine(
         activeDvrEntry = null
         lastPositionEmitElapsedMs = 0L
         lastEmittedPosMs = -1L
+        seekGuardUntilElapsedMs = 0L
+        completedSeekSeq = seekRequestSeq.incrementAndGet()
         lastGrowingServerSec = 0L
         lastGrowingTickElapsedMs = 0L
         timeshiftSmoother.reset()
@@ -542,14 +556,35 @@ class MpvPlaybackEngine(
     }
 
     override fun seekTo(positionMs: Long) {
+        val gen = playbackGeneration.get()
         val current = _state.value
-        val clampedMs = clampSeekTargetMs(current, positionMs)
+        val clampedMs = current.clampSeekPositionMs(positionMs)
+        val reqSeq = seekRequestSeq.incrementAndGet()
+        seekGuardUntilElapsedMs = SystemClock.elapsedRealtime() + SEEK_GUARD_SUBMIT_MS
         lastPositionEmitElapsedMs = 0L
+        lastEmittedPosMs = clampedMs
+        _state.update { state ->
+            if (state.status == PlaybackStatus.IDLE || state.status == PlaybackStatus.ERROR) {
+                state
+            } else if (!state.isRecordingPlayback && state.isTimeshiftSeekable && state.bufferEndMs > 0L) {
+                state.copy(
+                    positionMs = clampedMs,
+                    liveEdgeOffsetMs = (state.bufferEndMs - clampedMs).coerceAtLeast(0L),
+                )
+            } else {
+                state.copy(positionMs = clampedMs)
+            }
+        }
         submitMpvTask {
+            if (playbackGeneration.get() != gen || explicitlyStopped) return@submitMpvTask
             val instance = mpv ?: return@submitMpvTask
             if (instance.isInitialized) {
                 val secStr = String.format(Locale.US, "%.3f", clampedMs / 1000.0)
                 instance.command("seek", secStr, "absolute")
+            }
+            completedSeekSeq = reqSeq
+            if (seekRequestSeq.get() == reqSeq) {
+                seekGuardUntilElapsedMs = SystemClock.elapsedRealtime() + SEEK_GUARD_SETTLE_MS
             }
         }
     }
@@ -576,8 +611,8 @@ class MpvPlaybackEngine(
             val (_, endSec) = readSeekableCacheRangeSecLocked(instance)
             val fallbackEnd = runCatching { instance.getPropertyDouble("demuxer-cache-time") }.getOrNull()
             val liveSec = endSec ?: fallbackEnd
-            if (liveSec != null && liveSec > 1.5) {
-                val target = (liveSec - 1.5).coerceAtLeast(0.0)
+            if (liveSec != null && liveSec > PlaybackSeekDefaults.LIVE_EDGE_SAFETY_SEC) {
+                val target = (liveSec - PlaybackSeekDefaults.LIVE_EDGE_SAFETY_SEC).coerceAtLeast(0.0)
                 val secStr = String.format(Locale.US, "%.3f", target)
                 instance.command("seek", secStr, "absolute")
             }
@@ -868,22 +903,6 @@ class MpvPlaybackEngine(
         } catch (_: RejectedExecutionException) {
         }
         mpvExecutor.shutdown()
-    }
-
-    private fun clampSeekTargetMs(state: PlaybackState, requestedMs: Long): Long {
-        val nonNeg = requestedMs.coerceAtLeast(0L)
-        return when {
-            state.isGrowingRecording -> {
-                val maxSafe = (state.durationMs - GROWING_WRITE_HEAD_SAFETY_MS).coerceAtLeast(0L)
-                nonNeg.coerceAtMost(maxSafe)
-            }
-            !state.isRecordingPlayback && state.isTimeshiftSeekable -> {
-                val minStart = state.bufferStartMs.coerceAtLeast(0L)
-                val maxEnd = (state.bufferEndMs - LIVE_EDGE_SAFETY_MS).coerceAtLeast(minStart)
-                nonNeg.coerceIn(minStart, maxEnd)
-            }
-            else -> nonNeg
-        }
     }
 
     private fun configureLiveTimeshiftLocked(instance: MPV, requested: TimeshiftWindow) {
@@ -1255,6 +1274,9 @@ class MpvPlaybackEngine(
             "time-pos" -> {
                 val posMs = (value * 1000.0).toLong().coerceAtLeast(0L)
                 val nowElapsed = SystemClock.elapsedRealtime()
+                if (nowElapsed < seekGuardUntilElapsedMs) {
+                    return
+                }
                 val prevPos = lastEmittedPosMs
                 val jumped = prevPos < 0L || kotlin.math.abs(posMs - prevPos) >= 1_500L
                 if (!jumped && (nowElapsed - lastPositionEmitElapsedMs) < POSITION_EMIT_INTERVAL_MS) {
@@ -1340,6 +1362,11 @@ class MpvPlaybackEngine(
                 if (eventId == MPV.mpvEvent.MPV_EVENT_FILE_LOADED) {
                     hadFileLoaded = true
                     retriedLiveReconnect = false
+                } else if (eventId == MPV.mpvEvent.MPV_EVENT_PLAYBACK_RESTART &&
+                    completedSeekSeq >= seekRequestSeq.get()
+                ) {
+                    seekGuardUntilElapsedMs = 0L
+                    lastPositionEmitElapsedMs = 0L
                 }
                 submitMpvTask {
                     if (explicitlyStopped || playbackGeneration.get() != eventGen) return@submitMpvTask
@@ -1782,9 +1809,9 @@ class MpvPlaybackEngine(
         private const val CACHE_POLL_INTERVAL_MS = 500L
         private const val DEFAULT_RAM_CACHE_BYTES = 64L * 1024L * 1024L
         private const val DISK_SAFETY_RESERVE_BYTES = 512L * 1024L * 1024L
-        private const val GROWING_WRITE_HEAD_SAFETY_MS = 2_000L
-        private const val LIVE_EDGE_SAFETY_MS = 1_500L
         private const val SURFACE_DETACH_TIMEOUT_MS = 1_500L
+        private const val SEEK_GUARD_SUBMIT_MS = 1_200L
+        private const val SEEK_GUARD_SETTLE_MS = 450L
     }
 }
 
