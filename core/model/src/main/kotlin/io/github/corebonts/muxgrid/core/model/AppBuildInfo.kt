@@ -4,6 +4,7 @@ data class AppBuildInfo(
     val versionName: String,
     val versionCode: Int,
     val buildSha: String,
+    val buildType: String = "",
     val githubUrl: String = DEFAULT_GITHUB_URL,
 ) {
     val shortSha: String

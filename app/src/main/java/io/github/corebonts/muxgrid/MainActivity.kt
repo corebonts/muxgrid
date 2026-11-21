@@ -163,6 +163,7 @@ class MainActivity : ComponentActivity() {
                         versionName = BuildConfig.VERSION_NAME,
                         versionCode = BuildConfig.VERSION_CODE,
                         buildSha = BuildConfig.GIT_SHA,
+                        buildType = BuildConfig.BUILD_TYPE,
                     )
                 }
 

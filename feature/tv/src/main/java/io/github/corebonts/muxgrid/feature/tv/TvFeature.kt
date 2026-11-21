@@ -67,6 +67,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -103,8 +104,11 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
+import io.github.corebonts.muxgrid.core.designsystem.collectDebugEnvironmentSnapshot
 import io.github.corebonts.muxgrid.core.designsystem.connectionStatusDotColor
+import io.github.corebonts.muxgrid.core.designsystem.copyDebugInfoToClipboard
 import io.github.corebonts.muxgrid.core.designsystem.filterChannels
+import io.github.corebonts.muxgrid.core.designsystem.formatDebugInfoReport
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
 import io.github.corebonts.muxgrid.core.designsystem.label
 import io.github.corebonts.muxgrid.core.designsystem.rememberNowEpochSec
@@ -120,7 +124,9 @@ import io.github.corebonts.muxgrid.core.model.ServerProfile
 import io.github.corebonts.muxgrid.core.model.StartScreen
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class TvRoute {
     ONBOARDING,
@@ -1270,6 +1276,8 @@ private fun TvSettingsTab(
 ) {
     val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var debugReport by remember { mutableStateOf<String?>(null) }
     val isServerError = connectionState is ConnectionState.Error
     val canRetryConnect = isServerError || connectionState is ConnectionState.Disconnected
     val reconnectFocusRequester = remember { FocusRequester() }
@@ -1665,6 +1673,131 @@ private fun TvSettingsTab(
                         contentDescription = "Open GitHub",
                         modifier = Modifier.size(18.dp),
                     )
+                }
+            }
+
+            Surface(
+                onClick = {
+                    scope.launch {
+                        debugReport = withContext(Dispatchers.IO) {
+                            formatDebugInfoReport(
+                                collectDebugEnvironmentSnapshot(
+                                    context = context,
+                                    appInfo = appInfo,
+                                    isTv = true,
+                                    connectionState = connectionState,
+                                    hwDecPreset = hwDecPreset,
+                                    timeshiftWindow = timeshiftWindow,
+                                    themeMode = themeMode,
+                                ),
+                            )
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
+                colors = ClickableSurfaceDefaults.colors(
+                    containerColor = MuxGridColors.CardSurfaceElevated,
+                    contentColor = MuxGridColors.TextPrimary,
+                    focusedContainerColor = MuxGridColors.FocusBorder,
+                    focusedContentColor = MuxGridColors.CanvasTv,
+                ),
+                border = ClickableSurfaceDefaults.border(
+                    border = Border.None,
+                    focusedBorder = Border(
+                        border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
+                        shape = MuxGridShapes.Sm,
+                    ),
+                ),
+                scale = ClickableSurfaceDefaults.scale(focusedScale = 1.015f),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text(
+                            text = "Debug Info",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "Device, OS, and playback environment",
+                            fontSize = 12.sp,
+                            color = LocalContentColor.current.copy(alpha = 0.78f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Icon(
+                        imageVector = MuxGridIcons.ChevronRight,
+                        contentDescription = "Show Debug Info",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+
+    debugReport?.let { report ->
+        val copyFocusRequester = remember { FocusRequester() }
+        LaunchedEffect(report) {
+            runCatching { copyFocusRequester.requestFocus() }
+        }
+        TvModalDialog(
+            onDismissRequest = { debugReport = null },
+            minWidth = 500.dp,
+            maxWidth = 700.dp,
+        ) {
+            Text(
+                text = "Debug Info",
+                style = MuxGridType.Title,
+                fontSize = 18.sp,
+                color = MuxGridColors.TextPrimary,
+            )
+            Text(
+                text = "Non-personal hardware and software environment for issue reports.",
+                style = MuxGridType.CardSubtitle,
+                fontSize = 13.sp,
+                color = MuxGridColors.TextSecondary,
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MuxGridShapes.Sm)
+                    .background(MuxGridColors.CardSurface)
+                    .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Sm)
+                    .padding(12.dp),
+            ) {
+                Text(
+                    text = report,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MuxGridColors.TextPrimary,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+            ) {
+                Button(
+                    onClick = { debugReport = null },
+                    shape = tvButtonShape(),
+                    colors = tvDialogSecondaryButtonColors(),
+                ) {
+                    Text("Close", maxLines = 1, softWrap = false)
+                }
+                Button(
+                    onClick = { copyDebugInfoToClipboard(context, report) },
+                    modifier = Modifier.focusRequester(copyFocusRequester),
+                    shape = tvButtonShape(),
+                    colors = tvPrimaryButtonColors(),
+                ) {
+                    Text("Copy", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                 }
             }
         }
