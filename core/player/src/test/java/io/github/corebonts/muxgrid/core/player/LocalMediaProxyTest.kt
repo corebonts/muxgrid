@@ -531,6 +531,160 @@ class LocalMediaProxyTest {
         }
     }
 
+    @Test
+    fun `decodes upstream Transfer-Encoding chunked for live and DVR streams`() {
+        ServerSocket(0, 4, InetAddress.getByName("127.0.0.1")).use { upstream ->
+            val thread = Thread {
+                repeat(2) {
+                    upstream.accept().use { sock ->
+                        val reader = BufferedReader(InputStreamReader(sock.getInputStream()))
+                        val reqLine = reader.readLine() ?: ""
+                        while (true) {
+                            val l = reader.readLine() ?: break
+                            if (l.isEmpty()) break
+                        }
+                        val out = sock.getOutputStream()
+                        val ct = if (reqLine.contains("/dvrfile/")) "video/x-matroska" else "video/mp2t"
+                        out.write(
+                            (
+                                "HTTP/1.1 200 OK\r\n" +
+                                    "Content-Type: $ct\r\n" +
+                                    "Transfer-Encoding: chunked\r\n" +
+                                    "Connection: close\r\n\r\n" +
+                                    "5;ext=1\r\nHELLO\r\n" +
+                                    "6\r\n_WORLD\r\n" +
+                                    "0\r\nX-Trailer: done\r\n\r\n"
+                                ).toByteArray(StandardCharsets.US_ASCII),
+                        )
+                        out.flush()
+                    }
+                }
+            }.apply { start() }
+
+            val proxy = LocalMediaProxy(
+                serverBaseUrlProvider = { "http://127.0.0.1:${upstream.localPort}" },
+                ticketProvider = { chId -> StreamTicket("/stream/channelid/$chId", "L1") },
+                dvrTicketProvider = { dvrId -> StreamTicket("/dvrfile/$dvrId", "D1") },
+            )
+            try {
+                assertEquals("HELLO_WORLD", httpGet(proxy.liveStreamUrl(1L)))
+                assertEquals("HELLO_WORLD", httpGet(proxy.dvrStreamUrl(2L)))
+            } finally {
+                proxy.close()
+                thread.join(2_000)
+            }
+        }
+    }
+
+    @Test
+    fun `growing DVR HEAD with zero bytes and Range returns 200 instead of invalid bytes 0-0`() {
+        val isRecording = AtomicBoolean(true)
+        val proxy = LocalMediaProxy(
+            serverBaseUrlProvider = { null },
+            ticketProvider = { StreamTicket("", "") },
+            growingFileOpener = {
+                object : GrowingDvrFile {
+                    override val initialSize: Long = 0L
+                    override suspend fun statSize(): Long = 0L
+                    override suspend fun read(offset: Long, size: Int): ByteArray = ByteArray(0)
+                    override fun close() = Unit
+                }
+            },
+            isDvrRecordingProvider = { isRecording.get() },
+        )
+        try {
+            val headLive = URL(proxy.growingDvrStreamUrl(55L)).openConnection() as HttpURLConnection
+            headLive.requestMethod = "HEAD"
+            headLive.setRequestProperty("Range", "bytes=0-")
+            assertEquals(200, headLive.responseCode)
+            assertNull(headLive.getHeaderField("Content-Range"))
+            assertEquals("bytes", headLive.getHeaderField("Accept-Ranges"))
+
+            isRecording.set(false)
+            val headDone = URL(proxy.growingDvrStreamUrl(55L)).openConnection() as HttpURLConnection
+            headDone.requestMethod = "HEAD"
+            headDone.setRequestProperty("Range", "bytes=0-")
+            assertEquals(416, headDone.responseCode)
+            assertEquals("bytes */0", headDone.getHeaderField("Content-Range"))
+        } finally {
+            proxy.close()
+        }
+    }
+
+    @Test
+    fun `resolves https upstream endpoint and connects via SSLSocketFactory`() {
+        val capturedHosts = mutableListOf<String>()
+        val capturedPorts = mutableListOf<Int>()
+        val proxy = LocalMediaProxy(
+            serverBaseUrlProvider = { "https://tvh.example.invalid/proxy" },
+            ticketProvider = { chId -> StreamTicket("/stream/channelid/$chId", "S1") },
+            sslSocketFactoryProvider = {
+                object : javax.net.ssl.SSLSocketFactory() {
+                    override fun getDefaultCipherSuites(): Array<String> = emptyArray()
+                    override fun getSupportedCipherSuites(): Array<String> = emptyArray()
+                    override fun createSocket(s: Socket?, host: String?, port: Int, autoClose: Boolean): Socket {
+                        capturedHosts.add(host ?: "")
+                        capturedPorts.add(port)
+                        throw java.io.IOException("test handshake stopped")
+                    }
+                    override fun createSocket(host: String?, port: Int) = throw UnsupportedOperationException()
+                    override fun createSocket(host: String?, port: Int, localHost: InetAddress?, localPort: Int) =
+                        throw UnsupportedOperationException()
+                    override fun createSocket(host: InetAddress?, port: Int) = throw UnsupportedOperationException()
+                    override fun createSocket(
+                        address: InetAddress?,
+                        port: Int,
+                        localAddress: InetAddress?,
+                        localPort: Int,
+                    ) = throw UnsupportedOperationException()
+                }
+            },
+        )
+        // Open a local TCP listener on an ephemeral port? Instead test explicit https port so connect succeeds and hits SSLSocketFactory:
+        proxy.close()
+
+        ServerSocket(0, 4, InetAddress.getByName("127.0.0.1")).use { upstream ->
+            val thread = Thread {
+                runCatching { upstream.accept().use { } }
+            }.apply { start() }
+            val httpsProxy = LocalMediaProxy(
+                serverBaseUrlProvider = { "https://127.0.0.1:${upstream.localPort}/base" },
+                ticketProvider = { chId -> StreamTicket("/stream/channelid/$chId", "S1") },
+                sslSocketFactoryProvider = {
+                    object : javax.net.ssl.SSLSocketFactory() {
+                        override fun getDefaultCipherSuites(): Array<String> = emptyArray()
+                        override fun getSupportedCipherSuites(): Array<String> = emptyArray()
+                        override fun createSocket(s: Socket?, host: String?, port: Int, autoClose: Boolean): Socket {
+                            capturedHosts.add(host ?: "")
+                            capturedPorts.add(port)
+                            s?.close()
+                            throw java.io.IOException("wrapped TLS check")
+                        }
+                        override fun createSocket(host: String?, port: Int) = throw UnsupportedOperationException()
+                        override fun createSocket(host: String?, port: Int, localHost: InetAddress?, localPort: Int) =
+                            throw UnsupportedOperationException()
+                        override fun createSocket(host: InetAddress?, port: Int) = throw UnsupportedOperationException()
+                        override fun createSocket(
+                            address: InetAddress?,
+                            port: Int,
+                            localAddress: InetAddress?,
+                            localPort: Int,
+                        ) = throw UnsupportedOperationException()
+                    }
+                },
+            )
+            try {
+                val conn = URL(httpsProxy.liveStreamUrl(9L)).openConnection() as HttpURLConnection
+                assertEquals(503, conn.responseCode)
+                assertEquals(listOf("127.0.0.1"), capturedHosts)
+                assertEquals(listOf(upstream.localPort), capturedPorts)
+            } finally {
+                httpsProxy.close()
+                thread.join(2_000)
+            }
+        }
+    }
+
     private fun httpGet(url: String): String {
         val conn = URL(url).openConnection() as HttpURLConnection
         assertEquals(200, conn.responseCode)

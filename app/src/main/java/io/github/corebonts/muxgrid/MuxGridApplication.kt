@@ -7,18 +7,151 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import io.github.corebonts.muxgrid.core.data.TvheadendRepository
 import io.github.corebonts.muxgrid.core.model.FormFactor
+import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.player.MpvPlaybackEngine
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
 import io.github.corebonts.muxgrid.core.player.PlaybackSessionHost
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+/**
+ * Tracks active DVR playback state and reports resume position / completion back to Tvheadend.
+ */
+internal class DvrProgressTracker(
+    private val scope: CoroutineScope,
+    private val stateFlow: StateFlow<PlaybackState>,
+    private val reportProgress: suspend (
+        dvrId: Long,
+        positionSec: Long,
+        durationSec: Long,
+        markCompleted: Boolean,
+    ) -> Unit,
+    private val tickIntervalMs: Long = 10_000L,
+) {
+    private var activeTrackedDvrId: Long? = null
+    private var reportedCompletion: Boolean = false
+    private var lastTrackedPosSec: Long = 0L
+    private var lastTrackedDurSec: Long = 0L
+    private var progressTickJob: Job? = null
+
+    fun start(): Job = scope.launch {
+        stateFlow.collect { state ->
+            onStateChanged(state)
+        }
+    }
+
+    internal fun onStateChanged(state: PlaybackState) {
+        val dvrId = state.dvrEntryId
+        if (dvrId != activeTrackedDvrId) {
+            val prevId = activeTrackedDvrId
+            val prevPos = lastTrackedPosSec
+            val prevDur = lastTrackedDurSec
+            val prevCompleted = reportedCompletion
+            if (prevId != null && !prevCompleted && prevPos > 0L) {
+                scope.launch {
+                    runCatchingNonFatal {
+                        reportProgress(prevId, prevPos, prevDur, false)
+                    }
+                }
+            }
+            activeTrackedDvrId = dvrId
+            reportedCompletion = false
+            lastTrackedPosSec = state.positionMs / 1000L
+            lastTrackedDurSec = state.durationMs / 1000L
+            progressTickJob?.cancel()
+            progressTickJob = null
+        }
+
+        if (dvrId != null) {
+            if (state.positionMs > 0L) {
+                lastTrackedPosSec = state.positionMs / 1000L
+            }
+            if (state.durationMs > 0L) {
+                lastTrackedDurSec = state.durationMs / 1000L
+            }
+            if (state.isCompleted) {
+                progressTickJob?.cancel()
+                progressTickJob = null
+                if (!reportedCompletion) {
+                    reportedCompletion = true
+                    val finalPos = lastTrackedDurSec.coerceAtLeast(lastTrackedPosSec)
+                    val finalDur = lastTrackedDurSec
+                    scope.launch {
+                        runCatchingNonFatal {
+                            reportProgress(dvrId, finalPos, finalDur, true)
+                        }
+                    }
+                }
+            } else {
+                reportedCompletion = false
+                if (state.status == PlaybackStatus.PLAYING && progressTickJob == null) {
+                    val job = scope.launch {
+                        try {
+                            while (isActive) {
+                                delay(tickIntervalMs)
+                                val current = stateFlow.value
+                                val curDvrId = current.dvrEntryId ?: break
+                                if (current.status == PlaybackStatus.PLAYING) {
+                                    runCatchingNonFatal {
+                                        reportProgress(
+                                            curDvrId,
+                                            current.positionMs / 1000L,
+                                            current.durationMs / 1000L,
+                                            false,
+                                        )
+                                    }
+                                }
+                            }
+                        } finally {
+                            if (progressTickJob === coroutineContext[Job]) {
+                                progressTickJob = null
+                            }
+                        }
+                    }
+                    if (job.isActive) {
+                        progressTickJob = job
+                    }
+                } else if (state.status != PlaybackStatus.PLAYING && progressTickJob != null) {
+                    progressTickJob?.cancel()
+                    progressTickJob = null
+                }
+            }
+        }
+    }
+
+    fun flush() {
+        val dvrId = activeTrackedDvrId ?: return
+        if (reportedCompletion) return
+        val current = stateFlow.value
+        val posSec = (current.positionMs / 1000L).takeIf { it > 0L } ?: lastTrackedPosSec
+        val durSec = (current.durationMs / 1000L).takeIf { it > 0L } ?: lastTrackedDurSec
+        if (posSec > 0L) {
+            scope.launch {
+                runCatchingNonFatal {
+                    reportProgress(dvrId, posSec, durSec, false)
+                }
+            }
+        }
+    }
+
+    private suspend inline fun runCatchingNonFatal(block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
+    }
+}
 
 class MuxGridAppContainer(context: Context) {
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -48,10 +181,18 @@ class MuxGridAppContainer(context: Context) {
         conflictFinder = { channelId -> repository.findConflictingRecording(channelId) },
     )
 
-    private var activeTrackedDvrId: Long? = null
-    private var lastTrackedPosSec: Long = 0L
-    private var lastTrackedDurSec: Long = 0L
-    private var progressTickJob: Job? = null
+    private val dvrProgressTracker = DvrProgressTracker(
+        scope = applicationScope,
+        stateFlow = playbackEngine.state,
+        reportProgress = { dvrId, posSec, durSec, markCompleted ->
+            repository.reportDvrPlaybackProgress(
+                dvrId = dvrId,
+                positionSec = posSec,
+                durationSec = durSec,
+                markCompleted = markCompleted,
+            )
+        },
+    )
 
     init {
         PlaybackSessionHost.register(
@@ -72,7 +213,7 @@ class MuxGridAppContainer(context: Context) {
                 playbackEngine.setSubtitlePreference(preference)
             }
         }
-        startDvrProgressTracking()
+        dvrProgressTracker.start()
     }
 
     private fun zapBy(delta: Int) {
@@ -84,90 +225,8 @@ class MuxGridAppContainer(context: Context) {
         playbackEngine.playChannel(list[nextIdx], repository.hwDecPreset.value)
     }
 
-    private fun startDvrProgressTracking() {
-        applicationScope.launch {
-            playbackEngine.state.collect { state ->
-                val dvrId = state.dvrEntryId
-                if (dvrId != activeTrackedDvrId) {
-                    val prevId = activeTrackedDvrId
-                    val prevPos = lastTrackedPosSec
-                    val prevDur = lastTrackedDurSec
-                    if (prevId != null && prevPos > 0L) {
-                        launch {
-                            repository.reportDvrPlaybackProgress(
-                                dvrId = prevId,
-                                positionSec = prevPos,
-                                durationSec = prevDur,
-                                markCompleted = false,
-                            )
-                        }
-                    }
-                    activeTrackedDvrId = dvrId
-                    lastTrackedPosSec = state.positionMs / 1000L
-                    lastTrackedDurSec = state.durationMs / 1000L
-                    progressTickJob?.cancel()
-                    progressTickJob = null
-                }
-
-                if (dvrId != null) {
-                    if (state.positionMs > 0L) {
-                        lastTrackedPosSec = state.positionMs / 1000L
-                    }
-                    if (state.durationMs > 0L) {
-                        lastTrackedDurSec = state.durationMs / 1000L
-                    }
-                    if (state.isCompleted) {
-                        progressTickJob?.cancel()
-                        progressTickJob = null
-                        activeTrackedDvrId = null
-                        launch {
-                            repository.reportDvrPlaybackProgress(
-                                dvrId = dvrId,
-                                positionSec = lastTrackedDurSec.coerceAtLeast(lastTrackedPosSec),
-                                durationSec = lastTrackedDurSec,
-                                markCompleted = true,
-                            )
-                        }
-                    } else if (state.status == PlaybackStatus.PLAYING && progressTickJob == null) {
-                        progressTickJob = launch {
-                            while (isActive) {
-                                delay(10_000L)
-                                val current = playbackEngine.state.value
-                                val curDvrId = current.dvrEntryId ?: break
-                                if (current.status == PlaybackStatus.PLAYING) {
-                                    repository.reportDvrPlaybackProgress(
-                                        dvrId = curDvrId,
-                                        positionSec = current.positionMs / 1000L,
-                                        durationSec = current.durationMs / 1000L,
-                                        markCompleted = false,
-                                    )
-                                }
-                            }
-                        }
-                    } else if (state.status != PlaybackStatus.PLAYING && progressTickJob != null) {
-                        progressTickJob?.cancel()
-                        progressTickJob = null
-                    }
-                }
-            }
-        }
-    }
-
     fun flushDvrProgress() {
-        val dvrId = activeTrackedDvrId ?: return
-        val current = playbackEngine.state.value
-        val posSec = (current.positionMs / 1000L).takeIf { it > 0L } ?: lastTrackedPosSec
-        val durSec = (current.durationMs / 1000L).takeIf { it > 0L } ?: lastTrackedDurSec
-        if (posSec > 0L) {
-            applicationScope.launch {
-                repository.reportDvrPlaybackProgress(
-                    dvrId = dvrId,
-                    positionSec = posSec,
-                    durationSec = durSec,
-                    markCompleted = false,
-                )
-            }
-        }
+        dvrProgressTracker.flush()
     }
 
     fun close() {
@@ -177,8 +236,8 @@ class MuxGridAppContainer(context: Context) {
 
     companion object {
         fun detectFormFactor(context: Context): FormFactor {
-            val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as UiModeManager
-            val isTvUi = uiModeManager.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+            val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+            val isTvUi = uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
             val hasLeanback = context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
             return if (isTvUi || hasLeanback) FormFactor.TV else FormFactor.PHONE
         }
