@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -38,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
@@ -104,7 +106,9 @@ internal fun TvPlayerScreen(
     onExit: () -> Unit,
 ) {
     var hudVisible by remember { mutableStateOf(false) }
+    var hudInteractionNonce by remember { mutableIntStateOf(0) }
     var trackPanelOpen by remember { mutableStateOf(false) }
+    var progressFocused by remember { mutableStateOf(false) }
     var zapOsdTrigger by remember { mutableLongStateOf(0L) }
     var zapOsdVisible by remember { mutableStateOf(true) }
     var seekOsdTrigger by remember { mutableLongStateOf(0L) }
@@ -121,6 +125,7 @@ internal fun TvPlayerScreen(
 
     val playerFocusRequester = remember { FocusRequester() }
     val playPauseFocusRequester = remember { FocusRequester() }
+    val progressFocusRequester = remember { FocusRequester() }
     val canSeekTimeline = playbackState.isRecordingPlayback || playbackState.isTimeshiftSeekable
 
     LaunchedEffect(playbackState.isCompleted) {
@@ -132,6 +137,7 @@ internal fun TvPlayerScreen(
     LaunchedEffect(playbackState.channelId, playbackState.dvrEntryId) {
         pendingSeekTargetMs = null
         seekOsdVisible = false
+        progressFocused = false
         zapOsdVisible = true
         zapOsdTrigger = System.currentTimeMillis()
     }
@@ -148,8 +154,10 @@ internal fun TvPlayerScreen(
         val target = pendingSeekTargetMs
         if (target != null) {
             delay(450L)
-            playbackEngine.seekTo(target)
-            pendingSeekTargetMs = null
+            if (pendingSeekTargetMs == target) {
+                playbackEngine.seekTo(target)
+                pendingSeekTargetMs = null
+            }
         }
         if (seekOsdVisible) {
             delay(2_200L)
@@ -159,15 +167,32 @@ internal fun TvPlayerScreen(
         }
     }
 
-    LaunchedEffect(hudVisible, trackPanelOpen, playbackState.status) {
+    LaunchedEffect(hudVisible, trackPanelOpen) {
         if (hudVisible) {
-            runCatching { playPauseFocusRequester.requestFocus() }
-            if (!trackPanelOpen && playbackState.status == PlaybackStatus.PLAYING) {
-                delay(6_000L)
-                hudVisible = false
+            if (!trackPanelOpen && !progressFocused) {
+                runCatching { playPauseFocusRequester.requestFocus() }
             }
         } else {
+            progressFocused = false
+            seekOsdVisible = false
             runCatching { playerFocusRequester.requestFocus() }
+        }
+    }
+
+    LaunchedEffect(canSeekTimeline) {
+        if (!canSeekTimeline && progressFocused) {
+            progressFocused = false
+            if (hudVisible && !trackPanelOpen) {
+                runCatching { playPauseFocusRequester.requestFocus() }
+            }
+        }
+    }
+
+    // Keep the HUD on screen while the progress bar is focused or while navigating HUD controls.
+    LaunchedEffect(hudVisible, trackPanelOpen, playbackState.status, progressFocused, hudInteractionNonce) {
+        if (hudVisible && !trackPanelOpen && !progressFocused && playbackState.status == PlaybackStatus.PLAYING) {
+            delay(6_000L)
+            hudVisible = false
         }
     }
 
@@ -195,6 +220,16 @@ internal fun TvPlayerScreen(
         seekOsdTrigger = nowMs
     }
 
+    fun confirmFromProgressBar() {
+        val target = pendingSeekTargetMs
+        if (target != null) {
+            playbackEngine.seekTo(target)
+            pendingSeekTargetMs = null
+        } else {
+            playbackEngine.togglePause()
+        }
+    }
+
     BackHandler {
         when {
             trackPanelOpen -> trackPanelOpen = false
@@ -207,8 +242,6 @@ internal fun TvPlayerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .focusRequester(playerFocusRequester)
-            .focusable()
             .onPreviewKeyEvent { keyEvent ->
                 val code = keyEvent.nativeKeyEvent.keyCode
                 val isBackKey = code == KeyEvent.KEYCODE_BACK ||
@@ -231,6 +264,9 @@ internal fun TvPlayerScreen(
                     return@onPreviewKeyEvent false
                 }
                 if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                if (hudVisible && !trackPanelOpen && !isBackKey) {
+                    hudInteractionNonce++
+                }
                 when {
                     isBackKey && (trackPanelOpen || hudVisible) -> {
                         if (trackPanelOpen) {
@@ -269,10 +305,11 @@ internal fun TvPlayerScreen(
                         triggerProgressiveSeek(1)
                         true
                     }
-                    !hudVisible && !trackPanelOpen && (
-                        code == KeyEvent.KEYCODE_DPAD_UP ||
-                            code == KeyEvent.KEYCODE_DPAD_DOWN
-                        ) -> {
+                    !hudVisible && !trackPanelOpen && code == KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        hudVisible = true
+                        true
+                    }
+                    !hudVisible && !trackPanelOpen && code == KeyEvent.KEYCODE_DPAD_UP -> {
                         true
                     }
                     !hudVisible && !trackPanelOpen && canSeekTimeline && code == KeyEvent.KEYCODE_DPAD_LEFT -> {
@@ -294,7 +331,9 @@ internal fun TvPlayerScreen(
                     }
                     else -> false
                 }
-            },
+            }
+            .focusRequester(playerFocusRequester)
+            .focusable(enabled = !hudVisible && !trackPanelOpen && playbackState.error == null),
     ) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -501,23 +540,7 @@ internal fun TvPlayerScreen(
                                 fontWeight = FontWeight.SemiBold,
                             )
                             if (lastSeekStepLabel.isNotEmpty()) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                ) {
-                                    Icon(
-                                        imageVector = if (lastSeekDirection < 0) MuxGridIcons.FastRewind else MuxGridIcons.FastForward,
-                                        contentDescription = null,
-                                        tint = MuxGridColors.AccentSoft,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                    Text(
-                                        text = lastSeekStepLabel,
-                                        color = MuxGridColors.AccentSoft,
-                                        style = MuxGridType.TabularSmall,
-                                        fontWeight = FontWeight.Bold,
-                                    )
-                                }
+                                SeekStepBadge(direction = lastSeekDirection, label = lastSeekStepLabel)
                             }
                         }
                         Row(
@@ -560,23 +583,7 @@ internal fun TvPlayerScreen(
                                 fontWeight = FontWeight.SemiBold,
                             )
                             if (lastSeekStepLabel.isNotEmpty()) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                ) {
-                                    Icon(
-                                        imageVector = if (lastSeekDirection < 0) MuxGridIcons.FastRewind else MuxGridIcons.FastForward,
-                                        contentDescription = null,
-                                        tint = MuxGridColors.AccentSoft,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                    Text(
-                                        text = lastSeekStepLabel,
-                                        color = MuxGridColors.AccentSoft,
-                                        style = MuxGridType.TabularSmall,
-                                        fontWeight = FontWeight.Bold,
-                                    )
-                                }
+                                SeekStepBadge(direction = lastSeekDirection, label = lastSeekStepLabel)
                             }
                         }
                         Text(
@@ -678,48 +685,77 @@ internal fun TvPlayerScreen(
 
                     if (playbackState.isRecordingPlayback) {
                         val dur = playbackState.durationMs.coerceAtLeast(1L)
-                        val stablePosSec = rememberStableDurationSec(playbackState.positionMs, playbackState.dvrEntryId)
+                        val shownPosMs = pendingSeekTargetMs ?: playbackState.positionMs
+                        val stablePosSec = rememberStableDurationSec(shownPosMs, playbackState.dvrEntryId)
                         val stableDurSec = rememberStableDurationSec(playbackState.durationMs, playbackState.dvrEntryId)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            LiveProgressBar(
-                                progress = (playbackState.positionMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f),
+                            TvSeekProgressBar(
+                                progress = (shownPosMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f),
                                 fillColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.Accent,
-                                height = 4.dp,
-                                modifier = Modifier.fillMaxWidth(),
+                                focused = progressFocused,
+                                focusRequester = progressFocusRequester,
+                                onFocusChanged = { progressFocused = it },
+                                onSeek = { triggerProgressiveSeek(it) },
+                                onConfirm = { confirmFromProgressBar() },
+                                onDown = { runCatching { playPauseFocusRequester.requestFocus() } },
                             )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(formatDurationSec(stablePosSec), style = MuxGridType.TabularSmall, color = Color.White)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(formatDurationSec(stablePosSec), style = MuxGridType.TabularSmall, color = Color.White)
+                                    if (seekOsdVisible && lastSeekStepLabel.isNotEmpty()) {
+                                        SeekStepBadge(direction = lastSeekDirection, label = lastSeekStepLabel)
+                                    }
+                                }
                                 Text(formatDurationSec(stableDurSec), style = MuxGridType.TabularSmall)
                             }
                         }
                     } else if (playbackState.isTimeshiftSeekable) {
                         val bufWindow = playbackState.bufferWindowMs.coerceAtLeast(1L)
-                        val frac = ((playbackState.positionMs - playbackState.bufferStartMs).toFloat() / bufWindow.toFloat()).coerceIn(0f, 1f)
-                        val stableOffsetSec = rememberStableDurationSec(playbackState.liveEdgeOffsetMs, playbackState.channelId)
+                        val shownPosMs = pendingSeekTargetMs ?: playbackState.positionMs
+                        val frac = ((shownPosMs - playbackState.bufferStartMs).toFloat() / bufWindow.toFloat()).coerceIn(0f, 1f)
+                        val shownOffsetMs = (playbackState.bufferEndMs - shownPosMs).coerceAtLeast(0L)
+                        val stableOffsetSec = rememberStableDurationSec(shownOffsetMs, playbackState.channelId)
                         val stableBufSec = rememberStableDurationSec(bufWindow, playbackState.channelId)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            LiveProgressBar(
+                            TvSeekProgressBar(
                                 progress = frac,
                                 fillColor = MuxGridColors.Accent,
-                                height = 4.dp,
-                                modifier = Modifier.fillMaxWidth(),
+                                focused = progressFocused,
+                                focusRequester = progressFocusRequester,
+                                onFocusChanged = { progressFocused = it },
+                                onSeek = { triggerProgressiveSeek(it) },
+                                onConfirm = { confirmFromProgressBar() },
+                                onDown = { runCatching { playPauseFocusRequester.requestFocus() } },
                             )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(
-                                    text = if (playbackState.isBehindLive) {
-                                        "-${formatDurationSec(stableOffsetSec)} behind live"
-                                    } else {
-                                        "LIVE"
-                                    },
-                                    style = MuxGridType.TabularSmall,
-                                    color = if (playbackState.isBehindLive) MuxGridColors.AccentSoft else MuxGridColors.CoralLive,
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        text = if (shownOffsetMs >= 2_000L) {
+                                            "-${formatDurationSec(stableOffsetSec)} behind live"
+                                        } else {
+                                            "LIVE"
+                                        },
+                                        style = MuxGridType.TabularSmall,
+                                        color = if (shownOffsetMs >= 2_000L) MuxGridColors.AccentSoft else MuxGridColors.CoralLive,
+                                    )
+                                    if (seekOsdVisible && lastSeekStepLabel.isNotEmpty()) {
+                                        SeekStepBadge(direction = lastSeekDirection, label = lastSeekStepLabel)
+                                    }
+                                }
                                 Text(
                                     text = "Timeshift buffer ${formatDurationSec(stableBufSec)}",
                                     style = MuxGridType.TabularSmall,
@@ -729,6 +765,18 @@ internal fun TvPlayerScreen(
                     }
 
                     Row(
+                        modifier = Modifier.onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyDown &&
+                                keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP
+                            ) {
+                                if (canSeekTimeline) {
+                                    runCatching { progressFocusRequester.requestFocus() }
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        },
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -941,6 +989,106 @@ internal fun TvPlayerScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun SeekStepBadge(
+    direction: Int,
+    label: String,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(
+            imageVector = if (direction < 0) MuxGridIcons.FastRewind else MuxGridIcons.FastForward,
+            contentDescription = null,
+            tint = MuxGridColors.AccentSoft,
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            text = label,
+            color = MuxGridColors.AccentSoft,
+            style = MuxGridType.TabularSmall,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun TvSeekProgressBar(
+    progress: Float,
+    fillColor: Color,
+    focused: Boolean,
+    focusRequester: FocusRequester,
+    onFocusChanged: (Boolean) -> Unit,
+    onSeek: (Int) -> Unit,
+    onConfirm: () -> Unit,
+    onDown: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    DisposableEffect(Unit) {
+        onDispose { onFocusChanged(false) }
+    }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(26.dp)
+            .onPreviewKeyEvent { keyEvent ->
+                val code = keyEvent.nativeKeyEvent.keyCode
+                val isConfirmKey = code == KeyEvent.KEYCODE_DPAD_CENTER ||
+                    code == KeyEvent.KEYCODE_ENTER ||
+                    code == KeyEvent.KEYCODE_NUMPAD_ENTER
+                if (keyEvent.type == KeyEventType.KeyUp) {
+                    return@onPreviewKeyEvent isConfirmKey
+                }
+                if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (code) {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> {
+                        onSeek(-1)
+                        true
+                    }
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                        onSeek(1)
+                        true
+                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        onDown()
+                        true
+                    }
+                    KeyEvent.KEYCODE_DPAD_UP -> true
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        onConfirm()
+                        true
+                    }
+                    else -> false
+                }
+            }
+            .onFocusChanged { onFocusChanged(it.isFocused) }
+            .focusRequester(focusRequester)
+            .focusable()
+            .clip(MuxGridShapes.Sm)
+            .then(
+                if (focused) {
+                    Modifier
+                        .background(MuxGridColors.CardSurfaceElevated)
+                        .border(MuxGridBorders.Focused, MuxGridColors.FocusBorder, MuxGridShapes.Sm)
+                } else {
+                    Modifier
+                },
+            )
+            .padding(horizontal = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        LiveProgressBar(
+            progress = progress,
+            fillColor = fillColor,
+            height = if (focused) 6.dp else 4.dp,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
