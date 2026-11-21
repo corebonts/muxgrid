@@ -40,7 +40,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -55,7 +54,6 @@ class TvheadendRepository(
     private val settings = SettingsRepository(context.applicationContext, formFactor)
     private val htspClient = HtspClient(scope = scope, awaitConsumerSyncAck = true)
     private val vfsClient = HtspVfsClient(profileProvider = { serverProfile.value ?: ServerProfile(host = "") })
-    private val epgDiskCache = EpgDiskCache(File(context.applicationContext.filesDir, "epg_cache.dat"))
     private var backgroundDisconnectJob: Job? = null
     private val store = TvheadendStore(
         epochSecondsProvider = {
@@ -108,6 +106,12 @@ class TvheadendRepository(
     init {
         scope.coroutineContext[Job]?.invokeOnCompletion {
             vfsClient.close()
+        }
+        // Clean up legacy epg_cache.dat files from older versions
+        scope.launch(Dispatchers.IO) {
+            val filesDir = context.applicationContext.filesDir
+            runCatching { File(filesDir, "epg_cache.dat").delete() }
+            runCatching { File(filesDir, "epg_cache.dat.tmp").delete() }
         }
         scope.launch {
             settings.localDvrProgress.collect { localProgress ->
@@ -219,15 +223,7 @@ class TvheadendRepository(
                         val switchedServer = previousServerKey != null
                         if (switchedServer) {
                             htspClient.disconnect()
-                            store.seedCachedEvents(emptyList(), clearExisting = true)
-                            previousServerKey = ""
-                        }
-                        if (serverKey.isNotEmpty()) {
-                            val minStopSec = currentServerEpochSec() - TvheadendStore.EPG_PAST_RETENTION_SEC
-                            val cached = withContext(Dispatchers.IO) {
-                                epgDiskCache.load(serverKey, minStopSec)
-                            }
-                            store.seedCachedEvents(cached, clearExisting = false)
+                            store.clear()
                         }
                         previousServerKey = serverKey
                     }
@@ -237,18 +233,6 @@ class TvheadendRepository(
                         htspClient.disconnect()
                     }
                 }
-        }
-        // Persist recent EPG events (debounced) off the main thread so past shows survive restarts
-        scope.launch(Dispatchers.IO) {
-            store.epgByChannel.collectLatest { epgMap ->
-                if (epgMap.isEmpty()) return@collectLatest
-                delay(3_000L)
-                val serverKey = serverProfile.value?.serverKey.orEmpty()
-                if (serverKey.isEmpty()) return@collectLatest
-                val minStopSec = currentServerEpochSec() - TvheadendStore.EPG_PAST_RETENTION_SEC
-                val allEvents = epgMap.values.flatten()
-                epgDiskCache.save(serverKey, allEvents, minStopSec)
-            }
         }
         // Refresh Now/Next progress & transitions every 15 s off the main thread
         scope.launch(Dispatchers.Default) {

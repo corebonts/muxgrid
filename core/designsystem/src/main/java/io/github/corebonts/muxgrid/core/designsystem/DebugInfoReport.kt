@@ -35,7 +35,6 @@ data class DebugEnvironmentSnapshot(
     val cacheUsedBytes: Long?,
     val piconCacheBytes: Long?,
     val timeshiftCacheBytes: Long?,
-    val epgCacheBytes: Long?,
     val freeStorageBytes: Long?,
     val totalStorageBytes: Long?,
     val decoderPreset: HwDecPreset,
@@ -72,10 +71,9 @@ fun collectDebugEnvironmentSnapshot(
     }.getOrNull()
 
     val cacheDir = context.cacheDir
-    val cacheSizes = measureCacheDirectorySizes(cacheDir, File(context.filesDir, "epg_cache.dat"))
+    val cacheSizes = measureCacheDirectorySizes(cacheDir)
     val piconCacheBytes = cacheSizes.piconCacheBytes
     val timeshiftCacheBytes = cacheSizes.timeshiftCacheBytes
-    val epgCacheBytes = cacheSizes.epgCacheBytes
     val cacheUsedBytes = cacheSizes.totalCacheBytes
     val storageStats = runCatching {
         val target = cacheDir.apply { mkdirs() }
@@ -128,7 +126,6 @@ fun collectDebugEnvironmentSnapshot(
         cacheUsedBytes = cacheUsedBytes,
         piconCacheBytes = piconCacheBytes,
         timeshiftCacheBytes = timeshiftCacheBytes,
-        epgCacheBytes = epgCacheBytes,
         freeStorageBytes = storageStats?.first,
         totalStorageBytes = storageStats?.second,
         decoderPreset = hwDecPreset,
@@ -143,17 +140,14 @@ fun collectDebugEnvironmentSnapshot(
 internal data class CacheDirectorySizes(
     val piconCacheBytes: Long?,
     val timeshiftCacheBytes: Long?,
-    val epgCacheBytes: Long?,
     val totalCacheBytes: Long?,
 )
 
 internal fun measureCacheDirectorySizes(
     cacheDir: File,
-    epgCacheFile: File,
 ): CacheDirectorySizes {
     val piconCacheBytes = runCatching { fileOrDirectorySizeBytes(File(cacheDir, "picon_cache")) }.getOrNull()
     val timeshiftCacheBytes = runCatching { fileOrDirectorySizeBytes(File(cacheDir, "mpv-cache")) }.getOrNull()
-    val epgCacheBytes = runCatching { fileOrDirectorySizeBytes(epgCacheFile) }.getOrNull()
     val otherCacheBytes = runCatching {
         if (!cacheDir.exists() || Files.isSymbolicLink(cacheDir.toPath()) || !cacheDir.isDirectory) {
             0L
@@ -169,20 +163,14 @@ internal fun measureCacheDirectorySizes(
         }
     }.getOrNull()
 
-    val cacheDirTotal = if (piconCacheBytes != null || timeshiftCacheBytes != null || otherCacheBytes != null) {
+    val totalCacheBytes = if (piconCacheBytes != null || timeshiftCacheBytes != null || otherCacheBytes != null) {
         (piconCacheBytes ?: 0L) + (timeshiftCacheBytes ?: 0L) + (otherCacheBytes ?: 0L)
     } else {
         null
     }
-    val totalCacheBytes = when {
-        cacheDirTotal != null && epgCacheBytes != null -> cacheDirTotal + epgCacheBytes
-        cacheDirTotal != null -> cacheDirTotal
-        else -> epgCacheBytes
-    }
     return CacheDirectorySizes(
         piconCacheBytes = piconCacheBytes,
         timeshiftCacheBytes = timeshiftCacheBytes,
-        epgCacheBytes = epgCacheBytes,
         totalCacheBytes = totalCacheBytes,
     )
 }
@@ -237,7 +225,6 @@ fun formatDebugInfoReport(snapshot: DebugEnvironmentSnapshot): String {
         val parts = listOfNotNull(
             snapshot.piconCacheBytes?.let { "Picons ${formatByteCount(it)}" },
             snapshot.timeshiftCacheBytes?.let { "Timeshift ${formatByteCount(it)}" },
-            snapshot.epgCacheBytes?.let { "EPG ${formatByteCount(it)}" },
         )
         if (parts.isNotEmpty()) {
             "${formatByteCount(total)} (${parts.joinToString(", ")})"

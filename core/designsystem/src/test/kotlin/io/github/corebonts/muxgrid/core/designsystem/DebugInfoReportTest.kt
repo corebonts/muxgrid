@@ -32,10 +32,9 @@ class DebugInfoReportTest {
             displayWidthPx = 1920,
             displayHeightPx = 1080,
             densityDpi = 320,
-            cacheUsedBytes = 12L * 1024L * 1024L + 512L * 1024L,
+            cacheUsedBytes = 12L * 1024L * 1024L,
             piconCacheBytes = 4L * 1024L * 1024L,
             timeshiftCacheBytes = 8L * 1024L * 1024L,
-            epgCacheBytes = 512L * 1024L,
             freeStorageBytes = 3L * 1024L * 1024L * 1024L + 220L * 1024L * 1024L,
             totalStorageBytes = 8L * 1024L * 1024L * 1024L,
             decoderPreset = HwDecPreset.MEDIACODEC_ZERO_COPY,
@@ -55,7 +54,7 @@ class DebugInfoReportTest {
         assertTrue(report.contains("ABIs: armeabi-v7a, armeabi"))
         assertTrue(report.contains("RAM: 2.0 GB (2048 MB)"))
         assertTrue(report.contains("Display: 1920x1080 (320 dpi)"))
-        assertTrue(report.contains("Cache Used: 12.5 MB (Picons 4.0 MB, Timeshift 8.0 MB, EPG 512 KB)"))
+        assertTrue(report.contains("Cache Used: 12.0 MB (Picons 4.0 MB, Timeshift 8.0 MB)"))
         assertTrue(report.contains("Storage Free: 3.2 GB / 8.0 GB"))
         assertTrue(report.contains("Decoder: MEDIACODEC_ZERO_COPY"))
         assertTrue(report.contains("Server: Tvheadend 4.3-2375 (HTSP v34)"))
@@ -76,18 +75,15 @@ class DebugInfoReportTest {
     }
 
     @Test
-    fun `measureCacheDirectorySizes sums subcaches and epg file without double counting`(@TempDir tempDir: Path) {
+    fun `measureCacheDirectorySizes sums subcaches without double counting`(@TempDir tempDir: Path) {
         val cacheDir = File(tempDir.toFile(), "cache").apply { mkdirs() }
-        val filesDir = File(tempDir.toFile(), "files").apply { mkdirs() }
         File(cacheDir, "picon_cache").apply { mkdirs() }.let { File(it, "1.png").writeBytes(ByteArray(100)) }
         File(cacheDir, "mpv-cache").apply { mkdirs() }.let { File(it, "buf.bin").writeBytes(ByteArray(250)) }
         File(cacheDir, "misc.tmp").writeBytes(ByteArray(50))
-        val epgFile = File(filesDir, "epg_cache.dat").apply { writeBytes(ByteArray(300)) }
 
-        val breakdown = measureCacheDirectorySizes(cacheDir, epgFile)
+        val breakdown = measureCacheDirectorySizes(cacheDir)
         assertEquals(100L, breakdown.piconCacheBytes)
         assertEquals(250L, breakdown.timeshiftCacheBytes)
-        assertEquals(300L, breakdown.epgCacheBytes)
-        assertEquals(700L, breakdown.totalCacheBytes)
+        assertEquals(400L, breakdown.totalCacheBytes)
     }
 }
