@@ -1,6 +1,6 @@
-# MuxGrid — Tvheadend Client for Android & Android TV
-
-<img src="./docs/assets/muxgrid-icon.svg" alt="MuxGrid icon" width="72" />
+<p align="center">
+  <img src="./docs/assets/muxgrid-banner.jpg" alt="MuxGrid — Modern Tvheadend client for Android & Android TV (Live TV, EPG Guide, Recordings)" width="100%" />
+</p>
 
 A lightweight, native Android and Android TV client for **Tvheadend** (`4.3+`), built for sub-second channel zapping, local live pause/rewind (timeshift), smooth playback of completed and actively recording DVR shows, background audio playback on mobile, and a low-glare **Broadcast Monitor** dark interface (Carbon & Signal Amber).
 
