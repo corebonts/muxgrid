@@ -34,14 +34,20 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.file.Files
 import java.util.Locale
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * [PlaybackEngine] backed by `libmpv` (`mpv-android-lib`) and [LocalMediaProxy].
@@ -115,10 +121,25 @@ class MpvPlaybackEngine(
     private var prevCpuTimeMs: Long = -1L
     private var prevCpuWallMs: Long = 0L
     private var lastCpuPercent: Double? = null
+    @Volatile
     private var lastMemorySampleElapsedMs: Long = 0L
+    @Volatile
     private var cachedMemoryStats: MemorySnapshot? = null
+    @Volatile
     private var lastDiskCacheSampleElapsedMs: Long = 0L
+    @Volatile
     private var cachedDiskCacheBytes: Long? = null
+    @Volatile
+    private var mpvReportsFileCacheBytes: Boolean = false
+
+    private val destroyed = AtomicBoolean(false)
+    private val playbackGeneration = AtomicLong(0L)
+
+    @Volatile
+    private var pendingLoadGeneration: Long = 0L
+
+    @Volatile
+    private var startedMpvGeneration: Long = 0L
 
     @Volatile
     private var mpv: MPV? = null
@@ -126,8 +147,16 @@ class MpvPlaybackEngine(
     @Volatile
     private var hasSurface: Boolean = false
 
+    private var attachedSurface: Surface? = null
+    private var attachedSurfaceWidth: Int = 0
+    private var attachedSurfaceHeight: Int = 0
+    private var surfaceAttachedToMpv: Boolean = false
+
     @Volatile
     private var pendingUrl: String? = null
+
+    @Volatile
+    private var pendingUrlGeneration: Long = 0L
 
     @Volatile
     private var activeChannel: Channel? = null
@@ -182,8 +211,8 @@ class MpvPlaybackEngine(
         onPauseRequested = { setPaused(true) },
         onResumeRequested = { setPaused(false) },
         onDuckChanged = { ducked ->
-            mpvExecutor.execute {
-                val instance = mpv ?: return@execute
+            submitMpvTask {
+                val instance = mpv ?: return@submitMpvTask
                 if (instance.isInitialized) {
                     instance.setPropertyDouble("volume", if (ducked) 25.0 else 100.0)
                 }
@@ -195,23 +224,39 @@ class MpvPlaybackEngine(
     private var noticeClearJob: Job? = null
 
     init {
-        mpvExecutor.execute {
+        submitMpvTask {
             initMpvLocked()
         }
         engineScope.launch {
-            _state.collect { st ->
-                when (st.status) {
-                    PlaybackStatus.IDLE, PlaybackStatus.ERROR -> platformLocks.onPlaybackStopped()
-                    PlaybackStatus.BUFFERING, PlaybackStatus.PLAYING, PlaybackStatus.PAUSED -> {
-                        if (st.status == PlaybackStatus.PLAYING) {
-                            PlaybackSessionHost.ensureServiceStarted(context)
+            _state
+                .map { Triple(it.status, it.isPaused, it.isRadio) }
+                .distinctUntilChanged()
+                .collect { (status, isPaused, isRadio) ->
+                    when (status) {
+                        PlaybackStatus.IDLE, PlaybackStatus.ERROR -> platformLocks.onPlaybackStopped()
+                        PlaybackStatus.BUFFERING, PlaybackStatus.PLAYING, PlaybackStatus.PAUSED -> {
+                            if (status == PlaybackStatus.PLAYING) {
+                                PlaybackSessionHost.ensureServiceStarted(context)
+                            }
+                            val active = !isPaused &&
+                                (status == PlaybackStatus.PLAYING || status == PlaybackStatus.BUFFERING)
+                            platformLocks.onPlaybackActive(isRadio = isRadio, isPlayingOrBuffering = active)
                         }
-                        val active = !st.isPaused &&
-                            (st.status == PlaybackStatus.PLAYING || st.status == PlaybackStatus.BUFFERING)
-                        platformLocks.onPlaybackActive(isRadio = st.isRadio, isPlayingOrBuffering = active)
                     }
                 }
+        }
+    }
+
+    private inline fun submitMpvTask(crossinline block: () -> Unit) {
+        if (destroyed.get() || mpvExecutor.isShutdown) return
+        try {
+            mpvExecutor.execute {
+                if (!destroyed.get()) {
+                    block()
+                }
             }
+        } catch (_: RejectedExecutionException) {
+            // Engine was destroyed concurrently
         }
     }
 
@@ -273,6 +318,7 @@ class MpvPlaybackEngine(
     }
 
     override fun playChannel(channel: Channel, preset: HwDecPreset) {
+        val gen = playbackGeneration.incrementAndGet()
         activeChannel = channel
         activeDvrEntry = null
         currentPreset = preset
@@ -308,10 +354,13 @@ class MpvPlaybackEngine(
         val url = liveStrategy.resolveLiveUrl(channel.id)
         val requestedWindow = currentTimeshiftWindow
         Log.i(TAG, "playChannel id=${channel.id} (${channel.name}) timeshift=$requestedWindow mode=live")
-        mpvExecutor.execute {
-            val instance = ensureMpvLocked() ?: return@execute
+        submitMpvTask {
+            if (playbackGeneration.get() != gen || explicitlyStopped) return@submitMpvTask
+            val instance = ensureMpvLocked() ?: return@submitMpvTask
+            if (instance.isInitialized) {
+                instance.command("stop")
+            }
             liveStrategy.stopActive()
-            instance.command("stop")
             applyPresetOnInstance(instance, preset)
             applyAspectModeLocked(instance, currentAspectMode)
             applySubtitlePreferenceLocked(instance, currentSubtitlePreference)
@@ -323,14 +372,17 @@ class MpvPlaybackEngine(
             instance.setPropertyBoolean("pause", false)
             if (hasSurface || channel.isRadio) {
                 pendingUrl = null
+                pendingUrlGeneration = 0L
+                pendingLoadGeneration = gen
                 val rc = instance.command("loadfile", url)
                 Log.i(TAG, "loadfile immediate channel=${channel.id} rc=$rc")
             } else {
                 pendingUrl = url
+                pendingUrlGeneration = gen
                 Log.i(TAG, "loadfile deferred until surfaceCreated channel=${channel.id}")
             }
         }
-        startCacheMonitor()
+        startCacheMonitor(gen)
     }
 
     override fun playDvrEntry(
@@ -339,6 +391,7 @@ class MpvPlaybackEngine(
         preset: HwDecPreset,
         startPositionSec: Long,
     ) {
+        val gen = playbackGeneration.incrementAndGet()
         activeChannel = channel
         activeDvrEntry = entry
         currentPreset = preset
@@ -391,10 +444,13 @@ class MpvPlaybackEngine(
         }
         val mode = if (isGrowing) "growing" else "dvr"
         Log.i(TAG, "playDvrEntry id=${entry.id} (${entry.title}) mode=$mode start=${resumeSec}s")
-        mpvExecutor.execute {
-            val instance = ensureMpvLocked() ?: return@execute
+        submitMpvTask {
+            if (playbackGeneration.get() != gen || explicitlyStopped) return@submitMpvTask
+            val instance = ensureMpvLocked() ?: return@submitMpvTask
+            if (instance.isInitialized) {
+                instance.command("stop")
+            }
             proxy.stopActiveStream()
-            instance.command("stop")
             applyPresetOnInstance(instance, preset)
             applyAspectModeLocked(instance, currentAspectMode)
             applySubtitlePreferenceLocked(instance, currentSubtitlePreference)
@@ -406,21 +462,26 @@ class MpvPlaybackEngine(
             instance.setPropertyBoolean("pause", false)
             if (hasSurface || (channel?.isRadio == true)) {
                 pendingUrl = null
+                pendingUrlGeneration = 0L
+                pendingLoadGeneration = gen
                 val rc = instance.command("loadfile", url)
                 Log.i(TAG, "loadfile DVR immediate id=${entry.id} rc=$rc")
             } else {
                 pendingUrl = url
+                pendingUrlGeneration = gen
                 Log.i(TAG, "loadfile DVR deferred until surfaceCreated id=${entry.id}")
             }
         }
-        startCacheMonitor()
+        startCacheMonitor(gen)
     }
 
     override fun stop() {
+        playbackGeneration.incrementAndGet()
         explicitlyStopped = true
         explicitAudioOnly = false
         hadFileLoaded = false
         pendingUrl = null
+        pendingUrlGeneration = 0L
         activeChannel = null
         activeDvrEntry = null
         lastPositionEmitElapsedMs = 0L
@@ -438,21 +499,21 @@ class MpvPlaybackEngine(
         _diagnostics.value = PlaybackDiagnostics()
         sessionStartElapsedMs = 0L
 
-        mpvExecutor.execute {
-            liveStrategy.stopActive()
-            val instance = mpv ?: return@execute
-            if (instance.isInitialized) {
+        submitMpvTask {
+            val instance = mpv
+            if (instance != null && instance.isInitialized) {
                 instance.command("stop")
                 instance.setPropertyString("start", "none")
                 instance.setPropertyString("force-seekable", "no")
                 instance.setPropertyString("vid", "auto")
             }
+            liveStrategy.stopActive()
         }
     }
 
     override fun togglePause() {
-        mpvExecutor.execute {
-            val instance = mpv ?: return@execute
+        submitMpvTask {
+            val instance = mpv ?: return@submitMpvTask
             if (instance.isInitialized) {
                 val paused = instance.getPropertyBoolean("pause") ?: false
                 if (paused) {
@@ -467,8 +528,8 @@ class MpvPlaybackEngine(
         if (!paused) {
             platformLocks.requestFocusForStart(isRadio = activeChannel?.isRadio == true)
         }
-        mpvExecutor.execute {
-            val instance = mpv ?: return@execute
+        submitMpvTask {
+            val instance = mpv ?: return@submitMpvTask
             if (instance.isInitialized) {
                 instance.setPropertyBoolean("pause", paused)
             }
@@ -479,8 +540,8 @@ class MpvPlaybackEngine(
         val current = _state.value
         val clampedMs = clampSeekTargetMs(current, positionMs)
         lastPositionEmitElapsedMs = 0L
-        mpvExecutor.execute {
-            val instance = mpv ?: return@execute
+        submitMpvTask {
+            val instance = mpv ?: return@submitMpvTask
             if (instance.isInitialized) {
                 val secStr = String.format(Locale.US, "%.3f", clampedMs / 1000.0)
                 instance.command("seek", secStr, "absolute")
@@ -494,8 +555,8 @@ class MpvPlaybackEngine(
             seekTo(current.positionMs + deltaMs)
             return
         }
-        mpvExecutor.execute {
-            val instance = mpv ?: return@execute
+        submitMpvTask {
+            val instance = mpv ?: return@submitMpvTask
             if (instance.isInitialized) {
                 val secStr = String.format(Locale.US, "%.3f", deltaMs / 1000.0)
                 instance.command("seek", secStr, "relative")
@@ -504,9 +565,9 @@ class MpvPlaybackEngine(
     }
 
     override fun seekToLiveEdge() {
-        mpvExecutor.execute {
-            val instance = mpv ?: return@execute
-            if (!instance.isInitialized || activeChannel == null || activeDvrEntry != null) return@execute
+        submitMpvTask {
+            val instance = mpv ?: return@submitMpvTask
+            if (!instance.isInitialized || activeChannel == null || activeDvrEntry != null) return@submitMpvTask
             val (_, endSec) = readSeekableCacheRangeSecLocked(instance)
             val fallbackEnd = runCatching { instance.getPropertyDouble("demuxer-cache-time") }.getOrNull()
             val liveSec = endSec ?: fallbackEnd
@@ -521,8 +582,8 @@ class MpvPlaybackEngine(
     }
 
     override fun setAudioTrack(trackId: Int) {
-        mpvExecutor.execute {
-            val instance = mpv ?: return@execute
+        submitMpvTask {
+            val instance = mpv ?: return@submitMpvTask
             if (instance.isInitialized) {
                 instance.setPropertyInt("aid", trackId)
                 refreshTracksLocked(instance)
@@ -548,8 +609,8 @@ class MpvPlaybackEngine(
         currentSubtitlePreference = nextPref
         runCatching { onSubtitlePreferenceChanged(nextPref) }
 
-        mpvExecutor.execute {
-            val instance = mpv ?: return@execute
+        submitMpvTask {
+            val instance = mpv ?: return@submitMpvTask
             if (instance.isInitialized) {
                 runCatching {
                     if (trackId == null) {
@@ -567,8 +628,8 @@ class MpvPlaybackEngine(
 
     override fun applyPreset(preset: HwDecPreset) {
         currentPreset = preset
-        mpvExecutor.execute {
-            val instance = mpv ?: return@execute
+        submitMpvTask {
+            val instance = mpv ?: return@submitMpvTask
             if (instance.isInitialized) {
                 applyPresetOnInstance(instance, preset)
             }
@@ -581,8 +642,8 @@ class MpvPlaybackEngine(
 
     override fun setSubtitlePreference(preference: SubtitlePreference) {
         currentSubtitlePreference = preference
-        mpvExecutor.execute {
-            val instance = mpv ?: return@execute
+        submitMpvTask {
+            val instance = mpv ?: return@submitMpvTask
             if (instance.isInitialized && !hadFileLoaded && activeChannel == null && activeDvrEntry == null) {
                 applySubtitlePreferenceLocked(instance, preference)
             }
@@ -605,17 +666,18 @@ class MpvPlaybackEngine(
         val effective = audioOnly || (activeChannel?.isRadio == true)
         explicitAudioOnly = effective
         _state.update { it.copy(isAudioOnly = effective) }
-        mpvExecutor.execute {
-            val instance = mpv ?: return@execute
-            if (!instance.isInitialized) return@execute
+        submitMpvTask {
+            val instance = mpv ?: return@submitMpvTask
+            if (!instance.isInitialized) return@submitMpvTask
             if (effective) {
                 instance.setPropertyString("vid", "no")
                 instance.setPropertyString("vo", "null")
                 instance.setPropertyString("force-window", "no")
-            } else if (hasSurface) {
-                instance.setPropertyString("vid", "auto")
-                instance.setOptionString("force-window", "yes")
-                instance.setPropertyString("vo", "gpu")
+            } else {
+                val surface = attachedSurface
+                if (surface != null && surface.isValid) {
+                    attachVideoOutputLocked(instance, surface, attachedSurfaceWidth, attachedSurfaceHeight)
+                }
             }
         }
     }
@@ -623,8 +685,8 @@ class MpvPlaybackEngine(
     override fun setVideoAspectMode(mode: VideoAspectMode) {
         currentAspectMode = mode
         _state.update { it.copy(aspectMode = mode) }
-        mpvExecutor.execute {
-            val instance = mpv ?: return@execute
+        submitMpvTask {
+            val instance = mpv ?: return@submitMpvTask
             if (instance.isInitialized) {
                 applyAspectModeLocked(instance, mode)
             }
@@ -634,43 +696,65 @@ class MpvPlaybackEngine(
     override fun setDiagnosticsEnabled(enabled: Boolean) {
         diagnosticsEnabled = enabled
         if (enabled && !explicitlyStopped) {
-            mpvExecutor.execute {
-                val instance = mpv ?: return@execute
-                if (instance.isInitialized && !explicitlyStopped) {
-                    collectDiagnosticsLocked(instance)
+            val gen = playbackGeneration.get()
+            engineScope.launch {
+                if (explicitlyStopped || playbackGeneration.get() != gen) return@launch
+                refreshSystemDiagnosticsOffMpvThread()
+                submitMpvTask {
+                    if (explicitlyStopped || playbackGeneration.get() != gen) return@submitMpvTask
+                    val instance = mpv ?: return@submitMpvTask
+                    if (instance.isInitialized) {
+                        collectDiagnosticsLocked(instance, preloadedCacheMap = null)
+                    }
                 }
             }
         }
     }
 
     override fun attachSurface(surface: Surface, width: Int, height: Int) {
-        mpvExecutor.execute {
-            val instance = mpv ?: return@execute
-            if (!instance.isInitialized) return@execute
+        submitMpvTask {
+            val instance = mpv ?: return@submitMpvTask
+            if (!instance.isInitialized) return@submitMpvTask
+            if (attachedSurface != null && attachedSurface !== surface && surfaceAttachedToMpv) {
+                instance.detachSurface()
+                surfaceAttachedToMpv = false
+            }
+            attachedSurface = surface
+            attachedSurfaceWidth = width
+            attachedSurfaceHeight = height
+            hasSurface = true
             val audioOnly = explicitAudioOnly || (activeChannel?.isRadio == true)
             if (audioOnly) {
-                hasSurface = false
                 instance.setPropertyString("vid", "no")
                 instance.setPropertyString("vo", "null")
                 instance.setPropertyString("force-window", "no")
-                return@execute
-            }
-            hasSurface = true
-            instance.attachSurface(surface)
-            instance.setPropertyString("vid", "auto")
-            instance.setOptionString("force-window", "yes")
-            instance.setPropertyString("vo", "gpu")
-            applyAspectModeLocked(instance, currentAspectMode)
-            if (width > 0 && height > 0) {
-                instance.setPropertyString("android-surface-size", "${width}x${height}")
+            } else {
+                attachVideoOutputLocked(instance, surface, width, height)
             }
             val urlToLoad = pendingUrl
-            pendingUrl = null
-            if (urlToLoad != null && !explicitlyStopped) {
+            val urlGen = pendingUrlGeneration
+            if (urlToLoad != null && !explicitlyStopped && playbackGeneration.get() == urlGen) {
+                pendingUrl = null
+                pendingUrlGeneration = 0L
                 instance.setPropertyBoolean("pause", false)
+                pendingLoadGeneration = urlGen
                 val rc = instance.command("loadfile", urlToLoad)
                 Log.i(TAG, "loadfile on attachSurface rc=$rc")
             }
+        }
+    }
+
+    private fun attachVideoOutputLocked(instance: MPV, surface: Surface, width: Int, height: Int) {
+        if (!surfaceAttachedToMpv) {
+            instance.attachSurface(surface)
+            surfaceAttachedToMpv = true
+        }
+        instance.setPropertyString("vid", "auto")
+        instance.setPropertyString("force-window", "yes")
+        instance.setPropertyString("vo", "gpu")
+        applyAspectModeLocked(instance, currentAspectMode)
+        if (width > 0 && height > 0) {
+            instance.setPropertyString("android-surface-size", "${width}x${height}")
         }
     }
 
@@ -683,28 +767,37 @@ class MpvPlaybackEngine(
 
     override fun updateSurfaceSize(width: Int, height: Int) {
         if (width <= 0 || height <= 0) return
-        mpvExecutor.execute {
-            val instance = mpv ?: return@execute
-            if (instance.isInitialized && hasSurface) {
+        submitMpvTask {
+            attachedSurfaceWidth = width
+            attachedSurfaceHeight = height
+            val instance = mpv ?: return@submitMpvTask
+            if (instance.isInitialized && hasSurface && surfaceAttachedToMpv) {
                 instance.setPropertyString("android-surface-size", "${width}x${height}")
             }
         }
     }
 
     override fun detachSurface() {
+        if (destroyed.get() || mpvExecutor.isShutdown) return
         // SurfaceHolder.Callback.surfaceDestroyed requires the Surface to stop being used
         // before returning; wait briefly for mpv to disable vo=gpu and detach the ANativeWindow.
         val task = runCatching {
             mpvExecutor.submit {
-                if (!hasSurface) return@submit
+                if (!hasSurface && attachedSurface == null) return@submit
                 hasSurface = false
+                attachedSurface = null
+                attachedSurfaceWidth = 0
+                attachedSurfaceHeight = 0
                 val instance = mpv ?: return@submit
                 if (!instance.isInitialized) return@submit
                 // Disable video decode while backgrounded / audio-only so CPU & battery stay low
                 instance.setPropertyString("vid", "no")
                 instance.setPropertyString("vo", "null")
                 instance.setPropertyString("force-window", "no")
-                instance.detachSurface()
+                if (surfaceAttachedToMpv) {
+                    instance.detachSurface()
+                    surfaceAttachedToMpv = false
+                }
             }
         }.getOrNull() ?: return
         runCatching {
@@ -713,6 +806,8 @@ class MpvPlaybackEngine(
     }
 
     override fun destroy() {
+        if (!destroyed.compareAndSet(false, true)) return
+        playbackGeneration.incrementAndGet()
         explicitlyStopped = true
         cacheMonitorJob?.cancel()
         noticeClearJob?.cancel()
@@ -720,13 +815,18 @@ class MpvPlaybackEngine(
         liveStrategy.stopActive()
         proxy.close()
         engineScope.cancel()
-        mpvExecutor.execute {
-            val instance = mpv
-            mpv = null
-            if (instance != null) {
-                runCatching { instance.removeObserver(mpvEventObserver) }
-                runCatching { instance.close() }
+        try {
+            mpvExecutor.execute {
+                val instance = mpv
+                mpv = null
+                attachedSurface = null
+                surfaceAttachedToMpv = false
+                if (instance != null) {
+                    runCatching { instance.removeObserver(mpvEventObserver) }
+                    runCatching { instance.close() }
+                }
             }
+        } catch (_: RejectedExecutionException) {
         }
         mpvExecutor.shutdown()
     }
@@ -791,27 +891,50 @@ class MpvPlaybackEngine(
         return minOf(requested.maxBytesPerDirection, maxPerDirection) to true
     }
 
-    private fun startCacheMonitor() {
+    private fun startCacheMonitor(gen: Long) {
         cacheMonitorJob?.cancel()
         cacheMonitorJob = engineScope.launch {
-            while (isActive && !explicitlyStopped) {
+            while (isActive && !explicitlyStopped && playbackGeneration.get() == gen) {
                 delay(CACHE_POLL_INTERVAL_MS)
-                if (explicitlyStopped) break
-                mpvExecutor.execute {
-                    val instance = mpv ?: return@execute
-                    if (!instance.isInitialized || explicitlyStopped) return@execute
+                if (explicitlyStopped || playbackGeneration.get() != gen) break
+                if (diagnosticsEnabled) {
+                    refreshSystemDiagnosticsOffMpvThread()
+                }
+                submitMpvTask {
+                    if (explicitlyStopped || playbackGeneration.get() != gen) return@submitMpvTask
+                    val instance = mpv ?: return@submitMpvTask
+                    if (!instance.isInitialized) return@submitMpvTask
                     val dvrEntry = activeDvrEntry
+                    var preloadedCacheMap: Map<String, `is`.xyz.mpv.MPVNode>? = null
                     if (dvrEntry != null) {
                         updateGrowingDvrStateLocked(dvrEntry)
                     } else if (activeChannel != null) {
-                        updateLiveTimeshiftStateLocked(instance)
+                        preloadedCacheMap = updateLiveTimeshiftStateLocked(instance)
                     }
                     if (diagnosticsEnabled) {
-                        collectDiagnosticsLocked(instance)
+                        collectDiagnosticsLocked(instance, preloadedCacheMap)
                     } else {
                         updateNetworkRateSampleLocked(SystemClock.elapsedRealtime())
                     }
                 }
+            }
+        }
+    }
+
+    private suspend fun refreshSystemDiagnosticsOffMpvThread() {
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val needMem = cachedMemoryStats == null || nowElapsed - lastMemorySampleElapsedMs >= 1_500L
+        val needDisk = currentCacheOnDisk && !mpvReportsFileCacheBytes &&
+            (cachedDiskCacheBytes == null || nowElapsed - lastDiskCacheSampleElapsedMs >= 2_000L)
+        if (!needMem && !needDisk) return
+        withContext(Dispatchers.IO) {
+            if (needMem) {
+                cachedMemoryStats = sampleMemoryStats()
+                lastMemorySampleElapsedMs = SystemClock.elapsedRealtime()
+            }
+            if (needDisk) {
+                cachedDiskCacheBytes = runCatching { measureDiskCacheBytes(mpvCacheDir) }.getOrNull()
+                lastDiskCacheSampleElapsedMs = SystemClock.elapsedRealtime()
             }
         }
     }
@@ -845,9 +968,9 @@ class MpvPlaybackEngine(
         }
     }
 
-    private fun updateLiveTimeshiftStateLocked(instance: MPV) {
+    private fun updateLiveTimeshiftStateLocked(instance: MPV): Map<String, `is`.xyz.mpv.MPVNode>? {
         val currentState = _state.value
-        if (currentState.status == PlaybackStatus.IDLE || currentState.status == PlaybackStatus.ERROR) return
+        if (currentState.status == PlaybackStatus.IDLE || currentState.status == PlaybackStatus.ERROR) return null
 
         val cacheNode = runCatching { instance.getPropertyNode("demuxer-cache-state") }.getOrNull()
         val cacheMap = runCatching { cacheNode?.asMap() }.getOrNull()
@@ -906,6 +1029,7 @@ class MpvPlaybackEngine(
                 )
             }
         }
+        return cacheMap
     }
 
     private fun readSeekableCacheRangeSecLocked(
@@ -981,12 +1105,7 @@ class MpvPlaybackEngine(
     private fun handleProxyFailure(channelId: Long, reason: String, isEmptyReply: Boolean) {
         if (explicitlyStopped || activeChannel?.id != channelId) return
         val conflict = conflictFinder(channelId)
-        val error: PlaybackError = if (conflict != null && isEmptyReply) {
-            PlaybackError.TunerBusy(
-                recordingTitle = conflict.first.title,
-                channelName = conflict.second,
-            )
-        } else if (conflict != null) {
+        val error: PlaybackError = if (conflict != null) {
             PlaybackError.TunerBusy(
                 recordingTitle = conflict.first.title,
                 channelName = conflict.second,
@@ -1000,6 +1119,12 @@ class MpvPlaybackEngine(
         }
     }
 
+    private fun isCurrentPlaybackEvent(): Boolean {
+        if (explicitlyStopped) return false
+        val started = startedMpvGeneration
+        return started != 0L && started == playbackGeneration.get()
+    }
+
     private val mpvEventObserver = object : MPV.EventObserver {
         override fun eventProperty(property: String) = onMpvProperty(property)
         override fun eventProperty(property: String, value: Long) = onMpvProperty(property, value)
@@ -1011,31 +1136,42 @@ class MpvPlaybackEngine(
     }
 
     private fun onMpvProperty(property: String) {
+        if (!isCurrentPlaybackEvent()) return
+        val eventGen = startedMpvGeneration
         if (property == "aid" || property == "sid") {
-            engineScope.launch {
-                mpvExecutor.execute {
-                    mpv?.takeIf { it.isInitialized }?.let { refreshTracksLocked(it) }
-                }
+            submitMpvTask {
+                if (explicitlyStopped || playbackGeneration.get() != eventGen) return@submitMpvTask
+                mpv?.takeIf { it.isInitialized }?.let { refreshTracksLocked(it) }
             }
         }
     }
 
     private fun onMpvProperty(property: String, value: Long) {
+        if (!isCurrentPlaybackEvent()) return
         when (property) {
-            "video-params/w" -> _state.update { it.copy(videoWidth = value.toInt()) }
-            "video-params/h" -> _state.update { it.copy(videoHeight = value.toInt()) }
+            "video-params/w" -> _state.update { current ->
+                if (current.status == PlaybackStatus.IDLE || current.status == PlaybackStatus.ERROR) current
+                else current.copy(videoWidth = value.toInt())
+            }
+            "video-params/h" -> _state.update { current ->
+                if (current.status == PlaybackStatus.IDLE || current.status == PlaybackStatus.ERROR) current
+                else current.copy(videoHeight = value.toInt())
+            }
         }
     }
 
     private fun onMpvProperty(property: String, value: Boolean) {
+        if (!isCurrentPlaybackEvent()) return
         when (property) {
             "pause" -> _state.update { current ->
-                val nextStatus = when {
-                    current.status == PlaybackStatus.ERROR || current.status == PlaybackStatus.IDLE -> current.status
-                    value -> PlaybackStatus.PAUSED
-                    else -> PlaybackStatus.PLAYING
+                if (current.status == PlaybackStatus.ERROR || current.status == PlaybackStatus.IDLE) {
+                    current
+                } else {
+                    current.copy(
+                        isPaused = value,
+                        status = if (value) PlaybackStatus.PAUSED else PlaybackStatus.PLAYING,
+                    )
                 }
-                current.copy(isPaused = value, status = nextStatus)
             }
             "core-idle" -> _state.update { current ->
                 if (current.status == PlaybackStatus.ERROR || current.status == PlaybackStatus.IDLE) {
@@ -1046,16 +1182,28 @@ class MpvPlaybackEngine(
                     current
                 }
             }
-            "seekable" -> _state.update { it.copy(isSeekable = value) }
+            "seekable" -> _state.update { current ->
+                if (current.status == PlaybackStatus.IDLE || current.status == PlaybackStatus.ERROR) current
+                else current.copy(isSeekable = value)
+            }
         }
     }
 
     private fun onMpvProperty(property: String, value: String) {
+        if (!isCurrentPlaybackEvent()) return
+        val eventGen = startedMpvGeneration
         when (property) {
-            "hwdec-current" -> _state.update { it.copy(hwdecCurrent = value) }
-            "deinterlace" -> _state.update { it.copy(deinterlaceActive = value == "yes" || value == "auto") }
+            "hwdec-current" -> _state.update { current ->
+                if (current.status == PlaybackStatus.IDLE || current.status == PlaybackStatus.ERROR) current
+                else current.copy(hwdecCurrent = value)
+            }
+            "deinterlace" -> _state.update { current ->
+                if (current.status == PlaybackStatus.IDLE || current.status == PlaybackStatus.ERROR) current
+                else current.copy(deinterlaceActive = value == "yes" || value == "auto")
+            }
             "aid", "sid" -> {
-                mpvExecutor.execute {
+                submitMpvTask {
+                    if (explicitlyStopped || playbackGeneration.get() != eventGen) return@submitMpvTask
                     mpv?.takeIf { it.isInitialized }?.let { refreshTracksLocked(it) }
                 }
             }
@@ -1063,6 +1211,7 @@ class MpvPlaybackEngine(
     }
 
     private fun onMpvProperty(property: String, value: Double) {
+        if (!isCurrentPlaybackEvent()) return
         when (property) {
             "time-pos" -> {
                 val posMs = (value * 1000.0).toLong().coerceAtLeast(0L)
@@ -1075,13 +1224,11 @@ class MpvPlaybackEngine(
                 lastPositionEmitElapsedMs = nowElapsed
                 lastEmittedPosMs = posMs
 
-                val estEndMs = if (timeshiftSmoother.isInitialized) {
-                    timeshiftSmoother.currentEstimatedEndMs(nowElapsed)
-                } else {
-                    0L
-                }
+                val estEndMs = timeshiftSmoother.currentEstimatedEndMs(nowElapsed)
                 _state.update { current ->
-                    if (!current.isRecordingPlayback && current.isTimeshiftSeekable && estEndMs > 0L) {
+                    if (current.status == PlaybackStatus.IDLE || current.status == PlaybackStatus.ERROR) {
+                        current
+                    } else if (!current.isRecordingPlayback && current.isTimeshiftSeekable && estEndMs > 0L) {
                         val nextEndMs = maxOf(current.bufferEndMs, estEndMs)
                         val nextWindowMs = (nextEndMs - current.bufferStartMs).coerceAtLeast(0L)
                         val nextOffsetMs = (nextEndMs - posMs).coerceAtLeast(0L)
@@ -1103,7 +1250,10 @@ class MpvPlaybackEngine(
                 if (durMs > 0L && kotlin.math.abs(durMs - lastObservedMpvDurationMs) >= 500L) {
                     lastObservedMpvDurationMs = durMs
                     _state.update { current ->
-                        if (!current.isRecordingPlayback) {
+                        if (current.status == PlaybackStatus.IDLE ||
+                            current.status == PlaybackStatus.ERROR ||
+                            !current.isRecordingPlayback
+                        ) {
                             current
                         } else if (current.isGrowingRecording) {
                             current.copy(durationMs = maxOf(current.durationMs, durMs))
@@ -1120,9 +1270,10 @@ class MpvPlaybackEngine(
         when (eventId) {
             MPV.mpvEvent.MPV_EVENT_SHUTDOWN -> {
                 Log.w(TAG, "MPV_EVENT_SHUTDOWN received; resetting instance")
-                mpvExecutor.execute {
+                submitMpvTask {
                     val dead = mpv
                     mpv = null
+                    surfaceAttachedToMpv = false
                     if (dead != null) {
                         runCatching { dead.removeObserver(mpvEventObserver) }
                         runCatching { dead.close() }
@@ -1130,6 +1281,8 @@ class MpvPlaybackEngine(
                 }
             }
             MPV.mpvEvent.MPV_EVENT_START_FILE -> {
+                startedMpvGeneration = pendingLoadGeneration
+                if (!isCurrentPlaybackEvent()) return
                 _state.update { current ->
                     if (explicitlyStopped || current.status == PlaybackStatus.ERROR) {
                         current
@@ -1143,18 +1296,25 @@ class MpvPlaybackEngine(
             MPV.mpvEvent.MPV_EVENT_AUDIO_RECONFIG,
             MPV.mpvEvent.MPV_EVENT_VIDEO_RECONFIG,
             -> {
+                if (!isCurrentPlaybackEvent()) return
+                val eventGen = startedMpvGeneration
                 if (eventId == MPV.mpvEvent.MPV_EVENT_FILE_LOADED) {
                     hadFileLoaded = true
                     retriedLiveReconnect = false
                 }
-                mpvExecutor.execute {
-                    val instance = mpv ?: return@execute
+                submitMpvTask {
+                    if (explicitlyStopped || playbackGeneration.get() != eventGen) return@submitMpvTask
+                    val instance = mpv ?: return@submitMpvTask
                     if (instance.isInitialized) {
                         refreshTracksLocked(instance)
                         val realPaused = runCatching { instance.getPropertyBoolean("pause") }.getOrNull()
                         val realHwdec = runCatching { instance.getPropertyString("hwdec-current") }.getOrNull()
                         _state.update { current ->
-                            if (explicitlyStopped || current.status == PlaybackStatus.ERROR) {
+                            if (explicitlyStopped ||
+                                playbackGeneration.get() != eventGen ||
+                                current.status == PlaybackStatus.ERROR ||
+                                current.status == PlaybackStatus.IDLE
+                            ) {
                                 current
                             } else {
                                 val paused = realPaused ?: current.isPaused
@@ -1169,7 +1329,8 @@ class MpvPlaybackEngine(
                 }
             }
             MPV.mpvEvent.MPV_EVENT_END_FILE -> {
-                if (explicitlyStopped) return
+                if (!isCurrentPlaybackEvent()) return
+                val eventGen = startedMpvGeneration
                 val map = runCatching { data.asMap() }.getOrNull()
                 val reasonNode = map?.get("reason")
                 val reasonStr = runCatching { reasonNode?.asString() }.getOrNull()
@@ -1180,6 +1341,8 @@ class MpvPlaybackEngine(
                 val dvrEntry = activeDvrEntry
                 if (dvrEntry != null) {
                     if (isErrorReason) {
+                        cacheMonitorJob?.cancel()
+                        cacheMonitorJob = null
                         val fileErr = runCatching { map?.get("file_error")?.asString() }.getOrNull()
                         val msg = if (!fileErr.isNullOrBlank()) {
                             "Recording playback error: $fileErr"
@@ -1197,6 +1360,9 @@ class MpvPlaybackEngine(
                             }
                         }
                     } else if (!isStoppedReason) {
+                        cacheMonitorJob?.cancel()
+                        cacheMonitorJob = null
+                        playbackGeneration.incrementAndGet()
                         activeDvrEntry = null
                         _state.update { current ->
                             if (current.dvrEntryId == dvrEntry.id) {
@@ -1220,6 +1386,8 @@ class MpvPlaybackEngine(
                 if (currentError == null) {
                     val conflict = conflictFinder(channel.id)
                     if (conflict != null) {
+                        cacheMonitorJob?.cancel()
+                        cacheMonitorJob = null
                         val err = PlaybackError.TunerBusy(conflict.first.title, conflict.second)
                         _state.update { current ->
                             if (current.channelId == channel.id && current.error == null) {
@@ -1233,15 +1401,25 @@ class MpvPlaybackEngine(
                         timeshiftSmoother.reset()
                         postTimeshiftNotice("Live stream reconnected", autoClearMs = 4_000L)
                         val url = liveStrategy.resolveLiveUrl(channel.id)
-                        mpvExecutor.execute {
-                            val instance = mpv ?: return@execute
-                            if (!instance.isInitialized || explicitlyStopped || activeChannel?.id != channel.id) return@execute
+                        submitMpvTask {
+                            val instance = mpv ?: return@submitMpvTask
+                            if (!instance.isInitialized ||
+                                explicitlyStopped ||
+                                playbackGeneration.get() != eventGen ||
+                                activeChannel?.id != channel.id
+                            ) {
+                                return@submitMpvTask
+                            }
+                            instance.command("stop")
                             liveStrategy.stopActive()
                             configureLiveTimeshiftLocked(instance, currentTimeshiftWindow)
                             instance.setPropertyBoolean("pause", false)
+                            pendingLoadGeneration = eventGen
                             instance.command("loadfile", url)
                         }
                     } else {
+                        cacheMonitorJob?.cancel()
+                        cacheMonitorJob = null
                         _state.update { current ->
                             if (current.channelId == channel.id && current.error == null) {
                                 current.copy(
@@ -1330,6 +1508,7 @@ class MpvPlaybackEngine(
         cachedMemoryStats = null
         lastDiskCacheSampleElapsedMs = 0L
         cachedDiskCacheBytes = null
+        mpvReportsFileCacheBytes = false
         proxy.resetStreamStats()
         _diagnostics.value = PlaybackDiagnostics()
     }
@@ -1355,7 +1534,10 @@ class MpvPlaybackEngine(
         return proxyStats
     }
 
-    private fun collectDiagnosticsLocked(instance: MPV) {
+    private fun collectDiagnosticsLocked(
+        instance: MPV,
+        preloadedCacheMap: Map<String, `is`.xyz.mpv.MPVNode>?,
+    ) {
         val currentState = _state.value
         if (currentState.status == PlaybackStatus.IDLE || currentState.status == PlaybackStatus.ERROR) return
         val nowElapsed = SystemClock.elapsedRealtime()
@@ -1404,7 +1586,8 @@ class MpvPlaybackEngine(
         val audioBitrateBps = runCatching { instance.getPropertyDouble("audio-bitrate")?.toLong() }.getOrNull()?.takeIf { it > 0L }
         val audioOutput = runCatching { instance.getPropertyString("current-ao") }.getOrNull()?.takeIf { it.isNotBlank() }
 
-        val cacheMap = runCatching { instance.getPropertyNode("demuxer-cache-state")?.asMap() }.getOrNull()
+        val cacheMap = preloadedCacheMap
+            ?: runCatching { instance.getPropertyNode("demuxer-cache-state")?.asMap() }.getOrNull()
         val cacheTotalBytes = runCatching { cacheMap?.get("total-bytes")?.asInt() }.getOrNull()
         val cacheFwBytes = runCatching { cacheMap?.get("fw-bytes")?.asInt() }.getOrNull()
         val cacheBackBytes = if (cacheTotalBytes != null && cacheFwBytes != null) {
@@ -1419,6 +1602,7 @@ class MpvPlaybackEngine(
             ?: runCatching { instance.getPropertyDouble("demuxer-cache-duration") }.getOrNull()
         val mpvFileCacheBytes = runCatching { cacheMap?.get("file-cache-bytes")?.asInt() }.getOrNull()
             ?.takeIf { it > 0L }
+        mpvReportsFileCacheBytes = mpvFileCacheBytes != null
 
         val cpuCores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
         val nowCpuMs = Process.getElapsedCpuTime()
@@ -1433,20 +1617,10 @@ class MpvPlaybackEngine(
             prevCpuWallMs = nowElapsed
         }
 
-        if (cachedMemoryStats == null || nowElapsed - lastMemorySampleElapsedMs >= 1_500L) {
-            lastMemorySampleElapsedMs = nowElapsed
-            cachedMemoryStats = sampleMemoryStats()
-        }
-        if (currentCacheOnDisk) {
-            if (mpvFileCacheBytes != null) {
-                cachedDiskCacheBytes = mpvFileCacheBytes
-                lastDiskCacheSampleElapsedMs = nowElapsed
-            } else if (cachedDiskCacheBytes == null || nowElapsed - lastDiskCacheSampleElapsedMs >= 2_000L) {
-                lastDiskCacheSampleElapsedMs = nowElapsed
-                cachedDiskCacheBytes = runCatching { measureDiskCacheBytes(mpvCacheDir) }.getOrNull()
-            }
+        val diskCacheBytes = if (currentCacheOnDisk) {
+            mpvFileCacheBytes ?: cachedDiskCacheBytes
         } else {
-            cachedDiskCacheBytes = null
+            null
         }
 
         val mem = cachedMemoryStats
@@ -1491,7 +1665,7 @@ class MpvPlaybackEngine(
             cacheDurationSec = cacheDurationSec,
             cacheBudgetPerDirBytes = effectiveForwardCapBytes,
             cacheOnDisk = currentCacheOnDisk,
-            diskCacheBytes = cachedDiskCacheBytes,
+            diskCacheBytes = diskCacheBytes,
             cacheUnderrun = cacheUnderrun,
             processCpuPercent = lastCpuPercent,
             cpuCores = cpuCores,

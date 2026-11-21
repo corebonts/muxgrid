@@ -58,56 +58,65 @@ internal class HttpPassStrategy(
  * at 1x real-time between packet/GOP bursts, preventing 0.5-1s progress-bar and label jitter.
  */
 internal class TimeshiftRangeSmoother {
-    var isInitialized: Boolean = false
-        private set
+    private val lock = Any()
+    private var initialized: Boolean = false
     private var smoothedStartMs: Long = 0L
     private var smoothedEndMs: Long = 0L
     private var lastSampleRealtimeMs: Long = 0L
 
+    val isInitialized: Boolean
+        get() = synchronized(lock) { initialized }
+
     fun reset() {
-        isInitialized = false
-        smoothedStartMs = 0L
-        smoothedEndMs = 0L
-        lastSampleRealtimeMs = 0L
+        synchronized(lock) {
+            initialized = false
+            smoothedStartMs = 0L
+            smoothedEndMs = 0L
+            lastSampleRealtimeMs = 0L
+        }
     }
 
     fun update(rawStartMs: Long, rawEndMs: Long, nowRealtimeMs: Long): Pair<Long, Long> {
-        val clampedStart = rawStartMs.coerceAtLeast(0L)
-        val clampedEnd = rawEndMs.coerceAtLeast(clampedStart)
-        if (!isInitialized || clampedEnd + RESET_DROP_THRESHOLD_MS < smoothedEndMs) {
-            isInitialized = true
-            smoothedStartMs = clampedStart
-            smoothedEndMs = clampedEnd
+        synchronized(lock) {
+            val clampedStart = rawStartMs.coerceAtLeast(0L)
+            val clampedEnd = rawEndMs.coerceAtLeast(clampedStart)
+            if (!initialized || clampedEnd + RESET_DROP_THRESHOLD_MS < smoothedEndMs) {
+                initialized = true
+                smoothedStartMs = clampedStart
+                smoothedEndMs = clampedEnd
+                lastSampleRealtimeMs = nowRealtimeMs
+                return smoothedStartMs to smoothedEndMs
+            }
+
+            val dt = (nowRealtimeMs - lastSampleRealtimeMs).coerceIn(0L, MAX_EXTRAPOLATION_STEP_MS)
+            val predictedEnd = smoothedEndMs + dt
+            smoothedEndMs = when {
+                clampedEnd - predictedEnd > SNAP_FORWARD_THRESHOLD_MS -> clampedEnd
+                clampedEnd > predictedEnd -> predictedEnd + ((clampedEnd - predictedEnd) * 0.45).toLong()
+                predictedEnd - clampedEnd <= NORMAL_BURST_GAP_MS -> predictedEnd
+                else -> {
+                    val excess = (predictedEnd - clampedEnd) - NORMAL_BURST_GAP_MS
+                    (predictedEnd - (excess * 0.25).toLong()).coerceAtLeast(clampedEnd)
+                }
+            }
+
+            smoothedStartMs = if (kotlin.math.abs(clampedStart - smoothedStartMs) > SNAP_START_THRESHOLD_MS) {
+                clampedStart
+            } else {
+                smoothedStartMs + ((clampedStart - smoothedStartMs) * 0.35).toLong()
+            }.coerceIn(0L, smoothedEndMs)
+
             lastSampleRealtimeMs = nowRealtimeMs
             return smoothedStartMs to smoothedEndMs
         }
-
-        val dt = (nowRealtimeMs - lastSampleRealtimeMs).coerceIn(0L, MAX_EXTRAPOLATION_STEP_MS)
-        val predictedEnd = smoothedEndMs + dt
-        smoothedEndMs = when {
-            clampedEnd - predictedEnd > SNAP_FORWARD_THRESHOLD_MS -> clampedEnd
-            clampedEnd > predictedEnd -> predictedEnd + ((clampedEnd - predictedEnd) * 0.45).toLong()
-            predictedEnd - clampedEnd <= NORMAL_BURST_GAP_MS -> predictedEnd
-            else -> {
-                val excess = (predictedEnd - clampedEnd) - NORMAL_BURST_GAP_MS
-                (predictedEnd - (excess * 0.25).toLong()).coerceAtLeast(clampedEnd)
-            }
-        }
-
-        smoothedStartMs = if (kotlin.math.abs(clampedStart - smoothedStartMs) > SNAP_START_THRESHOLD_MS) {
-            clampedStart
-        } else {
-            smoothedStartMs + ((clampedStart - smoothedStartMs) * 0.35).toLong()
-        }.coerceIn(0L, smoothedEndMs)
-
-        lastSampleRealtimeMs = nowRealtimeMs
-        return smoothedStartMs to smoothedEndMs
     }
 
     fun currentEstimatedEndMs(nowRealtimeMs: Long): Long {
-        if (!isInitialized) return 0L
-        val dt = (nowRealtimeMs - lastSampleRealtimeMs).coerceIn(0L, MAX_EXTRAPOLATION_STEP_MS)
-        return smoothedEndMs + dt
+        synchronized(lock) {
+            if (!initialized) return 0L
+            val dt = (nowRealtimeMs - lastSampleRealtimeMs).coerceIn(0L, MAX_EXTRAPOLATION_STEP_MS)
+            return smoothedEndMs + dt
+        }
     }
 
     companion object {

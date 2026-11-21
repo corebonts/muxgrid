@@ -74,7 +74,11 @@ class MuxGridMediaSessionService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        val engine = PlaybackSessionHost.engine ?: return
+        val engine = PlaybackSessionHost.engine
+        if (engine == null) {
+            stopSelf()
+            return
+        }
 
         val notificationProvider = DefaultMediaNotificationProvider(this).apply {
             val icon = PlaybackSessionHost.smallIconResId

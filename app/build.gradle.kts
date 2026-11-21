@@ -135,4 +135,12 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(platform(libs.androidx.compose.bom))
+
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.platform.launcher)
+    testImplementation(libs.kotlinx.coroutines.test)
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
 }

@@ -13,17 +13,22 @@ import android.os.PowerManager
 import androidx.core.content.ContextCompat
 
 /**
- * Manages explicit Android platform locks & audio policy for [PlaybackEngine]:
- * - [AudioManager.requestAudioFocus] / [AudioManager.abandonAudioFocusRequest]
- * - [AudioManager.ACTION_AUDIO_BECOMING_NOISY] receiver (pause on headphone / BT disconnect)
- * - [WifiManager.WifiLock] + [PowerManager.PARTIAL_WAKE_LOCK] for uninterrupted screen-off streaming
+ * Abstraction over Android audio-focus, wake/Wi-Fi lock, and noisy-receiver APIs for testing.
  */
-internal class PlaybackPlatformLocks(
-    private val context: Context,
-    private val onPauseRequested: () -> Unit,
-    private val onResumeRequested: () -> Unit,
-    private val onDuckChanged: (ducked: Boolean) -> Unit,
-) {
+internal interface PlatformLockBackend {
+    fun requestAudioFocus(isRadio: Boolean, listener: AudioManager.OnAudioFocusChangeListener): Boolean
+    fun abandonAudioFocus()
+    fun acquireWifiLock()
+    fun releaseWifiLock()
+    fun acquireWakeLock(timeoutMs: Long)
+    fun releaseWakeLock()
+    fun registerNoisyReceiver(receiver: BroadcastReceiver)
+    fun unregisterNoisyReceiver(receiver: BroadcastReceiver)
+}
+
+private class AndroidPlatformLockBackend(
+    context: Context,
+) : PlatformLockBackend {
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -44,95 +49,13 @@ internal class PlaybackPlatformLocks(
         "MuxGrid:StreamPartialWakeLock",
     ).apply { setReferenceCounted(false) }
 
-    @Volatile
-    private var hasAudioFocus = false
-
-    @Volatile
-    private var resumeOnFocusGain = false
-
-    @Volatile
+    private var currentFocusRequest: AudioFocusRequest? = null
     private var noisyReceiverRegistered = false
 
-    @Volatile
-    private var activeIsRadio = false
-
-    private var currentFocusRequest: AudioFocusRequest? = null
-
-    private val focusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
-        when (focusChange) {
-            AudioManager.AUDIOFOCUS_GAIN -> {
-                hasAudioFocus = true
-                onDuckChanged(false)
-                if (resumeOnFocusGain) {
-                    resumeOnFocusGain = false
-                    onResumeRequested()
-                }
-            }
-            AudioManager.AUDIOFOCUS_LOSS -> {
-                hasAudioFocus = false
-                resumeOnFocusGain = false
-                onDuckChanged(false)
-                onPauseRequested()
-            }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                hasAudioFocus = false
-                resumeOnFocusGain = true
-                onDuckChanged(false)
-                onPauseRequested()
-            }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                onDuckChanged(true)
-            }
-        }
-    }
-
-    private val noisyReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
-                resumeOnFocusGain = false
-                onPauseRequested()
-            }
-        }
-    }
-
-    @Synchronized
-    fun onPlaybackActive(isRadio: Boolean, isPlayingOrBuffering: Boolean) {
-        activeIsRadio = isRadio
-        if (isPlayingOrBuffering) {
-            acquireNetworkLocks()
-            ensureNoisyReceiverRegistered()
-            if (!hasAudioFocus) {
-                requestFocus(isRadio)
-            }
-        } else {
-            releaseNetworkLocks()
-        }
-    }
-
-    @Synchronized
-    fun requestFocusForStart(isRadio: Boolean): Boolean {
-        activeIsRadio = isRadio
-        resumeOnFocusGain = false
-        return requestFocus(isRadio)
-    }
-
-    @Synchronized
-    fun onPlaybackStopped() {
-        resumeOnFocusGain = false
-        onDuckChanged(false)
-        releaseNetworkLocks()
-        unregisterNoisyReceiver()
-        abandonFocus()
-    }
-
-    @Synchronized
-    fun destroy() {
-        onPlaybackStopped()
-    }
-
-    private fun requestFocus(isRadio: Boolean): Boolean {
-        if (hasAudioFocus && activeIsRadio == isRadio && currentFocusRequest != null) return true
-        abandonFocus()
+    override fun requestAudioFocus(
+        isRadio: Boolean,
+        listener: AudioManager.OnAudioFocusChangeListener,
+    ): Boolean {
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
             .setContentType(
@@ -143,49 +66,53 @@ internal class PlaybackPlatformLocks(
             .setAudioAttributes(attrs)
             .setAcceptsDelayedFocusGain(false)
             .setWillPauseWhenDucked(false)
-            .setOnAudioFocusChangeListener(focusListener)
+            .setOnAudioFocusChangeListener(listener)
             .build()
         val granted = audioManager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         if (granted) {
             currentFocusRequest = req
-            hasAudioFocus = true
         }
         return granted
     }
 
-    private fun abandonFocus() {
+    override fun abandonAudioFocus() {
         currentFocusRequest?.let { req ->
             runCatching { audioManager.abandonAudioFocusRequest(req) }
         }
         currentFocusRequest = null
-        hasAudioFocus = false
     }
 
-    private fun acquireNetworkLocks() {
+    override fun acquireWifiLock() {
         runCatching {
             if (!wifiLock.isHeld) wifiLock.acquire()
         }
-        runCatching {
-            if (!wakeLock.isHeld) wakeLock.acquire(MAX_WAKE_LOCK_TIMEOUT_MS)
-        }
     }
 
-    private fun releaseNetworkLocks() {
+    override fun releaseWifiLock() {
         runCatching {
             if (wifiLock.isHeld) wifiLock.release()
         }
+    }
+
+    override fun acquireWakeLock(timeoutMs: Long) {
+        runCatching {
+            wakeLock.acquire(timeoutMs)
+        }
+    }
+
+    override fun releaseWakeLock() {
         runCatching {
             if (wakeLock.isHeld) wakeLock.release()
         }
     }
 
-    private fun ensureNoisyReceiverRegistered() {
+    override fun registerNoisyReceiver(receiver: BroadcastReceiver) {
         if (noisyReceiverRegistered) return
         val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
         runCatching {
             ContextCompat.registerReceiver(
                 appContext,
-                noisyReceiver,
+                receiver,
                 filter,
                 ContextCompat.RECEIVER_NOT_EXPORTED,
             )
@@ -193,14 +120,151 @@ internal class PlaybackPlatformLocks(
         }
     }
 
-    private fun unregisterNoisyReceiver() {
+    override fun unregisterNoisyReceiver(receiver: BroadcastReceiver) {
         if (!noisyReceiverRegistered) return
-        runCatching { appContext.unregisterReceiver(noisyReceiver) }
+        runCatching { appContext.unregisterReceiver(receiver) }
         noisyReceiverRegistered = false
+    }
+}
+
+/**
+ * Manages explicit Android platform locks & audio policy for [PlaybackEngine]:
+ * - [AudioManager.requestAudioFocus] / [AudioManager.abandonAudioFocusRequest]
+ * - [AudioManager.ACTION_AUDIO_BECOMING_NOISY] receiver (pause on headphone / BT disconnect)
+ * - [WifiManager.WifiLock] + [PowerManager.PARTIAL_WAKE_LOCK] for uninterrupted screen-off streaming
+ */
+internal class PlaybackPlatformLocks internal constructor(
+    private val backend: PlatformLockBackend,
+    private val onPauseRequested: () -> Unit,
+    private val onResumeRequested: () -> Unit,
+    private val onDuckChanged: (ducked: Boolean) -> Unit,
+) {
+    constructor(
+        context: Context,
+        onPauseRequested: () -> Unit,
+        onResumeRequested: () -> Unit,
+        onDuckChanged: (ducked: Boolean) -> Unit,
+    ) : this(
+        backend = AndroidPlatformLockBackend(context),
+        onPauseRequested = onPauseRequested,
+        onResumeRequested = onResumeRequested,
+        onDuckChanged = onDuckChanged,
+    )
+
+    private val lock = Any()
+
+    private var hasAudioFocus = false
+    private var resumeOnFocusGain = false
+    private var activeIsRadio = false
+
+    internal val focusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        var shouldPause = false
+        var shouldResume = false
+        var duckState: Boolean? = null
+        synchronized(lock) {
+            when (focusChange) {
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    hasAudioFocus = true
+                    duckState = false
+                    if (resumeOnFocusGain) {
+                        resumeOnFocusGain = false
+                        shouldResume = true
+                    }
+                }
+                AudioManager.AUDIOFOCUS_LOSS -> {
+                    hasAudioFocus = false
+                    resumeOnFocusGain = false
+                    duckState = false
+                    shouldPause = true
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    hasAudioFocus = false
+                    resumeOnFocusGain = true
+                    duckState = false
+                    shouldPause = true
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    duckState = true
+                }
+            }
+        }
+        duckState?.let { onDuckChanged(it) }
+        if (shouldPause) onPauseRequested()
+        if (shouldResume) onResumeRequested()
+    }
+
+    internal val noisyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                synchronized(lock) {
+                    resumeOnFocusGain = false
+                }
+                onPauseRequested()
+            }
+        }
+    }
+
+    fun onPlaybackActive(isRadio: Boolean, isPlayingOrBuffering: Boolean) {
+        synchronized(lock) {
+            if (isPlayingOrBuffering) {
+                acquireNetworkLocksLocked()
+                backend.registerNoisyReceiver(noisyReceiver)
+                if (!hasAudioFocus || activeIsRadio != isRadio) {
+                    requestFocusLocked(isRadio)
+                }
+            } else {
+                releaseNetworkLocksLocked()
+            }
+        }
+    }
+
+    fun requestFocusForStart(isRadio: Boolean): Boolean {
+        synchronized(lock) {
+            resumeOnFocusGain = false
+            return requestFocusLocked(isRadio)
+        }
+    }
+
+    fun onPlaybackStopped() {
+        synchronized(lock) {
+            resumeOnFocusGain = false
+            releaseNetworkLocksLocked()
+            backend.unregisterNoisyReceiver(noisyReceiver)
+            abandonFocusLocked()
+        }
+        onDuckChanged(false)
+    }
+
+    fun destroy() {
+        onPlaybackStopped()
+    }
+
+    private fun requestFocusLocked(isRadio: Boolean): Boolean {
+        if (hasAudioFocus && activeIsRadio == isRadio) return true
+        abandonFocusLocked()
+        activeIsRadio = isRadio
+        val granted = backend.requestAudioFocus(isRadio, focusListener)
+        hasAudioFocus = granted
+        return granted
+    }
+
+    private fun abandonFocusLocked() {
+        backend.abandonAudioFocus()
+        hasAudioFocus = false
+    }
+
+    private fun acquireNetworkLocksLocked() {
+        backend.acquireWifiLock()
+        backend.acquireWakeLock(MAX_WAKE_LOCK_TIMEOUT_MS)
+    }
+
+    private fun releaseNetworkLocksLocked() {
+        backend.releaseWifiLock()
+        backend.releaseWakeLock()
     }
 
     companion object {
-        // 6 hour safety cap refreshed whenever playback state ticks
-        private const val MAX_WAKE_LOCK_TIMEOUT_MS = 6L * 60L * 60L * 1000L
+        // 6 hour safety cap refreshed on playback activation/state transitions
+        internal const val MAX_WAKE_LOCK_TIMEOUT_MS = 6L * 60L * 60L * 1000L
     }
 }

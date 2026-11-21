@@ -23,6 +23,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 
 /**
  * In-process HTTP/1.1 loopback proxy bound strictly to 127.0.0.1:<ephemeralPort>/<sessionToken>/...
@@ -49,6 +51,9 @@ class LocalMediaProxy(
     private val ticketTtlMs: Long = DEFAULT_TICKET_TTL_MS,
     private val growingPollIntervalMs: Long = DEFAULT_GROWING_POLL_INTERVAL_MS,
     private val nowMsProvider: () -> Long = { System.currentTimeMillis() },
+    private val sslSocketFactoryProvider: () -> SSLSocketFactory = {
+        SSLSocketFactory.getDefault() as SSLSocketFactory
+    },
 ) {
     private data class TicketCacheKey(
         val isDvr: Boolean,
@@ -75,6 +80,7 @@ class LocalMediaProxy(
     }
 
     private data class UpstreamEndpoint(
+        val isHttps: Boolean,
         val host: String,
         val port: Int,
         val basePath: String,
@@ -141,9 +147,15 @@ class LocalMediaProxy(
 
     fun stopActiveStream() {
         activeLiveUpstream.getAndSet(null)?.close()
+        closeActiveDvrUpstreams()
+    }
+
+    private fun closeActiveDvrUpstreams() {
         val dvrHandles = activeDvrUpstreams.toList()
-        activeDvrUpstreams.clear()
-        dvrHandles.forEach { it.close() }
+        for (handle in dvrHandles) {
+            activeDvrUpstreams.remove(handle)
+            handle.close()
+        }
     }
 
     fun close() {
@@ -206,10 +218,10 @@ class LocalMediaProxy(
             when (segments[1]) {
                 "live" -> {
                     // Deterministic single-tuner teardown before opening the next upstream connection
-                    stopActiveStream()
                     val handle = ActiveStreamHandle(clientSocket = clientSocket)
                     liveHandle = handle
-                    activeLiveUpstream.set(handle)
+                    activeLiveUpstream.getAndSet(handle)?.close()
+                    closeActiveDvrUpstreams()
                     relayLiveStream(method, id, handle, clientSocket.getOutputStream())
                 }
                 "dvr" -> {
@@ -250,10 +262,17 @@ class LocalMediaProxy(
         val baseUrl = serverBaseUrlProvider()?.trimEnd('/') ?: return null
         if (baseUrl.isEmpty()) return null
         val baseUri = runCatching { URI(baseUrl) }.getOrNull() ?: return null
+        val scheme = baseUri.scheme?.lowercase() ?: "http"
+        if (scheme != "http" && scheme != "https") return null
+        val isHttps = scheme == "https"
         val host = baseUri.host ?: return null
-        val port = if (baseUri.port > 0) baseUri.port else 9981
+        val port = when {
+            baseUri.port > 0 -> baseUri.port
+            isHttps -> 443
+            else -> 9981
+        }
         val basePath = baseUri.rawPath?.trimEnd('/') ?: ""
-        return UpstreamEndpoint(host = host, port = port, basePath = basePath)
+        return UpstreamEndpoint(isHttps = isHttps, host = host, port = port, basePath = basePath)
     }
 
     private fun relayLiveStream(
@@ -330,6 +349,7 @@ class LocalMediaProxy(
             }
 
             activeUpstreamStatus = "HTTP ${response.statusCode}"
+            val chunked = isChunkedResponse(response.headers)
             val contentType = sanitizeHeaderValue(response.headers["content-type"], fallback = "video/mp2t")
             val respHeader = "HTTP/1.1 200 OK\r\nContent-Type: $contentType\r\nConnection: close\r\n\r\n"
             clientOut.write(respHeader.toByteArray(StandardCharsets.US_ASCII))
@@ -342,7 +362,11 @@ class LocalMediaProxy(
 
             var totalCopied = 0L
             try {
-                totalCopied = copyStream(response.input, clientOut, handle, maxBytes = null)
+                totalCopied = if (chunked) {
+                    copyChunkedStream(response.input, clientOut, handle)
+                } else {
+                    copyStream(response.input, clientOut, handle, maxBytes = null)
+                }
             } catch (_: IOException) {
                 if (totalCopied == 0L && !handle.cancelled.get()) {
                     onLiveOpenFailed(channelId, "Stream closed with 0 bytes", true)
@@ -420,11 +444,14 @@ class LocalMediaProxy(
             }
 
             activeUpstreamStatus = "HTTP ${response.statusCode}"
+            val chunked = isChunkedResponse(response.headers)
             val respHeaders = buildString {
                 val safeReason = sanitizeHeaderValue(response.statusReason, fallback = "Response", maxLength = 128)
                 append("HTTP/1.1 ${response.statusCode} $safeReason\r\n")
                 response.headers["content-type"]?.let { append("Content-Type: ${sanitizeHeaderValue(it, "application/octet-stream")}\r\n") }
-                response.headers["content-length"]?.let { append("Content-Length: ${sanitizeHeaderValue(it, "0")}\r\n") }
+                if (!chunked) {
+                    response.headers["content-length"]?.let { append("Content-Length: ${sanitizeHeaderValue(it, "0")}\r\n") }
+                }
                 response.headers["content-range"]?.let { append("Content-Range: ${sanitizeHeaderValue(it, "")}\r\n") }
                 response.headers["accept-ranges"]?.let { append("Accept-Ranges: ${sanitizeHeaderValue(it, "bytes")}\r\n") }
                 append("Connection: close\r\n\r\n")
@@ -437,9 +464,13 @@ class LocalMediaProxy(
                 return
             }
 
-            val expectedLength = response.headers["content-length"]?.toLongOrNull()
+            val expectedLength = if (chunked) null else response.headers["content-length"]?.toLongOrNull()
             try {
-                copyStream(response.input, clientOut, handle, maxBytes = expectedLength)
+                if (chunked) {
+                    copyChunkedStream(response.input, clientOut, handle)
+                } else {
+                    copyStream(response.input, clientOut, handle, maxBytes = expectedLength)
+                }
             } catch (_: IOException) {
                 // Client disconnected or upstream ended
             } finally {
@@ -521,8 +552,9 @@ class LocalMediaProxy(
                     return
                 }
                 val headers = buildString {
-                    if (hasRange) {
-                        val headerEnd = requestedEnd ?: (currentSize - 1L).coerceAtLeast(startOffset)
+                    if (hasRange && currentSize > 0L && startOffset < currentSize) {
+                        val maxAvailableEnd = currentSize - 1L
+                        val headerEnd = minOf(requestedEnd ?: maxAvailableEnd, maxAvailableEnd)
                         append("HTTP/1.1 206 Partial Content\r\n")
                         append("Content-Range: bytes $startOffset-$headerEnd/*\r\n")
                     } else {
@@ -653,11 +685,39 @@ class LocalMediaProxy(
         rangeHeader: String?,
         handle: ActiveStreamHandle,
     ): UpstreamResponse? {
-        val upstreamSock = Socket()
-        handle.upstreamSocket.set(upstreamSock)
+        val tcpSock = Socket()
+        handle.upstreamSocket.set(tcpSock)
+        if (handle.cancelled.get()) {
+            handle.upstreamSocket.compareAndSet(tcpSock, null)
+            runCatching { tcpSock.close() }
+            return null
+        }
+        var activeSock: Socket = tcpSock
         return try {
-            upstreamSock.soTimeout = 15_000
-            upstreamSock.connect(InetSocketAddress(endpoint.host, endpoint.port), 5_000)
+            tcpSock.soTimeout = 15_000
+            val connectHost = endpoint.host.removePrefix("[").removeSuffix("]")
+            tcpSock.connect(InetSocketAddress(connectHost, endpoint.port), 5_000)
+
+            if (endpoint.isHttps) {
+                val sslSock = sslSocketFactoryProvider().createSocket(
+                    tcpSock,
+                    connectHost,
+                    endpoint.port,
+                    true,
+                ) as SSLSocket
+                activeSock = sslSock
+                sslSock.sslParameters = sslSock.sslParameters.apply {
+                    endpointIdentificationAlgorithm = "HTTPS"
+                }
+                sslSock.soTimeout = 15_000
+                handle.upstreamSocket.set(sslSock)
+                if (handle.cancelled.get()) {
+                    handle.upstreamSocket.compareAndSet(sslSock, null)
+                    runCatching { sslSock.close() }
+                    return null
+                }
+                sslSock.startHandshake()
+            }
 
             val reqBytes = buildString {
                 val safePath = sanitizeHeaderValue(reqPath, fallback = "/")
@@ -671,15 +731,15 @@ class LocalMediaProxy(
                 append("\r\n")
             }.toByteArray(StandardCharsets.US_ASCII)
 
-            upstreamSock.getOutputStream().apply {
+            activeSock.getOutputStream().apply {
                 write(reqBytes)
                 flush()
             }
 
-            val upstreamIn = BufferedInputStream(upstreamSock.getInputStream(), 32_768)
+            val upstreamIn = BufferedInputStream(activeSock.getInputStream(), 32_768)
             val statusLine = readHeaderLine(upstreamIn)
             if (statusLine == null) {
-                runCatching { upstreamSock.close() }
+                runCatching { activeSock.close() }
                 return null
             }
 
@@ -697,19 +757,86 @@ class LocalMediaProxy(
                 if (colon > 0) {
                     val name = headerLine.substring(0, colon).trim().lowercase()
                     val value = headerLine.substring(colon + 1).trim()
-                    headers[name] = value
+                    headers[name] = if (name == "transfer-encoding" && headers.containsKey(name)) {
+                        "${headers[name]}, $value"
+                    } else {
+                        value
+                    }
                 }
             }
             UpstreamResponse(
-                socket = upstreamSock,
+                socket = activeSock,
                 input = upstreamIn,
                 statusCode = statusCode,
                 statusReason = statusReason,
                 headers = headers,
             )
         } catch (e: IOException) {
-            runCatching { upstreamSock.close() }
+            runCatching { activeSock.close() }
+            runCatching { tcpSock.close() }
             throw e
+        }
+    }
+
+    private fun isChunkedResponse(headers: Map<String, String>): Boolean =
+        headers["transfer-encoding"]
+            ?.split(',')
+            ?.any { it.trim().equals("chunked", ignoreCase = true) } == true
+
+    private fun copyChunkedStream(
+        input: InputStream,
+        output: OutputStream,
+        handle: ActiveStreamHandle,
+    ): Long {
+        val buffer = ByteArray(32_768)
+        var totalCopied = 0L
+        while (!handle.cancelled.get()) {
+            val sizeLine = readHeaderLine(input) ?: break
+            val sizeToken = sizeLine.substringBefore(';').trim()
+            if (sizeToken.isEmpty()) continue
+            val chunkSize = sizeToken.toLongOrNull(16)
+                ?: throw IOException("Invalid chunked transfer size: $sizeToken")
+            if (chunkSize < 0L) throw IOException("Negative chunk size: $chunkSize")
+            if (chunkSize == 0L) {
+                var trailerCount = 0
+                while (true) {
+                    val trailer = readHeaderLine(input) ?: break
+                    if (trailer.isEmpty()) break
+                    if (++trailerCount > MAX_HEADER_COUNT) {
+                        throw IOException("Too many chunked trailers")
+                    }
+                }
+                break
+            }
+            var remaining = chunkSize
+            while (remaining > 0L && !handle.cancelled.get()) {
+                val toRead = minOf(buffer.size.toLong(), remaining).toInt()
+                val read = input.read(buffer, 0, toRead)
+                if (read < 0) throw EOFException("Unexpected EOF inside HTTP chunk")
+                if (read > 0) {
+                    totalCopied += read
+                    activeStreamBytes.addAndGet(read.toLong())
+                    output.write(buffer, 0, read)
+                    remaining -= read
+                }
+            }
+            output.flush()
+            if (!handle.cancelled.get()) {
+                consumeChunkTerminator(input)
+            }
+        }
+        return totalCopied
+    }
+
+    private fun consumeChunkTerminator(input: InputStream) {
+        val first = input.read()
+        if (first == '\r'.code) {
+            val second = input.read()
+            if (second != '\n'.code && second >= 0) {
+                throw IOException("Malformed chunk terminator")
+            }
+        } else if (first != '\n'.code && first >= 0) {
+            throw IOException("Malformed chunk terminator")
         }
     }
 

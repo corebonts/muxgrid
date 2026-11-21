@@ -43,4 +43,37 @@ class TimeshiftRangeSmootherTest {
         val (_, eStalled) = smoother.update(rawStartMs = 0L, rawEndMs = 20_000L, nowRealtimeMs = 2_000L)
         assertTrue(eStalled < 22_000L && eStalled >= 20_000L, "Expected gentle pullback, got $eStalled")
     }
+
+    @Test
+    fun `concurrent updates resets and reads remain consistent`() {
+        val smoother = TimeshiftRangeSmoother()
+        val errors = java.util.concurrent.ConcurrentLinkedQueue<Throwable>()
+        val writer = Thread {
+            runCatching {
+                for (i in 1..2_000) {
+                    val (start, end) = smoother.update(
+                        rawStartMs = (i * 10L),
+                        rawEndMs = (i * 10L) + 5_000L,
+                        nowRealtimeMs = i.toLong(),
+                    )
+                    assertTrue(start >= 0L)
+                    assertTrue(end >= start)
+                    if (i % 250 == 0) smoother.reset()
+                }
+            }.onFailure { errors.add(it) }
+        }
+        val reader = Thread {
+            runCatching {
+                for (i in 1..2_000) {
+                    val est = smoother.currentEstimatedEndMs(nowRealtimeMs = i.toLong())
+                    assertTrue(est >= 0L)
+                }
+            }.onFailure { errors.add(it) }
+        }
+        writer.start()
+        reader.start()
+        writer.join(3_000)
+        reader.join(3_000)
+        assertTrue(errors.isEmpty(), "Unexpected concurrent errors: $errors")
+    }
 }
