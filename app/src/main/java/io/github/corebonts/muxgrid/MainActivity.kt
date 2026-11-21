@@ -12,6 +12,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -42,6 +43,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
 import io.github.corebonts.muxgrid.core.model.FormFactor
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
+import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.player.MuxGridMediaSessionService
 import io.github.corebonts.muxgrid.feature.mobile.MobileRoot
 import io.github.corebonts.muxgrid.feature.tv.TvRoot
@@ -74,6 +76,28 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val pipEnabled by container.repository.pipEnabled.collectAsState()
+            val themeMode by container.repository.themeMode.collectAsState()
+            val systemDark = isSystemInDarkTheme()
+            val isDarkTheme = when (themeMode) {
+                ThemeMode.AUTO -> systemDark
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+            }
+            val useDarkSystemBars = isDarkTheme || isMobilePlayerRouteActive
+            LaunchedEffect(useDarkSystemBars) {
+                val barStyle = if (useDarkSystemBars) {
+                    SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                } else {
+                    SystemBarStyle.light(
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT,
+                    )
+                }
+                enableEdgeToEdge(
+                    statusBarStyle = barStyle,
+                    navigationBarStyle = barStyle,
+                )
+            }
             val rootView = LocalView.current
             val keepScreenOn by remember(container.playbackEngine) {
                 container.playbackEngine.state
@@ -117,7 +141,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            MuxGridTheme(isTv = isTv) {
+            MuxGridTheme(isTv = isTv, darkTheme = isDarkTheme) {
                 val context = LocalContext.current
                 val isDebuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
                 var lastCrashText by remember {

@@ -20,6 +20,7 @@ import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LocalDvrProgress
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import io.github.corebonts.muxgrid.core.model.StartScreen
+import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -75,6 +76,10 @@ class SettingsRepository(
 
     val startScreen: Flow<StartScreen> = context.muxGridDataStore.data.map { prefs ->
         StartScreen.fromPersisted(prefs[KEY_START_SCREEN])
+    }
+
+    val themeMode: Flow<ThemeMode> = context.muxGridDataStore.data.map { prefs ->
+        ThemeMode.fromPersisted(prefs[KEY_THEME_MODE], formFactor)
     }
 
     val localDvrProgress: Flow<Map<Long, LocalDvrProgress>> = context.muxGridDataStore.data.map { prefs ->
@@ -165,6 +170,12 @@ class SettingsRepository(
         }
     }
 
+    suspend fun setThemeMode(mode: ThemeMode) {
+        context.muxGridDataStore.edit { prefs ->
+            prefs[KEY_THEME_MODE] = mode.name
+        }
+    }
+
     private fun createOrRecoverAead(): Aead? = runCatching {
         AeadConfig.register()
         AndroidKeysetManager.Builder()
@@ -207,6 +218,7 @@ class SettingsRepository(
         private val KEY_BACKGROUND_PLAY = booleanPreferencesKey("background_play_enabled")
         private val KEY_PIP_ENABLED = booleanPreferencesKey("pip_enabled")
         private val KEY_START_SCREEN = stringPreferencesKey("start_screen")
+        private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         private val KEY_LOCAL_DVR_PROGRESS = stringSetPreferencesKey("dvr_local_progress")
 
         private const val KEYSET_NAME = "muxgrid_master_keyset"

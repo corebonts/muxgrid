@@ -55,3 +55,24 @@ enum class TimeshiftWindow(
         }
     }
 }
+
+enum class ThemeMode(
+    val label: String,
+    val description: String,
+) {
+    AUTO("Auto", "Follows system appearance"),
+    LIGHT("Light", "Daylight monitor light theme"),
+    DARK("Dark", "Broadcast monitor dark theme"),
+    ;
+
+    companion object {
+        fun defaultFor(formFactor: FormFactor): ThemeMode = when (formFactor) {
+            FormFactor.PHONE -> AUTO
+            FormFactor.TV -> DARK
+        }
+
+        fun fromPersisted(raw: String?, formFactor: FormFactor): ThemeMode =
+            raw?.let { entries.firstOrNull { mode -> mode.name == it } }
+                ?: defaultFor(formFactor)
+    }
+}
