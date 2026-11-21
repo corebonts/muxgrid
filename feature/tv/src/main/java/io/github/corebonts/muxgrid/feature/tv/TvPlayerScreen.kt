@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -50,7 +52,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
 import androidx.tv.material3.Border
 import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
@@ -232,6 +233,7 @@ internal fun TvPlayerScreen(
 
     BackHandler {
         when {
+            playbackState.error != null -> onExit()
             trackPanelOpen -> trackPanelOpen = false
             hudVisible -> hudVisible = false
             else -> onExit()
@@ -364,26 +366,35 @@ internal fun TvPlayerScreen(
                 trackPanelOpen = false
                 runCatching { okFocusRequester.requestFocus() }
             }
-            Dialog(onDismissRequest = onExit) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MuxGridColors.OverlayBackdrop)
+                    .padding(36.dp),
+                contentAlignment = Alignment.Center,
+            ) {
                 Column(
                     modifier = Modifier
                         .widthIn(min = 360.dp, max = 520.dp)
+                        .fillMaxWidth()
                         .clip(MuxGridShapes.Dialog)
                         .background(MuxGridColors.CardSurfaceElevated)
                         .border(MuxGridBorders.Hairline, MuxGridColors.CoralLive.copy(alpha = 0.55f), MuxGridShapes.Dialog)
-                        .padding(24.dp),
+                        .focusProperties { this.onExit = { cancelFocusChange() } }
+                        .focusGroup()
+                        .padding(22.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
                         text = if (err is PlaybackError.TunerBusy) "Tuner Busy" else "Playback Error",
                         style = MuxGridType.Title,
-                        fontSize = 20.sp,
+                        fontSize = 18.sp,
                         color = MuxGridColors.TextPrimary,
                     )
                     Text(
                         text = err.message,
                         style = MuxGridType.CardSubtitle,
-                        fontSize = 15.sp,
+                        fontSize = 14.sp,
                         color = MuxGridColors.TextSecondary,
                     )
                     if (err is PlaybackError.TunerBusy) {
@@ -985,7 +996,7 @@ internal fun TvPlayerScreen(
                     onSelectPreset = onSelectPreset,
                     onSelectAspectMode = onSelectAspectMode,
                     onClose = { trackPanelOpen = false },
-                    modifier = Modifier.widthIn(max = 560.dp),
+                    modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
                 )
             }
         }

@@ -144,6 +144,10 @@ class MainActivity : ComponentActivity() {
                             runCatching { File(context.filesDir, "last_crash.txt").delete() }
                             lastCrashText = null
                         },
+                        shape = MuxGridShapes.Dialog,
+                        containerColor = MuxGridColors.CardSurfaceElevated,
+                        titleContentColor = MuxGridColors.TextPrimary,
+                        textContentColor = MuxGridColors.TextSecondary,
                         title = { Text("Previous Crash Log") },
                         text = {
                             Column(
@@ -170,7 +174,7 @@ class MainActivity : ComponentActivity() {
                                         cm.setPrimaryClip(android.content.ClipData.newPlainText("MuxGrid Crash", crashText))
                                     },
                                 ) {
-                                    Text("Copy")
+                                    Text("Copy", color = MuxGridColors.TextSecondary)
                                 }
                                 TextButton(
                                     onClick = {
@@ -178,7 +182,7 @@ class MainActivity : ComponentActivity() {
                                         lastCrashText = null
                                     },
                                 ) {
-                                    Text("Dismiss")
+                                    Text("Dismiss", color = MuxGridColors.AccentSoft)
                                 }
                             }
                         },

@@ -26,10 +26,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,15 +49,19 @@ import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.designsystem.BroadcastUnderlineTab
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
+import io.github.corebonts.muxgrid.core.designsystem.DvrConfirmKind
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridConfirmDialog
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridModalSheet
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.buildUpcomingDays
+import io.github.corebonts.muxgrid.core.designsystem.dvrConfirmSpec
 import io.github.corebonts.muxgrid.core.designsystem.filterEpgEventsForDay
 import io.github.corebonts.muxgrid.core.designsystem.findMatchingDvrEntry
 import io.github.corebonts.muxgrid.core.designsystem.formatDayLabel
@@ -95,6 +97,7 @@ internal fun MobileGuideScreen(
     }
     var searchQuery by remember { mutableStateOf("") }
     var selectedEvent by remember { mutableStateOf<EpgEvent?>(null) }
+    var pendingConfirm by remember { mutableStateOf<Pair<DvrConfirmKind, DvrEntry>?>(null) }
     var actionBusy by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
 
@@ -393,20 +396,9 @@ internal fun MobileGuideScreen(
         val linkedDvr = findMatchingDvrEntry(detailEvent, dvrEntries)
         val isLiveNow = nowEpochSec in detailEvent.startEpochSec until detailEvent.stopEpochSec
 
-        ModalBottomSheet(
+        MuxGridModalSheet(
             onDismissRequest = { if (!actionBusy) selectedEvent = null },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            shape = MuxGridShapes.SheetTop,
-            containerColor = MuxGridColors.CardSurfaceElevated,
-            contentColor = MuxGridColors.TextPrimary,
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-                    .padding(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -503,20 +495,17 @@ internal fun MobileGuideScreen(
                             ) {
                                 Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.AccentSoft, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Chase Play", color = MuxGridColors.AccentSoft, maxLines = 1)
+                                Text(
+                                    text = if (linkedDvr.hasResumePosition) "Resume Chase Play" else "Chase Play",
+                                    color = MuxGridColors.AccentSoft,
+                                    maxLines = 1,
+                                )
                             }
                             OutlinedButton(
                                 enabled = !actionBusy,
                                 shape = MuxGridShapes.Sm,
                                 onClick = {
-                                    scope.launch {
-                                        actionBusy = true
-                                        actionError = null
-                                        onStopRecording(linkedDvr.id)
-                                            .onSuccess { selectedEvent = null }
-                                            .onFailure { actionError = it.message ?: "Failed to stop recording" }
-                                        actionBusy = false
-                                    }
+                                    pendingConfirm = DvrConfirmKind.STOP_AND_SAVE to linkedDvr
                                 },
                                 modifier = Modifier.weight(1f),
                             ) {
@@ -556,14 +545,7 @@ internal fun MobileGuideScreen(
                                     enabled = !actionBusy,
                                     shape = MuxGridShapes.Sm,
                                     onClick = {
-                                        scope.launch {
-                                            actionBusy = true
-                                            actionError = null
-                                            onCancelRecording(linkedDvr.id)
-                                                .onSuccess { selectedEvent = null }
-                                                .onFailure { actionError = it.message ?: "Failed to cancel timer" }
-                                            actionBusy = false
-                                        }
+                                        pendingConfirm = DvrConfirmKind.CANCEL_TIMER to linkedDvr
                                     },
                                     modifier = Modifier.weight(1f),
                                 ) {
@@ -600,7 +582,40 @@ internal fun MobileGuideScreen(
                         }
                     }
                 }
-            }
         }
+    }
+
+    pendingConfirm?.let { (kind, entry) ->
+        val spec = dvrConfirmSpec(kind, entry.title)
+        MuxGridConfirmDialog(
+            title = spec.title,
+            message = spec.message,
+            confirmLabel = spec.confirmLabel,
+            isDestructive = spec.isDestructive,
+            enabled = !actionBusy,
+            onDismiss = { pendingConfirm = null },
+            onConfirm = {
+                pendingConfirm = null
+                scope.launch {
+                    actionBusy = true
+                    actionError = null
+                    val result = when (kind) {
+                        DvrConfirmKind.STOP_AND_SAVE -> onStopRecording(entry.id)
+                        DvrConfirmKind.CANCEL_TIMER -> onCancelRecording(entry.id)
+                        else -> Result.success(Unit)
+                    }
+                    result
+                        .onSuccess { selectedEvent = null }
+                        .onFailure {
+                            actionError = it.message ?: when (kind) {
+                                DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop recording"
+                                DvrConfirmKind.CANCEL_TIMER -> "Failed to cancel timer"
+                                else -> "Action failed"
+                            }
+                        }
+                    actionBusy = false
+                }
+            },
+        )
     }
 }

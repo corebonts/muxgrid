@@ -174,6 +174,13 @@ internal fun MobilePlayerScreen(
     val isAudioStage = playbackState.isRadio || playbackState.isAudioOnly
     val hasError = playbackState.error != null
 
+    BackHandler(enabled = trackPanelOpen || quickZapOpen) {
+        when {
+            trackPanelOpen -> trackPanelOpen = false
+            quickZapOpen -> quickZapOpen = false
+        }
+    }
+
     // Immersive system bars on phone player
     LaunchedEffect(hudVisible, isInPip, trackPanelOpen, quickZapOpen, hasError) {
         val window = activity?.window ?: return@LaunchedEffect

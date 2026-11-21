@@ -37,11 +37,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -880,6 +878,7 @@ private fun MobileLiveChannelsTab(
 ) {
     val scope = rememberCoroutineScope()
     var actionChannel by remember { mutableStateOf<Channel?>(null) }
+    var actionBusy by remember { mutableStateOf(false) }
     var actionMessage by remember { mutableStateOf<String?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
     var refreshError by remember { mutableStateOf<String?>(null) }
@@ -1010,82 +1009,91 @@ private fun MobileLiveChannelsTab(
     actionChannel?.let { ch ->
         val nowEvent = nowNextMap[ch.id]?.now
         val isFav = ch.id in favorites
-        ModalBottomSheet(
-            onDismissRequest = { actionChannel = null },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            shape = MuxGridShapes.SheetTop,
-            containerColor = MuxGridColors.CardSurfaceElevated,
-            contentColor = MuxGridColors.TextPrimary,
+        io.github.corebonts.muxgrid.core.designsystem.MuxGridModalSheet(
+            onDismissRequest = { if (!actionBusy) actionChannel = null },
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-                    .padding(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(ch.name, style = MuxGridType.Title, fontSize = 18.sp)
-                nowEvent?.let { Text("On Now: ${it.title}", style = MuxGridType.CardSubtitle) }
-                actionMessage?.let { Text(it, color = MuxGridColors.CoralLive, fontSize = 12.sp) }
+                ChannelPiconBadge(
+                    channelNumber = ch.formattedNumber,
+                    channelName = ch.name,
+                    piconModel = ch.icon?.let { PiconModel(ch.id, it) },
+                    imageLoader = imageLoader,
+                    size = 44.dp,
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(ch.name, style = MuxGridType.Title, fontSize = 18.sp)
+                    nowEvent?.let { Text("On Now: ${it.title}", style = MuxGridType.CardSubtitle) }
+                }
+            }
+            actionMessage?.let { Text(it, color = MuxGridColors.CoralLive, fontSize = 13.sp) }
 
-                Button(
-                    onClick = {
-                        actionChannel = null
-                        onChannelClick(ch)
-                    },
-                    shape = MuxGridShapes.Sm,
-                    colors = ButtonDefaults.buttonColors(containerColor = MuxGridColors.Accent, contentColor = MuxGridColors.OnAccent),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Watch Live", fontWeight = FontWeight.SemiBold)
-                }
+            Button(
+                enabled = !actionBusy,
+                onClick = {
+                    actionChannel = null
+                    onChannelClick(ch)
+                },
+                shape = MuxGridShapes.Sm,
+                colors = ButtonDefaults.buttonColors(containerColor = MuxGridColors.Accent, contentColor = MuxGridColors.OnAccent),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Watch Live", fontWeight = FontWeight.SemiBold)
+            }
+            OutlinedButton(
+                enabled = !actionBusy,
+                onClick = {
+                    onToggleFavorite(ch)
+                    actionChannel = null
+                },
+                shape = MuxGridShapes.Sm,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    imageVector = if (isFav) MuxGridIcons.StarFilled else MuxGridIcons.Star,
+                    contentDescription = null,
+                    tint = if (isFav) MuxGridColors.AmberWarn else MuxGridColors.TextPrimary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(if (isFav) "Remove from Favorites" else "Add to Favorites", color = MuxGridColors.TextPrimary)
+            }
+            OutlinedButton(
+                enabled = !actionBusy,
+                onClick = {
+                    actionChannel = null
+                    onOpenGuideForChannel(ch)
+                },
+                shape = MuxGridShapes.Sm,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(MuxGridIcons.Guide, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("View EPG Guide", color = MuxGridColors.TextPrimary)
+            }
+            if (nowEvent != null && nowEvent.dvrId == null) {
                 OutlinedButton(
+                    enabled = !actionBusy,
                     onClick = {
-                        onToggleFavorite(ch)
-                        actionChannel = null
+                        scope.launch {
+                            actionBusy = true
+                            actionMessage = null
+                            onRecordEvent(nowEvent.id)
+                                .onSuccess { actionChannel = null }
+                                .onFailure { actionMessage = it.message ?: "Failed to record" }
+                            actionBusy = false
+                        }
                     },
                     shape = MuxGridShapes.Sm,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Icon(
-                        imageVector = if (isFav) MuxGridIcons.StarFilled else MuxGridIcons.Star,
-                        contentDescription = null,
-                        tint = if (isFav) MuxGridColors.AmberWarn else MuxGridColors.TextPrimary,
-                        modifier = Modifier.size(18.dp),
-                    )
+                    Icon(MuxGridIcons.Record, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(if (isFav) "Remove from Favorites" else "Add to Favorites", color = MuxGridColors.TextPrimary)
-                }
-                OutlinedButton(
-                    onClick = {
-                        actionChannel = null
-                        onOpenGuideForChannel(ch)
-                    },
-                    shape = MuxGridShapes.Sm,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(MuxGridIcons.Guide, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("View EPG Guide", color = MuxGridColors.TextPrimary)
-                }
-                if (nowEvent != null && nowEvent.dvrId == null) {
-                    OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                onRecordEvent(nowEvent.id)
-                                    .onSuccess { actionChannel = null }
-                                    .onFailure { actionMessage = it.message ?: "Failed to record" }
-                            }
-                        },
-                        shape = MuxGridShapes.Sm,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(MuxGridIcons.Record, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Record Current Show", color = MuxGridColors.CoralLive)
-                    }
+                    Text("Record Current Show", color = MuxGridColors.CoralLive)
                 }
             }
         }

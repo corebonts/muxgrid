@@ -10,6 +10,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -47,8 +48,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -124,7 +128,104 @@ internal fun tvDialogSecondaryButtonColors() = ButtonDefaults.colors(
 )
 
 @Composable
+internal fun tvDialogDestructiveButtonColors() = ButtonDefaults.colors(
+    containerColor = MuxGridColors.CoralLive.copy(alpha = 0.16f),
+    contentColor = MuxGridColors.CoralLive,
+    focusedContainerColor = MuxGridColors.CoralLive,
+    focusedContentColor = MuxGridColors.TextPrimary,
+)
+
+@Composable
 internal fun tvButtonShape() = ButtonDefaults.shape(shape = MuxGridShapes.Sm)
+
+@Composable
+internal fun TvModalDialog(
+    onDismissRequest: () -> Unit,
+    minWidth: Dp = 440.dp,
+    maxWidth: Dp = 680.dp,
+    borderColor: Color = MuxGridColors.HairlineBorder,
+    borderWidth: Dp = MuxGridBorders.Hairline,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(min = minWidth, max = maxWidth)
+                .clip(MuxGridShapes.Dialog)
+                .background(MuxGridColors.CardSurfaceElevated)
+                .border(borderWidth, borderColor, MuxGridShapes.Dialog)
+                .verticalScroll(rememberScrollState())
+                .padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            content = content,
+        )
+    }
+}
+
+@Composable
+internal fun TvConfirmDialog(
+    title: String,
+    message: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    dismissLabel: String = "Cancel",
+    isDestructive: Boolean = false,
+    enabled: Boolean = true,
+) {
+    val cancelFocusRequester = remember { FocusRequester() }
+    val confirmFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        runCatching {
+            if (isDestructive) cancelFocusRequester.requestFocus() else confirmFocusRequester.requestFocus()
+        }
+    }
+    TvModalDialog(
+        onDismissRequest = { if (enabled) onDismiss() },
+        minWidth = 380.dp,
+        maxWidth = 520.dp,
+        borderColor = if (isDestructive) MuxGridColors.CoralLive.copy(alpha = 0.45f) else MuxGridColors.HairlineBorder,
+    ) {
+        Text(
+            text = title,
+            style = MuxGridType.Title,
+            fontSize = 18.sp,
+            color = MuxGridColors.TextPrimary,
+        )
+        Text(
+            text = message,
+            style = MuxGridType.CardSubtitle,
+            fontSize = 14.sp,
+            color = MuxGridColors.TextSecondary,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+        ) {
+            Button(
+                enabled = enabled,
+                onClick = onDismiss,
+                modifier = Modifier.focusRequester(cancelFocusRequester),
+                shape = tvButtonShape(),
+                colors = tvDialogSecondaryButtonColors(),
+            ) {
+                Text(dismissLabel, maxLines = 1, softWrap = false)
+            }
+            Button(
+                enabled = enabled,
+                onClick = onConfirm,
+                modifier = Modifier.focusRequester(confirmFocusRequester),
+                shape = tvButtonShape(),
+                colors = if (isDestructive) tvDialogDestructiveButtonColors() else tvPrimaryButtonColors(),
+            ) {
+                Text(confirmLabel, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+            }
+        }
+    }
+}
 
 @Composable
 fun TvRoot(

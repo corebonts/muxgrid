@@ -22,6 +22,10 @@ MuxGrid uses a low-glare **Broadcast Monitor** dark visual language (`Carbon & S
   - Compact crisp corners: `3dp` badges, `5dp` controls/buttons, `8dp` rows/cards, `12dp` dialogs/sheets.
 - **Motion:**
   - Snappy transitions (~180–250ms) and subtle `2dp` focus borders + mild scale on TV cards without jumpy layouts.
+- **Dialogs, Sheets & Confirmations:**
+  - Modal sheets and action/confirmation dialogs use `CardSurfaceElevated` (`#1D1D22`), `12dp` corners (`MuxGridShapes.Dialog` / `MuxGridShapes.SheetTop`), and `1dp` `HairlineBorder` (or `CoralLive` at 55% alpha for playback errors); settings/options panels (**Server Setup**, **Display Options**) use `CardSurface` (`#141417`) with `CardSurfaceElevated` (`#1D1D22`) inner controls and `0.5dp` `HairlineBorder`.
+  - Player overlays (**Display Options**, **Playback Error**, **Quick Zap**) render in-window over `OverlayBackdrop` (`#99000000`) rather than separate `Dialog` windows over `SurfaceView`, trap D-pad focus inside modal panels (**Display Options** focuses the first content option on open), and always intercept `Back` to close the overlay first.
+  - Disruptive or irreversible DVR actions (**Stop & Save**, **Abort Recording**, **Cancel Timer**, **Delete Recording**) always require confirmation on both Mobile and TV, with TV destructive confirmations defaulting initial focus to **Cancel**.
 
 ---
 

@@ -8,11 +8,14 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -28,8 +31,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -506,11 +515,11 @@ fun TrackAndPresetPanel(
     aspectMode: VideoAspectMode? = null,
     onSelectAspectMode: ((VideoAspectMode) -> Unit)? = null,
 ) {
-    val closeFocusRequester = remember { FocusRequester() }
+    val firstOptionFocusRequester = remember { FocusRequester() }
     var closeFocused by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        runCatching { closeFocusRequester.requestFocus() }
+        runCatching { firstOptionFocusRequester.requestFocus() }
     }
 
     Column(
@@ -519,8 +528,15 @@ fun TrackAndPresetPanel(
             .clip(MuxGridShapes.Dialog)
             .background(MuxGridColors.CardSurface)
             .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {},
+            )
+            .focusProperties { onExit = { cancelFocusChange() } }
+            .focusGroup()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .padding(22.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(
@@ -528,36 +544,37 @@ fun TrackAndPresetPanel(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "Display Options",
-                style = MuxGridType.Title,
-                fontSize = 18.sp,
-                modifier = Modifier.padding(horizontal = 2.dp),
-            )
             Row(
+                modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    imageVector = MuxGridIcons.Tracks,
+                    contentDescription = null,
+                    tint = MuxGridColors.AccentSoft,
+                    modifier = Modifier.size(22.dp),
+                )
+                Text(
+                    text = "Display Options",
+                    style = MuxGridType.Title,
+                    fontSize = 20.sp,
+                )
+            }
+            Box(
                 modifier = Modifier
-                    .focusRequester(closeFocusRequester)
+                    .size(36.dp)
                     .onFocusChanged { closeFocused = it.isFocused }
                     .clip(MuxGridShapes.Sm)
-                    .background(if (closeFocused) MuxGridColors.FocusBorder else MuxGridColors.CardSurfaceElevated)
-                    .clickable(onClick = onClose)
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                    .background(if (closeFocused) MuxGridColors.FocusBorder else Color.Transparent)
+                    .clickable(onClick = onClose),
+                contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = MuxGridIcons.Close,
                     contentDescription = "Close",
                     tint = if (closeFocused) MuxGridColors.CanvasTv else MuxGridColors.TextSecondary,
-                    modifier = Modifier.size(15.dp),
-                )
-                Text(
-                    text = "Close",
-                    color = if (closeFocused) MuxGridColors.CanvasTv else MuxGridColors.TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    softWrap = false,
+                    modifier = Modifier.size(20.dp),
                 )
             }
         }
@@ -578,12 +595,13 @@ fun TrackAndPresetPanel(
                         .background(MuxGridColors.CanvasPhone),
                     verticalArrangement = Arrangement.spacedBy(1.dp),
                 ) {
-                    audioTracks.forEach { track ->
+                    audioTracks.forEachIndexed { idx, track ->
                         val selected = track.id == selectedAudioId || track.isSelected
                         SelectableOptionRow(
                             label = track.displayLabel,
                             selected = selected,
                             onClick = { onSelectAudio(track.id) },
+                            modifier = if (idx == 0) Modifier.focusRequester(firstOptionFocusRequester) else Modifier,
                         )
                     }
                 }
@@ -603,6 +621,7 @@ fun TrackAndPresetPanel(
                     label = "Off",
                     selected = selectedSubtitleId == null,
                     onClick = { onSelectSubtitle(null) },
+                    modifier = if (audioTracks.isEmpty()) Modifier.focusRequester(firstOptionFocusRequester) else Modifier,
                 )
                 subtitleTracks.forEach { track ->
                     val selected = track.id == selectedSubtitleId || track.isSelected
@@ -693,6 +712,7 @@ private fun SelectableOptionRow(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
     val bg = if (focused) MuxGridColors.FocusBorder else MuxGridColors.CardSurfaceElevated
@@ -702,7 +722,7 @@ private fun SelectableOptionRow(
         else -> MuxGridColors.TextSecondary
     }
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .onFocusChanged { focused = it.isFocused }
             .background(bg)
@@ -863,6 +883,114 @@ fun TimeshiftNoticeBanner(
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+enum class DvrConfirmKind {
+    STOP_AND_SAVE,
+    ABORT_RECORDING,
+    CANCEL_TIMER,
+    DELETE_RECORDING,
+}
+
+data class DvrConfirmSpec(
+    val title: String,
+    val message: String,
+    val confirmLabel: String,
+    val isDestructive: Boolean,
+)
+
+fun dvrConfirmSpec(kind: DvrConfirmKind, entryTitle: String): DvrConfirmSpec = when (kind) {
+    DvrConfirmKind.STOP_AND_SAVE -> DvrConfirmSpec(
+        title = "Stop Recording?",
+        message = "Stop \"$entryTitle\" now and save what has been recorded so far?",
+        confirmLabel = "Stop & Save",
+        isDestructive = false,
+    )
+    DvrConfirmKind.ABORT_RECORDING -> DvrConfirmSpec(
+        title = "Abort Recording?",
+        message = "Abort \"$entryTitle\"? The in-progress recording will be cancelled and discarded.",
+        confirmLabel = "Abort Recording",
+        isDestructive = true,
+    )
+    DvrConfirmKind.CANCEL_TIMER -> DvrConfirmSpec(
+        title = "Cancel Scheduled Recording?",
+        message = "Cancel the scheduled timer for \"$entryTitle\"?",
+        confirmLabel = "Cancel Timer",
+        isDestructive = true,
+    )
+    DvrConfirmKind.DELETE_RECORDING -> DvrConfirmSpec(
+        title = "Delete Recording?",
+        message = "Delete \"$entryTitle\" from Tvheadend storage? This cannot be undone.",
+        confirmLabel = "Delete",
+        isDestructive = true,
+    )
+}
+
+@Composable
+fun MuxGridConfirmDialog(
+    title: String,
+    message: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    dismissLabel: String = "Cancel",
+    isDestructive: Boolean = false,
+    enabled: Boolean = true,
+) {
+    AlertDialog(
+        onDismissRequest = { if (enabled) onDismiss() },
+        shape = MuxGridShapes.Dialog,
+        containerColor = MuxGridColors.CardSurfaceElevated,
+        titleContentColor = MuxGridColors.TextPrimary,
+        textContentColor = MuxGridColors.TextSecondary,
+        title = { Text(title) },
+        text = { Text(message) },
+        confirmButton = {
+            TextButton(
+                enabled = enabled,
+                onClick = onConfirm,
+            ) {
+                Text(
+                    text = confirmLabel,
+                    color = if (isDestructive) MuxGridColors.CoralLive else MuxGridColors.AccentSoft,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                enabled = enabled,
+                onClick = onDismiss,
+            ) {
+                Text(dismissLabel, color = MuxGridColors.TextSecondary)
+            }
+        },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MuxGridModalSheet(
+    onDismissRequest: () -> Unit,
+    contentSpacing: Dp = 12.dp,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = MuxGridShapes.SheetTop,
+        containerColor = MuxGridColors.CardSurfaceElevated,
+        contentColor = MuxGridColors.TextPrimary,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(contentSpacing),
+            content = content,
         )
     }
 }
