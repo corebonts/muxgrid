@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -55,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -408,13 +410,30 @@ private fun TvContent(
                     isGuideSearchOpen = false
                 }
             }
+            var railHasFocus by remember { mutableStateOf(false) }
+            var allowRailFocus by remember { mutableStateOf(false) }
+            var railFocusRequestNonce by remember { mutableIntStateOf(0) }
+            val contentFocusRequester = remember { FocusRequester() }
+
+            // Put initial focus inside content on frame 0 before enabling rail focusability so
+            // Android TV's initial focus never lands on the rail and flashes it open at startup.
+            LaunchedEffect(Unit) {
+                if (contentFocusRequestNonce == 0) {
+                    runCatching { contentFocusRequester.requestFocus() }
+                }
+                withFrameNanos { }
+                allowRailFocus = true
+            }
+
             if (!hasDeliveredInitialContentFocus) {
                 when (activeTab) {
                     MainTab.LIVE, MainTab.GUIDE -> {
                         LaunchedEffect(channels.isNotEmpty()) {
                             if (channels.isNotEmpty()) {
                                 hasDeliveredInitialContentFocus = true
-                                contentFocusRequestNonce++
+                                if (!railHasFocus) {
+                                    contentFocusRequestNonce++
+                                }
                             }
                         }
                     }
@@ -423,25 +442,24 @@ private fun TvContent(
                         LaunchedEffect(dvrEntries.isNotEmpty()) {
                             if (dvrEntries.isNotEmpty()) {
                                 hasDeliveredInitialContentFocus = true
-                                contentFocusRequestNonce++
+                                if (!railHasFocus) {
+                                    contentFocusRequestNonce++
+                                }
                             }
                         }
                     }
                     MainTab.SETTINGS -> {
                         LaunchedEffect(Unit) {
                             hasDeliveredInitialContentFocus = true
-                            contentFocusRequestNonce++
+                            if (!railHasFocus) {
+                                contentFocusRequestNonce++
+                            }
                         }
                     }
                 }
             }
-            var railHasFocus by remember { mutableStateOf(false) }
-            BackHandler(enabled = activeTab != currentStartScreen.tab && !isGuideSearchOpen) {
-                activeTab = currentStartScreen.tab
-                contentFocusRequestNonce++
-            }
-            BackHandler(enabled = activeTab == currentStartScreen.tab && railHasFocus) {
-                contentFocusRequestNonce++
+            BackHandler(enabled = !railHasFocus && !isGuideSearchOpen) {
+                railFocusRequestNonce++
             }
             var isRefreshing by remember { mutableStateOf(false) }
             val statusDotColor = connectionStatusDotColor(connectionState)
@@ -457,8 +475,9 @@ private fun TvContent(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(start = TV_RAIL_COLLAPSED_WIDTH + 20.dp, end = 24.dp, top = 16.dp, bottom = 12.dp)
-                        .focusGroup()
-                        .focusRestorer(),
+                        .focusRequester(contentFocusRequester)
+                        .focusRestorer()
+                        .focusGroup(),
                 ) {
                     Row(
                         modifier = Modifier
@@ -669,6 +688,8 @@ private fun TvContent(
                 TvNavigationRail(
                     activeTab = activeTab,
                     expanded = railHasFocus,
+                    allowFocus = allowRailFocus,
+                    focusRequestNonce = railFocusRequestNonce,
                     settingsStatusDotColor = statusDotColor,
                     onRailFocusChanged = { railHasFocus = it },
                     onSelectTab = { tab ->
@@ -751,6 +772,8 @@ private fun TvContent(
 private fun TvNavigationRail(
     activeTab: MainTab,
     expanded: Boolean,
+    allowFocus: Boolean,
+    focusRequestNonce: Int,
     settingsStatusDotColor: Color?,
     onRailFocusChanged: (Boolean) -> Unit,
     onSelectTab: (MainTab) -> Unit,
@@ -761,7 +784,17 @@ private fun TvNavigationRail(
         animationSpec = tween(durationMillis = MuxGridDurations.RailExpand),
         label = "tvRailWidth",
     )
-    val activeFocusRequester = remember { FocusRequester() }
+    val labelAlpha = {
+        ((railWidth - TV_RAIL_COLLAPSED_WIDTH) / (TV_RAIL_EXPANDED_WIDTH - TV_RAIL_COLLAPSED_WIDTH))
+            .coerceIn(0f, 1f)
+    }
+    val tabFocusRequesters = remember { MainTab.entries.associateWith { FocusRequester() } }
+
+    LaunchedEffect(focusRequestNonce) {
+        if (focusRequestNonce > 0) {
+            runCatching { tabFocusRequesters.getValue(activeTab).requestFocus() }
+        }
+    }
 
     Row(modifier = modifier.fillMaxHeight()) {
         Column(
@@ -770,26 +803,30 @@ private fun TvNavigationRail(
                 .fillMaxHeight()
                 .background(MuxGridColors.CardSurfaceAlt)
                 .onFocusChanged { onRailFocusChanged(it.hasFocus) }
+                .focusProperties {
+                    onEnter = {
+                        tabFocusRequesters.getValue(activeTab).requestFocus()
+                    }
+                }
                 .focusGroup()
-                .focusRestorer(activeFocusRequester)
                 .padding(vertical = 20.dp, horizontal = 10.dp),
             verticalArrangement = Arrangement.SpaceBetween,
-            horizontalAlignment = Alignment.CenterHorizontally,
+            horizontalAlignment = Alignment.Start,
         ) {
             Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                horizontalAlignment = Alignment.Start,
             ) {
                 listOf(MainTab.LIVE, MainTab.GUIDE, MainTab.RECORDINGS).forEach { tab ->
                     val selected = tab == activeTab
-                    val itemModifier = if (selected) Modifier.focusRequester(activeFocusRequester) else Modifier
                     TvRailItem(
                         icon = tab.icon(selected),
                         label = tab.label(),
-                        expanded = expanded,
                         selected = selected,
+                        allowFocus = allowFocus,
+                        labelAlpha = labelAlpha,
                         onClick = { onSelectTab(tab) },
-                        modifier = itemModifier,
+                        modifier = Modifier.focusRequester(tabFocusRequesters.getValue(tab)),
                     )
                 }
             }
@@ -798,11 +835,12 @@ private fun TvNavigationRail(
             TvRailItem(
                 icon = MainTab.SETTINGS.icon(settingsSelected),
                 label = MainTab.SETTINGS.label(),
-                expanded = expanded,
                 selected = settingsSelected,
+                allowFocus = allowFocus,
+                labelAlpha = labelAlpha,
                 statusDotColor = settingsStatusDotColor,
                 onClick = { onSelectTab(MainTab.SETTINGS) },
-                modifier = if (settingsSelected) Modifier.focusRequester(activeFocusRequester) else Modifier,
+                modifier = Modifier.focusRequester(tabFocusRequesters.getValue(MainTab.SETTINGS)),
             )
         }
         Box(
@@ -818,15 +856,18 @@ private fun TvNavigationRail(
 private fun TvRailItem(
     icon: ImageVector,
     label: String,
-    expanded: Boolean,
     selected: Boolean,
+    allowFocus: Boolean,
+    labelAlpha: () -> Float,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     statusDotColor: Color? = null,
 ) {
     Surface(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .focusProperties { canFocus = allowFocus },
         shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = if (selected) MuxGridColors.CardSurfaceElevated else Color.Transparent,
@@ -843,44 +884,54 @@ private fun TvRailItem(
         ),
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
     ) {
-        Row(
+        // Keep a single fixed-width [indicator + icon + label] row anchored at Start and clipped
+        // to the animated Surface width so icons and spacing never jump on expand/collapse.
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 11.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.Center,
+                .clipToBounds(),
+            contentAlignment = Alignment.CenterStart,
         ) {
-            if (selected) {
+            Row(
+                modifier = Modifier
+                    .wrapContentWidth(align = Alignment.Start, unbounded = true)
+                    .width(TV_RAIL_EXPANDED_WIDTH - 20.dp)
+                    .padding(vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Spacer(Modifier.width(4.dp))
                 Box(
                     modifier = Modifier
                         .width(3.dp)
                         .height(18.dp)
-                        .background(MuxGridColors.Accent),
+                        .background(if (selected) MuxGridColors.Accent else Color.Transparent),
                 )
-                Spacer(Modifier.width(if (expanded) 9.dp else 4.dp))
-            }
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = label,
-                    modifier = Modifier.size(22.dp),
-                )
-                if (statusDotColor != null) {
-                    ConnectionStatusDot(
-                        color = statusDotColor,
-                        borderColor = if (selected) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurfaceAlt,
-                        modifier = Modifier.align(Alignment.TopEnd),
+                Spacer(Modifier.width(6.dp))
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = label,
+                        modifier = Modifier.size(22.dp),
                     )
+                    if (statusDotColor != null) {
+                        ConnectionStatusDot(
+                            color = statusDotColor,
+                            borderColor = if (selected) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurfaceAlt,
+                            modifier = Modifier.align(Alignment.TopEnd),
+                        )
+                    }
                 }
-            }
-            if (expanded) {
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(13.dp))
                 Text(
                     text = label,
                     fontSize = 14.sp,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                    modifier = Modifier
+                        .padding(end = 10.dp)
+                        .graphicsLayer { alpha = labelAlpha() },
                 )
             }
         }
