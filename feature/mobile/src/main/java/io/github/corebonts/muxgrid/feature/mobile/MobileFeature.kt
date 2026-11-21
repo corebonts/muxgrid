@@ -1,5 +1,6 @@
 package io.github.corebonts.muxgrid.feature.mobile
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -14,10 +15,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,6 +49,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -53,6 +58,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -89,6 +98,7 @@ import io.github.corebonts.muxgrid.core.designsystem.filterChannels
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
 import io.github.corebonts.muxgrid.core.designsystem.label
 import io.github.corebonts.muxgrid.core.designsystem.rememberNowEpochSec
+import io.github.corebonts.muxgrid.core.model.AppBuildInfo
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
@@ -115,6 +125,7 @@ private enum class MobileRoute {
 fun MobileRoot(
     repository: TvheadendRepository,
     playbackEngine: PlaybackEngine,
+    appInfo: AppBuildInfo = AppBuildInfo(versionName = "", versionCode = 0, buildSha = ""),
     isInPictureInPictureMode: Boolean = false,
     openPlayerSignal: Int = 0,
     canEnterPip: Boolean = false,
@@ -213,12 +224,6 @@ fun MobileRoot(
                 } else {
                     1
                 }
-                val bottomPad = when {
-                    useRail && hasMiniPlayer -> 92.dp
-                    useRail -> 24.dp
-                    hasMiniPlayer -> 144.dp
-                    else -> 82.dp
-                }
 
                 MobileMainScaffold(
                     activeTab = activeTab,
@@ -238,7 +243,7 @@ fun MobileRoot(
                     },
                     onToggleMiniPlayerPause = { playbackEngine.togglePause() },
                     onStopMiniPlayer = { playbackEngine.stop() },
-                ) {
+                ) { bottomPad ->
                     when (activeTab) {
                         MainTab.LIVE -> {
                             MobileLiveChannelsTab(
@@ -322,6 +327,7 @@ fun MobileRoot(
                                 timeshiftWindow = timeshiftWindow,
                                 backgroundPlayEnabled = backgroundPlayEnabled,
                                 pipEnabled = pipEnabled,
+                                appInfo = appInfo,
                                 bottomContentPadding = bottomPad,
                                 onSelectStartScreen = { screen ->
                                     scope.launch { repository.setStartScreen(screen) }
@@ -463,14 +469,32 @@ private fun MobileMainScaffold(
     onExpandMiniPlayer: () -> Unit,
     onToggleMiniPlayerPause: () -> Unit,
     onStopMiniPlayer: () -> Unit,
-    content: @Composable () -> Unit,
+    content: @Composable (bottomContentPadding: Dp) -> Unit,
 ) {
     val hazeState = rememberHazeState()
     val glassStyle = rememberFrostedGlassStyle()
     val settingsStatusDotColor = connectionStatusDotColor(connectionState)
+    val density = LocalDensity.current
+    val navBarBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    var bottomChromeHeightPx by remember { mutableIntStateOf(0) }
 
     val hasMiniPlayer = playbackState.status != PlaybackStatus.IDLE &&
         (playbackState.channelId != null || playbackState.dvrEntryId != null)
+    val hasBottomChrome = hasMiniPlayer || !useNavigationRail
+    val bottomContentPadding = if (hasBottomChrome) {
+        val chromeHeight = if (bottomChromeHeightPx > 0) {
+            with(density) { bottomChromeHeightPx.toDp() }
+        } else {
+            navBarBottomPadding + when {
+                !useNavigationRail && hasMiniPlayer -> 120.dp
+                !useNavigationRail -> 60.dp
+                else -> 76.dp
+            }
+        }
+        chromeHeight + 20.dp
+    } else {
+        navBarBottomPadding + 24.dp
+    }
     val miniChannel = remember(playbackState.channelId, channels) {
         channels.firstOrNull { it.id == playbackState.channelId }
     }
@@ -499,14 +523,15 @@ private fun MobileMainScaffold(
                     .fillMaxSize()
                     .hazeSource(state = hazeState),
             ) {
-                content()
+                content(bottomContentPadding)
             }
 
             // Docked frosted-glass bottom chrome (Mini-player + Portrait Bottom Nav Bar)
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .onSizeChanged { bottomChromeHeightPx = it.height },
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 if (hasMiniPlayer) {
@@ -1209,6 +1234,7 @@ private fun MobileSettingsTab(
     timeshiftWindow: TimeshiftWindow,
     backgroundPlayEnabled: Boolean,
     pipEnabled: Boolean,
+    appInfo: AppBuildInfo,
     bottomContentPadding: Dp,
     onSelectStartScreen: (StartScreen) -> Unit,
     onSelectThemeMode: (ThemeMode) -> Unit,
@@ -1219,6 +1245,9 @@ private fun MobileSettingsTab(
     onRetryConnect: () -> Unit,
     onOpenServerSetup: () -> Unit,
 ) {
+    val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1516,6 +1545,96 @@ private fun MobileSettingsTab(
                 )
             }
         }
+
+        Column(
+            modifier = Modifier.widthIn(max = 680.dp).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text("APP INFO", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MuxGridShapes.Card)
+                    .background(MuxGridColors.Divider),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                SettingInfoRow(
+                    label = "Version",
+                    value = appInfo.versionDisplay,
+                )
+                SettingInfoRow(
+                    label = "Build SHA",
+                    value = appInfo.shortSha,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MuxGridColors.CardSurface)
+                        .clickable {
+                            runCatching {
+                                uriHandler.openUri(appInfo.githubUrl)
+                            }.onFailure {
+                                Toast.makeText(context, appInfo.githubUrl, Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        .padding(horizontal = 12.dp, vertical = 11.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                        Text(
+                            text = "GitHub",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MuxGridColors.TextPrimary,
+                        )
+                        Text(
+                            text = appInfo.githubDisplayUrl,
+                            style = MuxGridType.TabularSmall,
+                            color = MuxGridColors.AccentSoft,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Icon(
+                        imageVector = MuxGridIcons.ChevronRight,
+                        contentDescription = "Open GitHub",
+                        tint = MuxGridColors.TextMuted,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingInfoRow(
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MuxGridColors.CardSurface)
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MuxGridColors.TextPrimary,
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = value,
+            style = MuxGridType.TabularNumber,
+            color = MuxGridColors.TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

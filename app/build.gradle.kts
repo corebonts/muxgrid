@@ -29,6 +29,23 @@ val hasReleaseSigning = releaseStoreFile != null &&
     !releaseKeyAlias.isNullOrBlank() &&
     !releaseKeyPassword.isNullOrBlank()
 
+val gitSha = runCatching {
+    val exec = providers.exec {
+        workingDir = rootProject.projectDir
+        commandLine("git", "rev-parse", "--short=7", "HEAD")
+        isIgnoreExitValue = true
+    }
+    if (exec.result.get().exitValue == 0) {
+        exec.standardOutput.asText.get().trim()
+    } else {
+        ""
+    }
+}.getOrDefault("")
+    .ifEmpty { System.getenv("GITHUB_SHA")?.take(7).orEmpty() }
+    .filter { it.isLetterOrDigit() }
+    .take(7)
+    .ifEmpty { "unknown" }
+
 android {
     namespace = "io.github.corebonts.muxgrid"
     compileSdk {
@@ -43,6 +60,7 @@ android {
         targetSdk = 36
         versionCode = 4
         versionName = "0.6.0"
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
     }
 
     signingConfigs {
@@ -96,6 +114,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

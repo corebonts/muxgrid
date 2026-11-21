@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
+import io.github.corebonts.muxgrid.core.model.AppBuildInfo
 import io.github.corebonts.muxgrid.core.model.FormFactor
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
@@ -157,15 +158,25 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                val appInfo = remember {
+                    AppBuildInfo(
+                        versionName = BuildConfig.VERSION_NAME,
+                        versionCode = BuildConfig.VERSION_CODE,
+                        buildSha = BuildConfig.GIT_SHA,
+                    )
+                }
+
                 if (isTv) {
                     TvRoot(
                         repository = container.repository,
                         playbackEngine = container.playbackEngine,
+                        appInfo = appInfo,
                     )
                 } else {
                     MobileRoot(
                         repository = container.repository,
                         playbackEngine = container.playbackEngine,
+                        appInfo = appInfo,
                         isInPictureInPictureMode = isInPipModeState,
                         openPlayerSignal = openPlayerSignal,
                         canEnterPip = pipSupported && pipEnabled,
