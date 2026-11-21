@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,11 +21,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -37,10 +37,11 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -55,8 +56,13 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -87,15 +93,19 @@ import io.github.corebonts.muxgrid.core.designsystem.dvrConfirmSpec
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
+import io.github.corebonts.muxgrid.core.designsystem.TimelineRowTrack
+import io.github.corebonts.muxgrid.core.designsystem.TimelineRuler
 import io.github.corebonts.muxgrid.core.designsystem.buildAvailableGuideDays
-import io.github.corebonts.muxgrid.core.designsystem.buildRowTimelineCells
+import io.github.corebonts.muxgrid.core.designsystem.buildContinuousTimelineCells
 import io.github.corebonts.muxgrid.core.designsystem.computeDayJumpWindowStart
 import io.github.corebonts.muxgrid.core.designsystem.computeGuideEventBounds
+import io.github.corebonts.muxgrid.core.designsystem.findAdjacentEpgEvent
 import io.github.corebonts.muxgrid.core.designsystem.floorToHalfHour
 import io.github.corebonts.muxgrid.core.designsystem.formatDayLabel
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochDayHm
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
+import io.github.corebonts.muxgrid.core.designsystem.rememberTimelineScrollState
 import io.github.corebonts.muxgrid.core.designsystem.scrollItemIntoViewport
 import io.github.corebonts.muxgrid.core.designsystem.searchEpgEvents
 import io.github.corebonts.muxgrid.core.model.Channel
@@ -109,8 +119,7 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
 
-private const val TIMELINE_WINDOW_SEC = 3L * 3600L // 3-hour horizontal viewport
-private const val TIMELINE_STEP_SEC = 2L * 3600L
+private val TV_TIMELINE_DP_PER_HOUR = 260.dp
 
 @OptIn(ExperimentalTvMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -135,6 +144,7 @@ internal fun TvGuideScreen(
     onCancelRecording: suspend (Long) -> Result<Unit>,
 ) {
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
     val activeZone = remember { ZoneId.systemDefault() }
     val todayDate = remember(nowEpochSec / 3600L) {
         Instant.ofEpochSecond(nowEpochSec).atZone(activeZone).toLocalDate()
@@ -146,16 +156,27 @@ internal fun TvGuideScreen(
         computeGuideEventBounds(epgByChannel, nowEpochSec, activeZone)
     }
     val todayStartHalfHour = floorToHalfHour(nowEpochSec)
-    val minWindowStartSec = remember(eventBounds, todayStartHalfHour) {
+    val timelineOriginSec = remember(eventBounds, todayStartHalfHour) {
         val earliest = eventBounds?.first ?: (todayStartHalfHour - 3600L)
         minOf(floorToHalfHour(earliest), todayStartHalfHour - 3600L)
     }
-    val maxWindowStartSec = remember(eventBounds, todayStartHalfHour) {
+    val timelineEndSec = remember(eventBounds, todayStartHalfHour) {
         val latest = eventBounds?.second ?: (todayStartHalfHour + 24L * 3600L)
-        maxOf(todayStartHalfHour, floorToHalfHour(latest - TIMELINE_WINDOW_SEC))
+        maxOf(todayStartHalfHour + 6L * 3600L, floorToHalfHour(latest) + HALF_HOUR_SEC)
     }
-    val windowDate = remember(windowStartEpochSec) {
-        Instant.ofEpochSecond(windowStartEpochSec).atZone(activeZone).toLocalDate()
+
+    val timelineScrollState = rememberTimelineScrollState(initialEpochSec = windowStartEpochSec)
+    val bucketedStartSec by remember(timelineScrollState) {
+        derivedStateOf { floorToHalfHour(timelineScrollState.visibleStartEpochSec) }
+    }
+    LaunchedEffect(bucketedStartSec) {
+        if (bucketedStartSec != windowStartEpochSec) {
+            onWindowStartChange(bucketedStartSec)
+        }
+    }
+
+    val windowDate = remember(bucketedStartSec) {
+        Instant.ofEpochSecond(bucketedStartSec).atZone(activeZone).toLocalDate()
     }
     val selectedDayIndex = remember(days, windowDate) {
         val exact = days.indexOf(windowDate)
@@ -183,16 +204,29 @@ internal fun TvGuideScreen(
         }
     }
 
-    val windowEndEpochSec = windowStartEpochSec + TIMELINE_WINDOW_SEC
     val dvrIndex = remember(dvrEntries) { DvrLookupIndex(dvrEntries) }
 
     val searchState = rememberTextFieldState()
     val searchFocusRequester = remember { FocusRequester() }
     val nowButtonFocusRequester = remember { FocusRequester() }
     val cellFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    var pendingFocusTarget by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     var searchFieldFocused by remember { mutableStateOf(false) }
     var localFocusRestoreNonce by remember { mutableIntStateOf(0) }
     var wasSearchOpen by remember { mutableStateOf(searchOpen) }
+
+    LaunchedEffect(pendingFocusTarget, bucketedStartSec) {
+        val (chId, evId) = pendingFocusTarget ?: return@LaunchedEffect
+        val key = "ev_${chId}_$evId"
+        repeat(3) {
+            withFrameNanos { }
+            val requester = cellFocusRequesters[key]
+            if (requester != null && runCatching { requester.requestFocus() }.isSuccess) {
+                pendingFocusTarget = null
+                return@LaunchedEffect
+            }
+        }
+    }
 
     BackHandler(enabled = searchOpen) {
         searchState.clearText()
@@ -250,8 +284,10 @@ internal fun TvGuideScreen(
             runCatching { listState.scrollToItem(targetRowIndex) }
         }
         val targetEventId = lastFocusTarget?.takeIf { it.channelId == targetChannel.id }?.eventId
+        val visibleStart = timelineScrollState.visibleStartEpochSec
+        val visibleEnd = visibleStart + timelineScrollState.visibleDurationSec
         val rowFirstEventId = epgByChannel[targetChannel.id]
-            ?.firstOrNull { it.stopEpochSec > windowStartEpochSec && it.startEpochSec < windowEndEpochSec }
+            ?.firstOrNull { it.stopEpochSec > visibleStart && it.startEpochSec < visibleEnd }
             ?.id
         val candidateKeys = buildList {
             if (targetEventId != null) add("ev_${targetChannel.id}_$targetEventId")
@@ -299,27 +335,14 @@ internal fun TvGuideScreen(
         }
     }
 
-    val fallbackPreviewEvent = remember(searchOpen, trimmedQuery, searchResults, channels, epgByChannel, windowStartEpochSec) {
+    val fallbackPreviewEvent = remember(searchOpen, trimmedQuery, searchResults, channels, epgByChannel, bucketedStartSec) {
         if (searchOpen && trimmedQuery.isNotEmpty()) {
             searchResults.firstOrNull()?.first
         } else {
+            val endSec = bucketedStartSec + timelineScrollState.visibleDurationSec
             channels.firstNotNullOfOrNull { ch ->
-                epgByChannel[ch.id]?.firstOrNull { it.stopEpochSec > windowStartEpochSec && it.startEpochSec < windowEndEpochSec }
+                epgByChannel[ch.id]?.firstOrNull { it.stopEpochSec > bucketedStartSec && it.startEpochSec < endSec }
             }
-        }
-    }
-
-    val slotStarts = remember(windowStartEpochSec) {
-        List(6) { idx -> windowStartEpochSec + idx * HALF_HOUR_SEC } // 6 x 30-min markers
-    }
-    val slotLabels = remember(slotStarts) {
-        slotStarts.map { formatEpochHm(it) }
-    }
-    val nowFraction = remember(nowEpochSec, windowStartEpochSec) {
-        if (nowEpochSec in windowStartEpochSec..windowEndEpochSec) {
-            (nowEpochSec - windowStartEpochSec).toFloat() / TIMELINE_WINDOW_SEC.toFloat()
-        } else {
-            null
         }
     }
 
@@ -401,7 +424,7 @@ internal fun TvGuideScreen(
                 }
             }
         } else {
-            // Time navigation (pinned) + Day jump bar (auto-scrolled to keep selected in viewport)
+            // Now button (pinned) + Day jump bar (auto-scrolled to keep selected in viewport)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -412,17 +435,8 @@ internal fun TvGuideScreen(
             ) {
                 Button(
                     onClick = {
-                        onWindowStartChange((windowStartEpochSec - TIMELINE_STEP_SEC).coerceAtLeast(minWindowStartSec))
+                        scope.launch { timelineScrollState.animateScrollToEpoch(todayStartHalfHour) }
                     },
-                    shape = tvButtonShape(),
-                    colors = tvSecondaryButtonColors(),
-                ) {
-                    Icon(MuxGridIcons.ChevronLeft, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(2.dp))
-                    Text("-2h", fontSize = 12.sp)
-                }
-                Button(
-                    onClick = { onWindowStartChange(todayStartHalfHour) },
                     modifier = Modifier.focusRequester(nowButtonFocusRequester),
                     shape = tvButtonShape(),
                     colors = tvPrimaryButtonColors(),
@@ -430,17 +444,6 @@ internal fun TvGuideScreen(
                     Icon(MuxGridIcons.Schedule, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("Now", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                }
-                Button(
-                    onClick = {
-                        onWindowStartChange((windowStartEpochSec + TIMELINE_STEP_SEC).coerceAtMost(maxWindowStartSec))
-                    },
-                    shape = tvButtonShape(),
-                    colors = tvSecondaryButtonColors(),
-                ) {
-                    Text("+2h", fontSize = 12.sp)
-                    Spacer(Modifier.width(2.dp))
-                    Icon(MuxGridIcons.ChevronRight, contentDescription = null, modifier = Modifier.size(16.dp))
                 }
                 Spacer(Modifier.width(6.dp))
                 LazyRow(
@@ -466,10 +469,10 @@ internal fun TvGuideScreen(
                                     todayDate = todayDate,
                                     todayStartHalfHour = todayStartHalfHour,
                                     epgByChannel = epgByChannel,
-                                    windowDurationSec = TIMELINE_WINDOW_SEC,
+                                    windowDurationSec = timelineScrollState.visibleDurationSec,
                                     zoneId = activeZone,
                                 )
-                                onWindowStartChange(targetWindow.coerceIn(minWindowStartSec, maxWindowStartSec))
+                                scope.launch { timelineScrollState.animateScrollToEpoch(targetWindow) }
                             },
                             shape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm),
                             colors = FilterChipDefaults.colors(
@@ -610,13 +613,36 @@ internal fun TvGuideScreen(
                 Text(emptyText, style = MuxGridType.CardSubtitle, fontSize = 16.sp)
             }
         } else {
-            // Sticky time ruler + tight broadcast horizontal timeline rows with red "Now" hairline
-            BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            // Sticky time ruler + continuous broadcast horizontal timeline rows with red "Now" hairline
+            val pxPerSec = remember(density) { with(density) { TV_TIMELINE_DP_PER_HOUR.toPx() / 3600f } }
+            BoxWithConstraints(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .scrollable(
+                        state = timelineScrollState.scrollableState,
+                        orientation = Orientation.Horizontal,
+                        reverseDirection = true,
+                    ),
+            ) {
                 val channelColWidth = 172.dp
                 val trackWidth = (maxWidth - channelColWidth).coerceAtLeast(320.dp)
+                val trackWidthPx = with(density) { trackWidth.toPx() }
+                SideEffect {
+                    timelineScrollState.updateBounds(
+                        newOriginSec = timelineOriginSec,
+                        newEndSec = timelineEndSec,
+                        newViewportWidthPx = trackWidthPx,
+                        newPxPerSec = pxPerSec,
+                    )
+                }
+
+                val visibleDurationSec = timelineScrollState.visibleDurationSec
+                val bufferStartSec = (bucketedStartSec - 3600L).coerceAtLeast(timelineOriginSec)
+                val bufferEndSec = (bucketedStartSec + visibleDurationSec + 3600L).coerceAtMost(timelineEndSec)
 
                 Column(modifier = Modifier.fillMaxSize()) {
-                    // Time ruler header
+                    // Synchronized time ruler header
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -631,27 +657,14 @@ internal fun TvGuideScreen(
                                 style = MuxGridType.Eyebrow,
                             )
                         }
-                        Box(modifier = Modifier.width(trackWidth)) {
-                            Row(modifier = Modifier.fillMaxWidth()) {
-                                slotLabels.forEach { slotLabel ->
-                                    Text(
-                                        text = slotLabel,
-                                        style = MuxGridType.TabularSmall,
-                                        color = MuxGridColors.TextSecondary,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
-                            }
-                            nowFraction?.let { frac ->
-                                Box(
-                                    modifier = Modifier
-                                        .offset(x = trackWidth * frac)
-                                        .width(2.dp)
-                                        .height(16.dp)
-                                        .background(MuxGridColors.CoralLive),
-                                )
-                            }
-                        }
+                        TimelineRuler(
+                            scrollState = timelineScrollState,
+                            bucketStartEpochSec = bufferStartSec,
+                            bucketEndEpochSec = bufferEndSec,
+                            nowEpochSec = nowEpochSec,
+                            zoneId = activeZone,
+                            modifier = Modifier.width(trackWidth),
+                        )
                     }
 
                     // Channel rows
@@ -666,16 +679,18 @@ internal fun TvGuideScreen(
                             key = { _, ch -> ch.id },
                             contentType = { _, _ -> "guide_row" },
                         ) { rowIndex, channel ->
+                            val channelEvents = epgByChannel[channel.id].orEmpty()
                             val rowCells = remember(
                                 channel.id,
-                                epgByChannel[channel.id],
-                                windowStartEpochSec,
+                                channelEvents,
+                                bufferStartSec,
+                                bufferEndSec,
                             ) {
-                                buildRowTimelineCells(
+                                buildContinuousTimelineCells(
                                     channelId = channel.id,
-                                    events = epgByChannel[channel.id].orEmpty(),
-                                    windowStart = windowStartEpochSec,
-                                    windowEnd = windowEndEpochSec,
+                                    events = channelEvents,
+                                    rangeStart = bufferStartSec,
+                                    rangeEnd = bufferEndSec,
                                 )
                             }
                             val isEvenRow = rowIndex % 2 == 0
@@ -766,147 +781,162 @@ internal fun TvGuideScreen(
                                     }
                                 }
 
-                                // Horizontal timeline track for this channel
-                                Box(
+                                // Continuous horizontal timeline track for this channel
+                                TimelineRowTrack(
+                                    cells = rowCells,
+                                    scrollState = timelineScrollState,
+                                    nowEpochSec = nowEpochSec,
                                     modifier = Modifier
                                         .width(trackWidth)
                                         .fillMaxHeight(),
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxSize(),
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                    ) {
-                                        rowCells.forEach { cell ->
-                                            val ev = cell.event
-                                            if (ev == null) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(cell.weight)
-                                                        .fillMaxHeight()
-                                                        .clip(MuxGridShapes.Xs)
-                                                        .background(baseCellBg.copy(alpha = 0.55f))
-                                                        .padding(horizontal = 10.dp),
-                                                    contentAlignment = Alignment.CenterStart,
-                                                ) {
-                                                    Text(
-                                                        text = "No program data",
-                                                        fontSize = 11.sp,
-                                                        color = MuxGridColors.TextMuted,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                    )
-                                                }
-                                            } else {
-                                                val isLiveNow = nowEpochSec in ev.startEpochSec until ev.stopEpochSec
-                                                val isPast = ev.stopEpochSec <= nowEpochSec
-                                                val linkedDvr = dvrIndex.findMatch(ev)
-                                                val evFocusKey = "ev_${channel.id}_${ev.id}"
-                                                val evFocusRequester = remember(evFocusKey) { FocusRequester() }
-                                                val timeRangeLabel = remember(ev.id, ev.startEpochSec, ev.stopEpochSec) {
-                                                    "${formatEpochHm(ev.startEpochSec)}–${formatEpochHm(ev.stopEpochSec)}"
-                                                }
-                                                DisposableEffect(evFocusKey) {
-                                                    cellFocusRequesters[evFocusKey] = evFocusRequester
-                                                    onDispose {
-                                                        if (cellFocusRequesters[evFocusKey] === evFocusRequester) {
-                                                            cellFocusRequesters.remove(evFocusKey)
-                                                        }
-                                                    }
-                                                }
-                                                var evFocused by remember(evFocusKey) { mutableStateOf(false) }
-                                                val cellBg = when {
-                                                    evFocused -> MuxGridColors.Accent.copy(alpha = 0.22f)
-                                                    isLiveNow -> MuxGridColors.CardSurfaceElevated
-                                                    else -> baseCellBg
-                                                }
-                                                Column(
-                                                    modifier = Modifier
-                                                        .weight(cell.weight)
-                                                        .fillMaxHeight()
-                                                        .clip(MuxGridShapes.Xs)
-                                                        .background(cellBg)
-                                                        .then(
-                                                            when {
-                                                                evFocused -> Modifier.border(
-                                                                    MuxGridBorders.Focused,
-                                                                    MuxGridColors.FocusBorder,
-                                                                    MuxGridShapes.Xs,
-                                                                )
-                                                                linkedDvr?.state == DvrState.RECORDING -> Modifier.border(
-                                                                    MuxGridBorders.Hairline,
-                                                                    MuxGridColors.CoralLive.copy(alpha = 0.65f),
-                                                                    MuxGridShapes.Xs,
-                                                                )
-                                                                else -> Modifier
-                                                            },
-                                                        )
-                                                        .focusRequester(evFocusRequester)
-                                                        .onFocusChanged { state ->
-                                                            val focused = state.isFocused
-                                                            if (evFocused != focused) evFocused = focused
-                                                            if (focused) {
-                                                                focusedEventState.value = ev
-                                                                focusMemory.guideTarget = TvGuideFocusTarget(channel.id, ev.id)
-                                                            }
-                                                        }
-                                                        .clickable(
-                                                            interactionSource = remember(evFocusKey) { MutableInteractionSource() },
-                                                            indication = null,
-                                                            onClick = {
-                                                                focusMemory.guideTarget = TvGuideFocusTarget(channel.id, ev.id)
-                                                                if (isLiveNow && linkedDvr == null) {
-                                                                    onWatchChannel(channel)
-                                                                } else {
-                                                                    actionError = null
-                                                                    actionEventKey = ev.channelId to ev.id
-                                                                }
-                                                            },
-                                                        )
-                                                        .clearAndSetSemantics {
-                                                            role = Role.Button
-                                                            contentDescription = "${ev.title}, $timeRangeLabel"
-                                                        }
-                                                        .padding(horizontal = 9.dp, vertical = 7.dp),
-                                                    verticalArrangement = Arrangement.SpaceBetween,
-                                                ) {
-                                                    Row(
-                                                        modifier = Modifier.fillMaxWidth(),
-                                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                    ) {
-                                                        Text(
-                                                            text = ev.title,
-                                                            color = if (isPast && !evFocused) MuxGridColors.TextSecondary else MuxGridColors.TextPrimary,
-                                                            fontSize = 12.5.sp,
-                                                            fontWeight = FontWeight.SemiBold,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis,
-                                                            modifier = Modifier.weight(1f),
-                                                        )
-                                                        if (linkedDvr != null) {
-                                                            Spacer(Modifier.width(4.dp))
-                                                            DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
-                                                        }
-                                                    }
-                                                    Text(
-                                                        text = timeRangeLabel,
-                                                        style = MuxGridType.TabularSmall,
-                                                        color = MuxGridColors.TextMuted,
-                                                        maxLines = 1,
-                                                    )
+                                ) { cell ->
+                                    val ev = cell.event
+                                    if (ev == null) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(MuxGridShapes.Xs)
+                                                .background(baseCellBg.copy(alpha = 0.55f))
+                                                .padding(horizontal = 10.dp),
+                                            contentAlignment = Alignment.CenterStart,
+                                        ) {
+                                            Text(
+                                                text = "No program data",
+                                                fontSize = 11.sp,
+                                                color = MuxGridColors.TextMuted,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    } else {
+                                        val isLiveNow = nowEpochSec in ev.startEpochSec until ev.stopEpochSec
+                                        val isPast = ev.stopEpochSec <= nowEpochSec
+                                        val linkedDvr = dvrIndex.findMatch(ev)
+                                        val evFocusKey = "ev_${channel.id}_${ev.id}"
+                                        val evFocusRequester = remember(evFocusKey) { FocusRequester() }
+                                        val timeRangeLabel = remember(ev.id, ev.startEpochSec, ev.stopEpochSec) {
+                                            "${formatEpochHm(ev.startEpochSec)}–${formatEpochHm(ev.stopEpochSec)}"
+                                        }
+                                        DisposableEffect(evFocusKey) {
+                                            cellFocusRequesters[evFocusKey] = evFocusRequester
+                                            onDispose {
+                                                if (cellFocusRequesters[evFocusKey] === evFocusRequester) {
+                                                    cellFocusRequesters.remove(evFocusKey)
                                                 }
                                             }
                                         }
-                                    }
-
-                                    nowFraction?.let { frac ->
-                                        Box(
+                                        var evFocused by remember(evFocusKey) { mutableStateOf(false) }
+                                        val cellBg = when {
+                                            evFocused -> MuxGridColors.Accent.copy(alpha = 0.22f)
+                                            isLiveNow -> MuxGridColors.CardSurfaceElevated
+                                            else -> baseCellBg
+                                        }
+                                        Column(
                                             modifier = Modifier
-                                                .offset(x = trackWidth * frac)
-                                                .width(2.dp)
-                                                .fillMaxHeight()
-                                                .background(MuxGridColors.CoralLive),
-                                        )
+                                                .fillMaxSize()
+                                                .clip(MuxGridShapes.Xs)
+                                                .background(cellBg)
+                                                .then(
+                                                    when {
+                                                        evFocused -> Modifier.border(
+                                                            MuxGridBorders.Focused,
+                                                            MuxGridColors.FocusBorder,
+                                                            MuxGridShapes.Xs,
+                                                        )
+                                                        linkedDvr?.state == DvrState.RECORDING -> Modifier.border(
+                                                            MuxGridBorders.Hairline,
+                                                            MuxGridColors.CoralLive.copy(alpha = 0.65f),
+                                                            MuxGridShapes.Xs,
+                                                        )
+                                                        else -> Modifier
+                                                    },
+                                                )
+                                                .focusRequester(evFocusRequester)
+                                                .onPreviewKeyEvent { keyEvent ->
+                                                    if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                                    val dir = when (keyEvent.key) {
+                                                        Key.DirectionRight -> 1
+                                                        Key.DirectionLeft -> -1
+                                                        else -> 0
+                                                    }
+                                                    if (dir == 0) return@onPreviewKeyEvent false
+                                                    val target = findAdjacentEpgEvent(
+                                                        events = channelEvents,
+                                                        currentEventId = ev.id,
+                                                        direction = dir,
+                                                        minEpochSec = timelineOriginSec,
+                                                        maxEpochSec = timelineEndSec,
+                                                    ) ?: return@onPreviewKeyEvent false
+                                                    pendingFocusTarget = channel.id to target.id
+                                                    scope.launch {
+                                                        timelineScrollState.ensureIntervalVisible(
+                                                            startSec = target.startEpochSec,
+                                                            stopSec = target.stopEpochSec,
+                                                        )
+                                                    }
+                                                    true
+                                                }
+                                                .onFocusChanged { state ->
+                                                    val focused = state.isFocused
+                                                    if (evFocused != focused) evFocused = focused
+                                                    if (focused) {
+                                                        focusedEventState.value = ev
+                                                        focusMemory.guideTarget = TvGuideFocusTarget(channel.id, ev.id)
+                                                        scope.launch {
+                                                            timelineScrollState.ensureIntervalVisible(
+                                                                startSec = ev.startEpochSec,
+                                                                stopSec = ev.stopEpochSec,
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                                .clickable(
+                                                    interactionSource = remember(evFocusKey) { MutableInteractionSource() },
+                                                    indication = null,
+                                                    onClick = {
+                                                        focusMemory.guideTarget = TvGuideFocusTarget(channel.id, ev.id)
+                                                        if (isLiveNow && linkedDvr == null) {
+                                                            onWatchChannel(channel)
+                                                        } else {
+                                                            actionError = null
+                                                            actionEventKey = ev.channelId to ev.id
+                                                        }
+                                                    },
+                                                )
+                                                .clearAndSetSemantics {
+                                                    role = Role.Button
+                                                    contentDescription = "${ev.title}, $timeRangeLabel"
+                                                }
+                                                .padding(horizontal = 9.dp, vertical = 7.dp),
+                                            verticalArrangement = Arrangement.SpaceBetween,
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Text(
+                                                    text = ev.title,
+                                                    color = if (isPast && !evFocused) MuxGridColors.TextSecondary else MuxGridColors.TextPrimary,
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f),
+                                                )
+                                                if (linkedDvr != null) {
+                                                    Spacer(Modifier.width(4.dp))
+                                                    DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
+                                                }
+                                            }
+                                            Text(
+                                                text = timeRangeLabel,
+                                                style = MuxGridType.TabularSmall,
+                                                color = MuxGridColors.TextMuted,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
                                     }
                                 }
                             }

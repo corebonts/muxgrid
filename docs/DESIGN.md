@@ -60,7 +60,7 @@ Navigation stays minimal and consistent across both form factors:
   - Long-press a channel to Favorite, open its Guide, or jump straight into playback.
 - **Guide (EPG) Screen:**
   - **Portrait Phone:** Vertical per-channel agenda with day underline tabs paired with an icon-only **Search** button on the right (tapping expands a full-width search bar in place of the day chooser) and a compact borderless channel strip below (hidden while searching).
-  - **Landscape / Tablet (`>= 600dp`):** Horizontal multi-channel timeline grid with sticky channel column (tap to tune), half-hour time ruler, live coral "Now" hairline, compact time-step (`-1h`/`-2h`, `Now`, `+1h`/`+2h`) controls plus horizontal swipe-to-step, and the same top-bar day tabs and expandable program search.
+  - **Landscape / Tablet (`>= 600dp`):** Free 2D-scrolling horizontal multi-channel timeline grid with sticky channel column (tap to tune), synchronized half-hour time ruler, live coral "Now" hairline, **Now** quick jump, keyboard/gamepad Left/Right focus auto-follow, and the same top-bar day tabs and expandable program search.
   - Tap any program in either layout to open a modal bottom sheet with full description, time, channel, and **Watch Live** / **Record** / **Cancel Recording** actions.
 - **Recordings Screen:**
   - Underline filter tabs (`All`, `Completed`, `Scheduled`) and stacked sections for **Recording Now** (coral badge, live elapsed duration, **Chase Play** / **Stop** / overflow sheet), **Completed** (grouped by series/title with episode count, resume progress bar, watched badge, Play/Resume/Delete), and **Scheduled** (Cancel).
@@ -93,7 +93,7 @@ Designed strictly for **10-foot viewing** and a standard TV remote (`D-pad`, `OK
 
 ### Screen Layouts
 - **Live Screen:** Multi-column grid of large legible channel cards + focusable filter chips above the grid.
-- **Guide (EPG) Screen:** Horizontal timeline grid (sticky channel column, time slots horizontally, red vertical "Now" hairline, initialized to the server-clock-adjusted current half-hour upon entering Guide) with top-bar search across upcoming programs, paired with a fixed-height bottom details bar showing title, air time, and synopsis of the currently focused program.
+- **Guide (EPG) Screen:** Continuous horizontal timeline grid (sticky channel column, synchronized half-hour time ruler, red vertical "Now" hairline, initialized to the server-clock-adjusted current half-hour upon entering Guide) where D-pad Left/Right moves across shows with the viewport smoothly following focus, paired with **Now** / day jump chips, top-bar program search, and a fixed-height bottom details bar showing title, air time, and synopsis of the currently focused program.
 - **Recordings Screen:** Horizontal shelves (`Recording Now`, `Continue Watching`, `All Recordings`, `Scheduled`).
 
 ### TV Fullscreen Player (Zero-Friction Remote Controls)
