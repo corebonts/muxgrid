@@ -92,6 +92,13 @@ adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 adb install -r app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk
 ```
 
+For fast local testing with release-like ART AOT performance on Android TV (skipping R8 while setting `isDebuggable = false` and keeping debug signing), use the `noDebug` build type:
+
+```bash
+./gradlew assembleNoDebug -x lintVitalNoDebug
+adb install -r app/build/outputs/apk/noDebug/app-armeabi-v7a-noDebug.apk
+```
+
 ### Signed Release Builds (Optional)
 
 To sign release builds (`./gradlew assembleRelease`), create a gitignored `keystore.properties` in the repo root:

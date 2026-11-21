@@ -95,6 +95,13 @@ android {
                 "proguard-rules.pro"
             )
         }
+        create("noDebug") {
+            initWith(getByName("debug"))
+            isDebuggable = false
+            isMinifyEnabled = false
+            isShrinkResources = false
+            matchingFallbacks += listOf("release")
+        }
     }
 
     androidResources {
