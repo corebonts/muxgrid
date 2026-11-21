@@ -1,5 +1,6 @@
 package io.github.corebonts.muxgrid.feature.tv
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -60,6 +61,8 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -80,6 +83,7 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.FilterChip
 import androidx.tv.material3.FilterChipDefaults
 import androidx.tv.material3.Icon
+import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.MaterialTheme as TvMaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
@@ -104,6 +108,7 @@ import io.github.corebonts.muxgrid.core.designsystem.filterChannels
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
 import io.github.corebonts.muxgrid.core.designsystem.label
 import io.github.corebonts.muxgrid.core.designsystem.rememberNowEpochSec
+import io.github.corebonts.muxgrid.core.model.AppBuildInfo
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.ConnectionState
@@ -276,6 +281,7 @@ internal fun TvConfirmDialog(
 fun TvRoot(
     repository: TvheadendRepository,
     playbackEngine: PlaybackEngine,
+    appInfo: AppBuildInfo = AppBuildInfo(versionName = "", versionCode = 0, buildSha = ""),
 ) {
     TvMaterialTheme(
         colorScheme = tvDarkColorScheme(
@@ -289,7 +295,11 @@ fun TvRoot(
             onSurfaceVariant = MuxGridColors.TextSecondary,
         ),
     ) {
-        TvContent(repository = repository, playbackEngine = playbackEngine)
+        TvContent(
+            repository = repository,
+            playbackEngine = playbackEngine,
+            appInfo = appInfo,
+        )
     }
 }
 
@@ -298,6 +308,7 @@ fun TvRoot(
 private fun TvContent(
     repository: TvheadendRepository,
     playbackEngine: PlaybackEngine,
+    appInfo: AppBuildInfo,
 ) {
     val scope = rememberCoroutineScope()
     val profile by repository.serverProfile.collectAsState()
@@ -640,6 +651,7 @@ private fun TvContent(
                                     themeMode = themeMode,
                                     hwDecPreset = hwDecPreset,
                                     timeshiftWindow = timeshiftWindow,
+                                    appInfo = appInfo,
                                     focusMemory = focusMemory,
                                     focusRequestNonce = contentFocusRequestNonce,
                                     onSelectStartScreen = { screen ->
@@ -1246,6 +1258,7 @@ private fun TvSettingsTab(
     themeMode: ThemeMode,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
+    appInfo: AppBuildInfo,
     focusMemory: TvFocusMemory,
     focusRequestNonce: Int,
     onSelectStartScreen: (StartScreen) -> Unit,
@@ -1255,6 +1268,8 @@ private fun TvSettingsTab(
     onRetryConnect: () -> Unit,
     onOpenServerSetup: () -> Unit,
 ) {
+    val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
     val isServerError = connectionState is ConnectionState.Error
     val canRetryConnect = isServerError || connectionState is ConnectionState.Disconnected
     val reconnectFocusRequester = remember { FocusRequester() }
@@ -1549,6 +1564,108 @@ private fun TvSettingsTab(
                     style = MuxGridType.TabularSmall,
                     color = MuxGridColors.TextMuted,
                 )
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .widthIn(max = 760.dp)
+                .fillMaxWidth()
+                .clip(MuxGridShapes.Card)
+                .background(MuxGridColors.CardSurface)
+                .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                text = "APP INFO",
+                style = MuxGridType.Eyebrow,
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(32.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "Version",
+                        style = MuxGridType.CardSubtitle,
+                        fontSize = 12.5.sp,
+                    )
+                    Text(
+                        text = appInfo.versionDisplay,
+                        style = MuxGridType.TabularNumber,
+                        fontSize = 14.5.sp,
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "Build SHA",
+                        style = MuxGridType.CardSubtitle,
+                        fontSize = 12.5.sp,
+                    )
+                    Text(
+                        text = appInfo.shortSha,
+                        style = MuxGridType.TabularNumber,
+                        fontSize = 14.5.sp,
+                    )
+                }
+            }
+
+            MuxGridDivider()
+
+            Surface(
+                onClick = {
+                    runCatching {
+                        uriHandler.openUri(appInfo.githubUrl)
+                    }.onFailure {
+                        Toast.makeText(context, appInfo.githubUrl, Toast.LENGTH_LONG).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
+                colors = ClickableSurfaceDefaults.colors(
+                    containerColor = MuxGridColors.CardSurfaceElevated,
+                    contentColor = MuxGridColors.TextPrimary,
+                    focusedContainerColor = MuxGridColors.FocusBorder,
+                    focusedContentColor = MuxGridColors.CanvasTv,
+                ),
+                border = ClickableSurfaceDefaults.border(
+                    border = Border.None,
+                    focusedBorder = Border(
+                        border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
+                        shape = MuxGridShapes.Sm,
+                    ),
+                ),
+                scale = ClickableSurfaceDefaults.scale(focusedScale = 1.015f),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text(
+                            text = "GitHub",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = appInfo.githubDisplayUrl,
+                            fontSize = 12.sp,
+                            color = LocalContentColor.current.copy(alpha = 0.78f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Icon(
+                        imageVector = MuxGridIcons.ChevronRight,
+                        contentDescription = "Open GitHub",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             }
         }
     }
