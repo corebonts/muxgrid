@@ -43,12 +43,23 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
+    }
+
+    androidResources {
+        // mpv-android-lib bundles unused DroidSansFallback (subfont.ttf) and cacert.pem;
+        // MuxGrid never calls Utils.copyAssets() and streams through LocalMediaProxy.
+        ignoreAssetsPattern = listOfNotNull(
+            ignoreAssetsPattern?.takeIf { it.isNotBlank() },
+            "!subfont.ttf",
+            "!cacert.pem",
+        ).joinToString(":")
     }
 
     compileOptions {
