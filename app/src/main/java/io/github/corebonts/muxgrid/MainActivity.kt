@@ -30,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,8 +49,11 @@ import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.player.MuxGridMediaSessionService
 import io.github.corebonts.muxgrid.feature.mobile.MobileRoot
 import io.github.corebonts.muxgrid.feature.tv.TvRoot
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -71,9 +75,7 @@ class MainActivity : ComponentActivity() {
         val isTv = container.formFactor == FormFactor.TV
         val pipSupported = !isTv && packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
 
-        if (intent?.getBooleanExtra(MuxGridMediaSessionService.EXTRA_OPEN_PLAYER, false) == true) {
-            openPlayerSignal++
-        }
+        consumeOpenPlayerExtra(intent)
 
         setContent {
             val pipEnabled by container.repository.pipEnabled.collectAsState()
@@ -129,15 +131,17 @@ class MainActivity : ComponentActivity() {
                         .distinctUntilChanged()
                 }.collectAsState(initial = 0 to 0)
                 val shouldAutoPip = isMobilePlayerRouteActive && pipEnabled && keepScreenOn
-                LaunchedEffect(shouldAutoPip, videoDims) {
-                    runCatching {
-                        setPictureInPictureParams(
-                            buildPipParams(
-                                videoWidth = videoDims.first,
-                                videoHeight = videoDims.second,
-                                autoEnter = shouldAutoPip,
-                            ),
-                        )
+                LaunchedEffect(shouldAutoPip, videoDims, isInPipModeState) {
+                    if (!isInPipModeState) {
+                        runCatching {
+                            setPictureInPictureParams(
+                                buildPipParams(
+                                    videoWidth = videoDims.first,
+                                    videoHeight = videoDims.second,
+                                    autoEnter = shouldAutoPip,
+                                ),
+                            )
+                        }
                     }
                 }
             }
@@ -145,17 +149,17 @@ class MainActivity : ComponentActivity() {
             MuxGridTheme(isTv = isTv, darkTheme = isDarkTheme) {
                 val context = LocalContext.current
                 val isDebuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
-                var lastCrashText by remember {
-                    mutableStateOf(
-                        if (!isDebuggable) {
-                            null
-                        } else {
+                val ioScope = rememberCoroutineScope()
+                var lastCrashText by remember { mutableStateOf<String?>(null) }
+                LaunchedEffect(isDebuggable) {
+                    if (isDebuggable) {
+                        lastCrashText = withContext(Dispatchers.IO) {
                             runCatching {
                                 val f = File(context.filesDir, "last_crash.txt")
                                 if (f.exists()) f.readText().takeIf { it.isNotBlank() } else null
                             }.getOrNull()
-                        },
-                    )
+                        }
+                    }
                 }
 
                 val appInfo = remember {
@@ -187,11 +191,16 @@ class MainActivity : ComponentActivity() {
                 }
 
                 lastCrashText?.let { crashText ->
+                    val dismissCrashDialog = {
+                        lastCrashText = null
+                        val filesDir = context.filesDir
+                        ioScope.launch(Dispatchers.IO) {
+                            runCatching { File(filesDir, "last_crash.txt").delete() }
+                        }
+                        Unit
+                    }
                     AlertDialog(
-                        onDismissRequest = {
-                            runCatching { File(context.filesDir, "last_crash.txt").delete() }
-                            lastCrashText = null
-                        },
+                        onDismissRequest = dismissCrashDialog,
                         shape = MuxGridShapes.Dialog,
                         containerColor = MuxGridColors.CardSurfaceElevated,
                         titleContentColor = MuxGridColors.TextPrimary,
@@ -218,18 +227,13 @@ class MainActivity : ComponentActivity() {
                             Row {
                                 TextButton(
                                     onClick = {
-                                        val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                        cm.setPrimaryClip(android.content.ClipData.newPlainText("MuxGrid Crash", crashText))
+                                        val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                        cm?.setPrimaryClip(android.content.ClipData.newPlainText("MuxGrid Crash", crashText))
                                     },
                                 ) {
                                     Text("Copy", color = MuxGridColors.TextSecondary)
                                 }
-                                TextButton(
-                                    onClick = {
-                                        runCatching { File(context.filesDir, "last_crash.txt").delete() }
-                                        lastCrashText = null
-                                    },
-                                ) {
+                                TextButton(onClick = dismissCrashDialog) {
                                     Text("Dismiss", color = MuxGridColors.AccentSoft)
                                 }
                             }
@@ -243,8 +247,13 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.getBooleanExtra(MuxGridMediaSessionService.EXTRA_OPEN_PLAYER, false)) {
+        consumeOpenPlayerExtra(intent)
+    }
+
+    private fun consumeOpenPlayerExtra(intent: Intent?) {
+        if (intent?.getBooleanExtra(MuxGridMediaSessionService.EXTRA_OPEN_PLAYER, false) == true) {
             openPlayerSignal++
+            intent.removeExtra(MuxGridMediaSessionService.EXTRA_OPEN_PLAYER)
         }
     }
 

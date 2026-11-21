@@ -392,10 +392,14 @@ internal fun TvRecordingsScreen(
                                 onClick = {
                                     scope.launch {
                                         actionBusy = true
-                                        onToggleWatched(entry.id, !entry.isWatched)
-                                            .onSuccess { selectedEntryId = null }
-                                            .onFailure { actionError = it.message ?: "Failed to update" }
-                                        actionBusy = false
+                                        actionError = null
+                                        try {
+                                            onToggleWatched(entry.id, !entry.isWatched)
+                                                .onSuccess { selectedEntryId = null }
+                                                .onFailure { actionError = it.message ?: "Failed to update" }
+                                        } finally {
+                                            actionBusy = false
+                                        }
                                     }
                                 },
                                 shape = tvButtonShape(),
@@ -473,22 +477,25 @@ internal fun TvRecordingsScreen(
                 scope.launch {
                     actionBusy = true
                     actionError = null
-                    val result = when (kind) {
-                        DvrConfirmKind.STOP_AND_SAVE -> onStopRecording(entry.id)
-                        DvrConfirmKind.ABORT_RECORDING, DvrConfirmKind.CANCEL_TIMER -> onCancelRecording(entry.id)
-                        DvrConfirmKind.DELETE_RECORDING -> onDeleteRecording(entry.id)
-                    }
-                    result
-                        .onSuccess { selectedEntryId = null }
-                        .onFailure { err ->
-                            actionError = err.message ?: when (kind) {
-                                DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop"
-                                DvrConfirmKind.ABORT_RECORDING -> "Failed to abort"
-                                DvrConfirmKind.CANCEL_TIMER -> "Failed to cancel"
-                                DvrConfirmKind.DELETE_RECORDING -> "Failed to delete"
-                            }
+                    try {
+                        val result = when (kind) {
+                            DvrConfirmKind.STOP_AND_SAVE -> onStopRecording(entry.id)
+                            DvrConfirmKind.ABORT_RECORDING, DvrConfirmKind.CANCEL_TIMER -> onCancelRecording(entry.id)
+                            DvrConfirmKind.DELETE_RECORDING -> onDeleteRecording(entry.id)
                         }
-                    actionBusy = false
+                        result
+                            .onSuccess { selectedEntryId = null }
+                            .onFailure { err ->
+                                actionError = err.message ?: when (kind) {
+                                    DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop"
+                                    DvrConfirmKind.ABORT_RECORDING -> "Failed to abort"
+                                    DvrConfirmKind.CANCEL_TIMER -> "Failed to cancel"
+                                    DvrConfirmKind.DELETE_RECORDING -> "Failed to delete"
+                                }
+                            }
+                    } finally {
+                        actionBusy = false
+                    }
                 }
             },
         )

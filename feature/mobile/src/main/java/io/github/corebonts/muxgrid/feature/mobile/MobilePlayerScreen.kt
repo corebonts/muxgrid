@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.res.Configuration
 import android.media.AudioManager
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -63,13 +64,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -118,7 +117,7 @@ private data class DragFeedback(
 
 private data class SeekTapFeedback(
     val deltaSec: Int,
-    val nonce: Long,
+    val nonce: Int,
 )
 
 @Composable
@@ -162,12 +161,12 @@ internal fun MobilePlayerScreen(
     var quickZapOpen by remember { mutableStateOf(false) }
     var isScrubbing by remember { mutableStateOf(false) }
     var scrubPositionMs by remember { mutableLongStateOf(0L) }
-    var containerSize by remember { mutableStateOf(IntSize.Zero) }
 
     var dragFeedback by remember { mutableStateOf<DragFeedback?>(null) }
     var seekFeedback by remember { mutableStateOf<SeekTapFeedback?>(null) }
+    var seekFeedbackNonce by remember { mutableIntStateOf(0) }
     var accumulatedSeekDelta by remember { mutableIntStateOf(0) }
-    var lastSeekTapMs by remember { mutableLongStateOf(0L) }
+    var lastSeekTapElapsedMs by remember { mutableLongStateOf(0L) }
     var brightnessFraction by remember {
         mutableFloatStateOf(readInitialBrightness(activity, context))
     }
@@ -214,13 +213,22 @@ internal fun MobilePlayerScreen(
         }
     }
 
+    LaunchedEffect(playbackState.channelId, playbackState.dvrEntryId) {
+        isScrubbing = false
+        scrubPositionMs = 0L
+        dragFeedback = null
+        seekFeedback = null
+        accumulatedSeekDelta = 0
+        lastSeekTapElapsedMs = 0L
+    }
+
     LaunchedEffect(playbackState.isCompleted) {
         if (playbackState.isCompleted) {
             onPlaybackCompleted()
         }
     }
 
-    LaunchedEffect(hudVisible, hudInteractionNonce, trackPanelOpen, infoPanelOpen, quickZapOpen, playbackState.status, isScrubbing, isInPip) {
+    LaunchedEffect(hudVisible, hudInteractionNonce, trackPanelOpen, infoPanelOpen, quickZapOpen, playbackState.status, isScrubbing, isInPip, isAudioStage) {
         if (hudVisible && !trackPanelOpen && !infoPanelOpen && !quickZapOpen && !isScrubbing && !isInPip &&
             playbackState.status == PlaybackStatus.PLAYING && !isAudioStage
         ) {
@@ -241,7 +249,6 @@ internal fun MobilePlayerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .onSizeChanged { containerSize = it }
             .then(
                 if (isInPip) {
                     Modifier
@@ -262,16 +269,17 @@ internal fun MobilePlayerScreen(
                                     val isRight = offset.x >= size.width / 2f
                                     val stepSec = if (isRight) 30 else -10
                                     playbackEngine.seekBy(stepSec * 1_000L)
-                                    val nowMs = System.currentTimeMillis()
+                                    val nowMs = SystemClock.elapsedRealtime()
                                     val sameDirection = (stepSec > 0 && accumulatedSeekDelta > 0) ||
                                         (stepSec < 0 && accumulatedSeekDelta < 0)
-                                    accumulatedSeekDelta = if (nowMs - lastSeekTapMs <= 1_200L && sameDirection) {
+                                    accumulatedSeekDelta = if (nowMs - lastSeekTapElapsedMs <= 1_200L && sameDirection) {
                                         accumulatedSeekDelta + stepSec
                                     } else {
                                         stepSec
                                     }
-                                    lastSeekTapMs = nowMs
-                                    seekFeedback = SeekTapFeedback(accumulatedSeekDelta, nowMs)
+                                    lastSeekTapElapsedMs = nowMs
+                                    seekFeedbackNonce++
+                                    seekFeedback = SeekTapFeedback(accumulatedSeekDelta, seekFeedbackNonce)
                                 },
                             )
                         }
@@ -747,20 +755,12 @@ internal fun MobilePlayerScreen(
                                     style = MuxGridType.TabularSmall,
                                     color = Color.White,
                                 )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    if (playbackState.isGrowingRecording) {
-                                        DvrStateBadge(state = DvrState.RECORDING)
-                                    }
-                                    if (playbackState.videoWidth > 0 && !isAudioStage) {
-                                        Text(
-                                            text = "${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}",
-                                            style = MuxGridType.TabularSmall,
-                                            color = Color.White.copy(alpha = 0.78f),
-                                        )
-                                    }
+                                if (playbackState.videoWidth > 0 && !isAudioStage) {
+                                    Text(
+                                        text = "${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}",
+                                        style = MuxGridType.TabularSmall,
+                                        color = Color.White.copy(alpha = 0.78f),
+                                    )
                                 }
                                 Text(
                                     text = formatDurationSec(stableDurSec),

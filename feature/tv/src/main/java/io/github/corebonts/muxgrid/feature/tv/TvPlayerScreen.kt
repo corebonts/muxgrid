@@ -1,5 +1,6 @@
 package io.github.corebonts.muxgrid.feature.tv
 
+import android.os.SystemClock
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -119,9 +120,9 @@ internal fun TvPlayerScreen(
     var trackPanelOpen by remember { mutableStateOf(false) }
     var infoPanelOpen by remember { mutableStateOf(false) }
     var progressFocused by remember { mutableStateOf(false) }
-    var zapOsdTrigger by remember { mutableLongStateOf(0L) }
+    var zapOsdTrigger by remember { mutableIntStateOf(0) }
     var zapOsdVisible by remember { mutableStateOf(true) }
-    var seekOsdTrigger by remember { mutableLongStateOf(0L) }
+    var seekOsdTrigger by remember { mutableIntStateOf(0) }
     var seekOsdVisible by remember { mutableStateOf(false) }
     var suppressNextCenterKeyUp by remember { mutableStateOf(false) }
     var suppressNextBackKeyUp by remember { mutableStateOf(false) }
@@ -165,7 +166,7 @@ internal fun TvPlayerScreen(
         seekOsdVisible = false
         progressFocused = false
         zapOsdVisible = true
-        zapOsdTrigger = System.currentTimeMillis()
+        zapOsdTrigger++
     }
 
     LaunchedEffect(zapOsdTrigger, zapOsdVisible) {
@@ -250,7 +251,7 @@ internal fun TvPlayerScreen(
     }
 
     fun triggerProgressiveSeek(direction: Int) {
-        val nowMs = System.currentTimeMillis()
+        val nowMs = SystemClock.elapsedRealtime()
         if (lastSeekDirection == direction && (nowMs - lastSeekPressElapsedMs) <= 950L) {
             seekStepIndex = (seekStepIndex + 1).coerceAtMost(PROGRESSIVE_SEEK_STEPS_MS.lastIndex)
         } else {
@@ -270,7 +271,7 @@ internal fun TvPlayerScreen(
         val clamped = clampPreviewPositionMs(playbackState, baseMs + stepMs)
         pendingSeekTargetMs = clamped
         seekOsdVisible = true
-        seekOsdTrigger = nowMs
+        seekOsdTrigger++
     }
 
     fun confirmFromProgressBar() {

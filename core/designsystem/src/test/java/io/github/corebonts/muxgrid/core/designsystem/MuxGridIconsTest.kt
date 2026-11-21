@@ -1,6 +1,7 @@
 package io.github.corebonts.muxgrid.core.designsystem
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -68,5 +69,9 @@ class MuxGridIconsTest {
             assertEquals(960f, vector.viewportHeight, "${vector.name} viewportHeight")
             assertTrue(vector.root.size > 0, "${vector.name} root should have child group/path")
         }
+        assertNotEquals(MuxGridIcons.Live.root, MuxGridIcons.LiveFilled.root)
+        assertNotEquals(MuxGridIcons.Guide.root, MuxGridIcons.GuideFilled.root)
+        assertNotEquals(MuxGridIcons.Recordings.root, MuxGridIcons.RecordingsFilled.root)
+        assertNotEquals(MuxGridIcons.Settings.root, MuxGridIcons.SettingsFilled.root)
     }
 }

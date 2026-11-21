@@ -107,10 +107,13 @@ internal fun MobileRecordingsScreen(
             scope.launch {
                 isRefreshing = true
                 actionFeedback = null
-                onRefresh().onFailure {
-                    actionFeedback = it.message ?: "Failed to refresh recordings"
+                try {
+                    onRefresh().onFailure {
+                        actionFeedback = it.message ?: "Failed to refresh recordings"
+                    }
+                } finally {
+                    isRefreshing = false
                 }
-                isRefreshing = false
             }
         }
     }
@@ -444,10 +447,13 @@ internal fun MobileRecordingsScreen(
                             scope.launch {
                                 sheetBusy = true
                                 sheetError = null
-                                onToggleWatched(entry.id, !entry.isWatched)
-                                    .onSuccess { actionEntryId = null }
-                                    .onFailure { sheetError = it.message ?: "Failed to update watched state" }
-                                sheetBusy = false
+                                try {
+                                    onToggleWatched(entry.id, !entry.isWatched)
+                                        .onSuccess { actionEntryId = null }
+                                        .onFailure { sheetError = it.message ?: "Failed to update watched state" }
+                                } finally {
+                                    sheetBusy = false
+                                }
                             }
                         },
                         shape = MuxGridShapes.Sm,
@@ -493,28 +499,31 @@ internal fun MobileRecordingsScreen(
                     sheetBusy = true
                     sheetError = null
                     actionFeedback = null
-                    val result = when (kind) {
-                        DvrConfirmKind.STOP_AND_SAVE -> onStopRecording(targetId)
-                        DvrConfirmKind.ABORT_RECORDING, DvrConfirmKind.CANCEL_TIMER -> onCancelRecording(targetId)
-                        DvrConfirmKind.DELETE_RECORDING -> onDeleteRecording(targetId)
-                    }
-                    result
-                        .onSuccess { actionEntryId = null }
-                        .onFailure { err ->
-                            val fallback = when (kind) {
-                                DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop recording"
-                                DvrConfirmKind.ABORT_RECORDING -> "Failed to abort recording"
-                                DvrConfirmKind.CANCEL_TIMER -> "Failed to cancel timer"
-                                DvrConfirmKind.DELETE_RECORDING -> "Failed to delete recording"
-                            }
-                            val msg = err.message ?: fallback
-                            if (actionEntryId != null) {
-                                sheetError = msg
-                            } else {
-                                actionFeedback = msg
-                            }
+                    try {
+                        val result = when (kind) {
+                            DvrConfirmKind.STOP_AND_SAVE -> onStopRecording(targetId)
+                            DvrConfirmKind.ABORT_RECORDING, DvrConfirmKind.CANCEL_TIMER -> onCancelRecording(targetId)
+                            DvrConfirmKind.DELETE_RECORDING -> onDeleteRecording(targetId)
                         }
-                    sheetBusy = false
+                        result
+                            .onSuccess { actionEntryId = null }
+                            .onFailure { err ->
+                                val fallback = when (kind) {
+                                    DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop recording"
+                                    DvrConfirmKind.ABORT_RECORDING -> "Failed to abort recording"
+                                    DvrConfirmKind.CANCEL_TIMER -> "Failed to cancel timer"
+                                    DvrConfirmKind.DELETE_RECORDING -> "Failed to delete recording"
+                                }
+                                val msg = err.message ?: fallback
+                                if (actionEntryId != null) {
+                                    sheetError = msg
+                                } else {
+                                    actionFeedback = msg
+                                }
+                            }
+                    } finally {
+                        sheetBusy = false
+                    }
                 }
             },
         )

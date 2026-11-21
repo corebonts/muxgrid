@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,11 +75,21 @@ fun OnboardingServerScreen(
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val hostFocusRequester = remember { FocusRequester() }
-    var host by remember(initialProfile) { mutableStateOf(initialProfile.host) }
-    var htspPortText by remember(initialProfile) { mutableStateOf(initialProfile.htspPort.toString()) }
-    var httpPortText by remember(initialProfile) { mutableStateOf(initialProfile.httpPort.toString()) }
-    var username by remember(initialProfile) { mutableStateOf(initialProfile.username) }
-    var password by remember(initialProfile) { mutableStateOf(initialProfile.password) }
+    var host by rememberSaveable(initialProfile.id, initialProfile.host) {
+        mutableStateOf(initialProfile.host)
+    }
+    var htspPortText by rememberSaveable(initialProfile.id, initialProfile.htspPort) {
+        mutableStateOf(initialProfile.htspPort.toString())
+    }
+    var httpPortText by rememberSaveable(initialProfile.id, initialProfile.httpPort) {
+        mutableStateOf(initialProfile.httpPort.toString())
+    }
+    var username by rememberSaveable(initialProfile.id, initialProfile.username) {
+        mutableStateOf(initialProfile.username)
+    }
+    var password by rememberSaveable(initialProfile.id, initialProfile.password) {
+        mutableStateOf(initialProfile.password)
+    }
 
     var testing by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
@@ -96,31 +107,56 @@ fun OnboardingServerScreen(
     }
 
     fun buildProfile(): ServerProfile? {
-        val cleanHost = host.trim()
-        val htspPort = htspPortText.trim().toIntOrNull()
-        val httpPort = httpPortText.trim().toIntOrNull()
-        if (cleanHost.isEmpty()) {
-            validationError = "Enter your Tvheadend server IP or hostname"
-            return null
-        }
-        if (htspPort == null || htspPort !in 1..65535) {
-            validationError = "Enter a valid HTSP port (default 9982)"
-            return null
-        }
-        if (httpPort == null || httpPort !in 1..65535) {
-            validationError = "Enter a valid HTTP port (default 9981)"
-            return null
-        }
-        validationError = null
-        return ServerProfile(
-            id = initialProfile.id,
-            name = "Tvheadend ($cleanHost)",
-            host = cleanHost,
-            htspPort = htspPort,
-            httpPort = httpPort,
-            username = username.trim(),
+        val result = validateServerProfileInput(
+            profileId = initialProfile.id,
+            rawHost = host,
+            rawHtspPort = htspPortText,
+            rawHttpPort = httpPortText,
+            rawUsername = username,
             password = password,
         )
+        return when (result) {
+            is ServerValidationResult.Valid -> {
+                validationError = null
+                result.profile
+            }
+            is ServerValidationResult.Invalid -> {
+                validationError = result.message
+                null
+            }
+        }
+    }
+
+    val doTest: () -> Unit = {
+        if (!testing && !saving) {
+            val profile = buildProfile()
+            if (profile != null) {
+                testing = true
+                testResult = null
+                scope.launch {
+                    try {
+                        testResult = onTestConnection(profile)
+                    } finally {
+                        testing = false
+                    }
+                }
+            }
+        }
+    }
+    val doSave: () -> Unit = {
+        if (!saving && !testing) {
+            val profile = buildProfile()
+            if (profile != null) {
+                saving = true
+                scope.launch {
+                    try {
+                        onSaveAndConnect(profile)
+                    } finally {
+                        saving = false
+                    }
+                }
+            }
+        }
     }
 
     val canvas = if (isTv) MuxGridColors.CanvasTv else MuxGridColors.CanvasPhone
@@ -190,7 +226,7 @@ fun OnboardingServerScreen(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(MuxGridShapes.Sm)
-                            .clickable(onClick = onCancel),
+                            .clickable(enabled = !saving, onClick = onCancel),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
@@ -277,14 +313,7 @@ fun OnboardingServerScreen(
                             imeAction = ImeAction.Done,
                         ),
                         keyboardActions = KeyboardActions(
-                            onDone = {
-                                val profile = buildProfile() ?: return@KeyboardActions
-                                saving = true
-                                scope.launch {
-                                    onSaveAndConnect(profile)
-                                    saving = false
-                                }
-                            },
+                            onDone = { doSave() },
                         ),
                         colors = fieldColors,
                         modifier = Modifier.weight(1f).then(dpadFieldModifier),
@@ -314,14 +343,7 @@ fun OnboardingServerScreen(
                         imeAction = ImeAction.Done,
                     ),
                     keyboardActions = KeyboardActions(
-                        onDone = {
-                            val profile = buildProfile() ?: return@KeyboardActions
-                            saving = true
-                            scope.launch {
-                                onSaveAndConnect(profile)
-                                saving = false
-                            }
-                        },
+                        onDone = { doSave() },
                     ),
                     colors = fieldColors,
                     modifier = Modifier
@@ -364,31 +386,6 @@ fun OnboardingServerScreen(
 
             Spacer(Modifier.height(2.dp))
 
-            val doTest: () -> Unit = {
-                if (!testing && !saving) {
-                    val profile = buildProfile()
-                    if (profile != null) {
-                        testing = true
-                        testResult = null
-                        scope.launch {
-                            testResult = onTestConnection(profile)
-                            testing = false
-                        }
-                    }
-                }
-            }
-            val doSave: () -> Unit = {
-                if (!saving) {
-                    val profile = buildProfile()
-                    if (profile != null) {
-                        saving = true
-                        scope.launch {
-                            onSaveAndConnect(profile)
-                            saving = false
-                        }
-                    }
-                }
-            }
             val btnPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
 
             if (isTv) {
@@ -399,6 +396,7 @@ fun OnboardingServerScreen(
                     if (canCancel) {
                         OutlinedButton(
                             onClick = onCancel,
+                            enabled = !saving,
                             shape = MuxGridShapes.Sm,
                             contentPadding = btnPadding,
                             colors = ButtonDefaults.outlinedButtonColors(
@@ -430,6 +428,7 @@ fun OnboardingServerScreen(
                     }
                     OutlinedButton(
                         onClick = doTest,
+                        enabled = !testing && !saving,
                         shape = MuxGridShapes.Sm,
                         contentPadding = btnPadding,
                         colors = ButtonDefaults.outlinedButtonColors(
@@ -460,6 +459,7 @@ fun OnboardingServerScreen(
                     }
                     Button(
                         onClick = doSave,
+                        enabled = !saving && !testing,
                         shape = MuxGridShapes.Sm,
                         contentPadding = btnPadding,
                         border = if (saveFocused) BorderStroke(2.dp, MuxGridColors.FocusBorder) else null,
@@ -492,6 +492,7 @@ fun OnboardingServerScreen(
                 ) {
                     Button(
                         onClick = doSave,
+                        enabled = !saving && !testing,
                         shape = MuxGridShapes.Sm,
                         contentPadding = btnPadding,
                         colors = ButtonDefaults.buttonColors(
@@ -515,6 +516,7 @@ fun OnboardingServerScreen(
                     }
                     OutlinedButton(
                         onClick = doTest,
+                        enabled = !testing && !saving,
                         shape = MuxGridShapes.Sm,
                         contentPadding = btnPadding,
                         colors = ButtonDefaults.outlinedButtonColors(
@@ -542,4 +544,159 @@ fun OnboardingServerScreen(
             }
         }
     }
+}
+
+internal sealed interface ServerValidationResult {
+    data class Valid(val profile: ServerProfile) : ServerValidationResult
+    data class Invalid(val message: String) : ServerValidationResult
+}
+
+internal fun validateServerProfileInput(
+    profileId: String,
+    rawHost: String,
+    rawHtspPort: String,
+    rawHttpPort: String,
+    rawUsername: String,
+    password: String,
+): ServerValidationResult {
+    val hostValidation = validateServerHost(rawHost)
+    if (hostValidation.error != null) {
+        return ServerValidationResult.Invalid(hostValidation.error)
+    }
+    val cleanHost = hostValidation.normalizedHost!!
+    val htspPort = rawHtspPort.trim().toIntOrNull()
+    if (htspPort == null || htspPort !in 1..65535) {
+        return ServerValidationResult.Invalid("Enter a valid HTSP port (default 9982)")
+    }
+    val httpPort = rawHttpPort.trim().toIntOrNull()
+    if (httpPort == null || httpPort !in 1..65535) {
+        return ServerValidationResult.Invalid("Enter a valid HTTP port (default 9981)")
+    }
+    return ServerValidationResult.Valid(
+        ServerProfile(
+            id = profileId,
+            name = "Tvheadend ($cleanHost)",
+            host = cleanHost,
+            htspPort = htspPort,
+            httpPort = httpPort,
+            username = rawUsername.trim(),
+            password = password,
+        ),
+    )
+}
+
+private data class HostValidation(
+    val normalizedHost: String? = null,
+    val error: String? = null,
+)
+
+private fun validateServerHost(rawHost: String): HostValidation {
+    val trimmed = rawHost.trim()
+    if (trimmed.isEmpty()) {
+        return HostValidation(error = "Enter your Tvheadend server IP or hostname")
+    }
+    if (trimmed.any { it.isWhitespace() }) {
+        return HostValidation(error = "Host or IP must not contain spaces")
+    }
+    if ("://" in trimmed || '/' in trimmed || '?' in trimmed || '#' in trimmed || '@' in trimmed) {
+        return HostValidation(error = "Enter a hostname or IP without a URL scheme or path")
+    }
+
+    if ('[' in trimmed || ']' in trimmed) {
+        if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
+            return HostValidation(error = "Invalid bracketed IPv6 address")
+        }
+        val inner = trimmed.substring(1, trimmed.length - 1)
+        if ('[' in inner || ']' in inner || !isValidIpv6Literal(inner)) {
+            return HostValidation(error = "Enter a valid IPv6 address")
+        }
+        return HostValidation(normalizedHost = inner)
+    }
+
+    if (':' in trimmed) {
+        val colonCount = trimmed.count { it == ':' }
+        if (colonCount == 1) {
+            return HostValidation(error = "Enter the host or IP without a port number")
+        }
+        if (!isValidIpv6Literal(trimmed)) {
+            return HostValidation(error = "Enter a valid IPv6 address")
+        }
+        return HostValidation(normalizedHost = trimmed)
+    }
+
+    if (trimmed.length > 253 || trimmed.startsWith('.') || trimmed.endsWith('.') || ".." in trimmed) {
+        return HostValidation(error = "Enter a valid hostname or IP address")
+    }
+
+    val labels = trimmed.split('.')
+    if (labels.size == 4 && labels.all { label -> label.isNotEmpty() && label.all { it.isDigit() } }) {
+        val validIpv4 = labels.all { label ->
+            label.length <= 3 && (label.toIntOrNull()?.let { it in 0..255 } == true)
+        }
+        return if (validIpv4) {
+            HostValidation(normalizedHost = trimmed)
+        } else {
+            HostValidation(error = "Enter a valid IPv4 address")
+        }
+    }
+
+    val validHostname = labels.all { label ->
+        label.length in 1..63 &&
+            label.first().isAsciiAlnum() &&
+            label.last().isAsciiAlnum() &&
+            label.all { it.isAsciiAlnum() || it == '-' }
+    }
+    return if (validHostname) {
+        HostValidation(normalizedHost = trimmed)
+    } else {
+        HostValidation(error = "Enter a valid hostname or IP address")
+    }
+}
+
+private fun Char.isAsciiAlnum(): Boolean =
+    this in 'a'..'z' || this in 'A'..'Z' || this in '0'..'9'
+
+private fun isValidIpv6Literal(raw: String): Boolean {
+    val pctIdx = raw.indexOf('%')
+    val addrPart = if (pctIdx >= 0) {
+        val zoneId = raw.substring(pctIdx + 1)
+        if (zoneId.isEmpty() || zoneId.any { !it.isAsciiAlnum() && it != '.' && it != '_' && it != '-' }) {
+            return false
+        }
+        raw.substring(0, pctIdx)
+    } else {
+        raw
+    }
+
+    if (addrPart.isEmpty() || ':' !in addrPart || ":::" in addrPart) return false
+    val doubleColonIdx = addrPart.indexOf("::")
+    if (doubleColonIdx >= 0 && addrPart.indexOf("::", doubleColonIdx + 2) >= 0) {
+        return false
+    }
+    if (addrPart.startsWith(':') && !addrPart.startsWith("::")) return false
+    if (addrPart.endsWith(':') && !addrPart.endsWith("::")) return false
+
+    val parts = addrPart.split(':')
+    var hextetCount = 0
+    for (i in parts.indices) {
+        val part = parts[i]
+        if (part.isEmpty()) continue
+        if ('.' in part) {
+            if (i != parts.lastIndex) return false
+            val ipv4Labels = part.split('.')
+            if (ipv4Labels.size != 4 || ipv4Labels.any { l ->
+                    l.isEmpty() || l.length > 3 || l.any { !it.isDigit() } || (l.toIntOrNull()?.let { it in 0..255 } != true)
+                }
+            ) {
+                return false
+            }
+            hextetCount += 2
+        } else {
+            if (part.length > 4 || part.any { ch -> ch !in '0'..'9' && ch !in 'a'..'f' && ch !in 'A'..'F' }) {
+                return false
+            }
+            hextetCount += 1
+        }
+    }
+    return if (doubleColonIdx >= 0) hextetCount <= 7 else hextetCount == 8
 }

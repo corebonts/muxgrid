@@ -45,6 +45,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,6 +71,7 @@ fun PlaybackInfoPanel(
     val closeFocusRequester = remember { FocusRequester() }
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
+    val scrollStepPx = with(LocalDensity.current) { 80.dp.roundToPx() }
 
     LaunchedEffect(Unit) {
         runCatching { closeFocusRequester.requestFocus() }
@@ -94,11 +96,11 @@ fun PlaybackInfoPanel(
                 if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when (keyEvent.nativeKeyEvent.keyCode) {
                     android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        scope.launch { scrollState.scrollTo((scrollState.value + 160).coerceAtMost(scrollState.maxValue)) }
+                        scope.launch { scrollState.scrollTo((scrollState.value + scrollStepPx).coerceAtMost(scrollState.maxValue)) }
                         true
                     }
                     android.view.KeyEvent.KEYCODE_DPAD_UP -> {
-                        scope.launch { scrollState.scrollTo((scrollState.value - 160).coerceAtLeast(0)) }
+                        scope.launch { scrollState.scrollTo((scrollState.value - scrollStepPx).coerceAtLeast(0)) }
                         true
                     }
                     else -> false
@@ -433,9 +435,13 @@ private fun buildPlaybackInfoSections(
         if (abs(diag.playbackSpeed - 1.0) > 0.01) {
             add(InfoRow("Speed", String.format(Locale.US, "%.2fx", diag.playbackSpeed)))
         }
-        val activeAudio = state.audioTracks.firstOrNull { it.id == state.selectedAudioId || it.isSelected }
+        val activeAudio = state.selectedAudioId?.let { id ->
+            state.audioTracks.firstOrNull { it.id == id }
+        } ?: state.audioTracks.firstOrNull { it.isSelected }
         activeAudio?.let { add(InfoRow("Audio Track", it.displayLabel)) }
-        val activeSub = state.subtitleTracks.firstOrNull { it.id == state.selectedSubtitleId || it.isSelected }
+        val activeSub = state.selectedSubtitleId?.let { id ->
+            state.subtitleTracks.firstOrNull { it.id == id }
+        }
         add(InfoRow("Subtitles", activeSub?.displayLabel ?: "Off"))
     }
     sections += InfoSection("stream", "STREAM & TRANSPORT", streamRows)
