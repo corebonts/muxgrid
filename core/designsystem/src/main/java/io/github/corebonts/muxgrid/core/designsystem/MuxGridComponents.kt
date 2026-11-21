@@ -55,6 +55,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -114,9 +115,20 @@ fun BroadcastUnderlineTab(
     modifier: Modifier = Modifier,
     leadingIcon: ImageVector? = null,
 ) {
+    val accentColor = MuxGridColors.Accent
     Box(
         modifier = modifier
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .drawBehind {
+                if (selected) {
+                    val strokePx = 2.dp.toPx()
+                    drawRect(
+                        color = accentColor,
+                        topLeft = Offset(0f, size.height - strokePx),
+                        size = Size(size.width, strokePx),
+                    )
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         Row(
@@ -140,13 +152,6 @@ fun BroadcastUnderlineTab(
                 maxLines = 1,
             )
         }
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .width(if (selected) 28.dp else 0.dp)
-                .height(2.dp)
-                .background(if (selected) MuxGridColors.Accent else Color.Transparent),
-        )
     }
 }
 
@@ -726,7 +731,8 @@ fun TrackAndPresetPanel(
                             Spacer(Modifier.height(4.dp))
                             Box(
                                 modifier = Modifier
-                                    .width(if (selected && !modeFocused) 20.dp else 0.dp)
+                                    .padding(horizontal = 6.dp)
+                                    .fillMaxWidth()
                                     .height(2.dp)
                                     .background(if (selected && !modeFocused) MuxGridColors.Accent else Color.Transparent),
                             )
