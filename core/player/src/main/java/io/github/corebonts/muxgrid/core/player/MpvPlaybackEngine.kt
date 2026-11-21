@@ -248,7 +248,7 @@ class MpvPlaybackEngine(
                     when (status) {
                         PlaybackStatus.IDLE, PlaybackStatus.ERROR -> platformLocks.onPlaybackStopped()
                         PlaybackStatus.BUFFERING, PlaybackStatus.PLAYING, PlaybackStatus.PAUSED -> {
-                            if (status == PlaybackStatus.PLAYING) {
+                            if (status == PlaybackStatus.BUFFERING || status == PlaybackStatus.PLAYING) {
                                 PlaybackSessionHost.ensureServiceStarted(context)
                             }
                             val active = !isPaused &&

@@ -197,7 +197,7 @@ internal class MuxGridSessionPlayer(
         val metadata = MediaMetadata.Builder()
             .setTitle(title)
             .setSubtitle(subtitle)
-            .setArtist(channelLabel)
+            .setArtist(subtitle)
             .setDisplayTitle(title)
             .setMediaType(mediaType)
             .setIsPlayable(true)

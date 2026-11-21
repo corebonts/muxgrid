@@ -1,5 +1,6 @@
 package io.github.corebonts.muxgrid
 
+import android.Manifest
 import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
@@ -11,8 +12,10 @@ import android.os.PowerManager
 import android.util.Rational
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -33,6 +36,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +44,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
@@ -52,6 +57,7 @@ import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.player.MuxGridMediaSessionService
+import io.github.corebonts.muxgrid.core.player.PlaybackSessionHost
 import io.github.corebonts.muxgrid.feature.mobile.MobileRoot
 import io.github.corebonts.muxgrid.feature.tv.TvRoot
 import kotlinx.coroutines.Dispatchers
@@ -126,6 +132,36 @@ class MainActivity : ComponentActivity() {
             DisposableEffect(rootView) {
                 onDispose {
                     rootView.keepScreenOn = false
+                }
+            }
+
+            if (!isTv && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val hasActivePlayback by remember(container.playbackEngine) {
+                    container.playbackEngine.state
+                        .map { pb ->
+                            pb.status == PlaybackStatus.PLAYING || pb.status == PlaybackStatus.BUFFERING
+                        }
+                        .distinctUntilChanged()
+                }.collectAsState(initial = false)
+                var promptedNotificationPermission by rememberSaveable { mutableStateOf(false) }
+                val notificationPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission(),
+                ) { granted ->
+                    if (granted) {
+                        PlaybackSessionHost.refreshNotification()
+                    }
+                }
+                LaunchedEffect(hasActivePlayback) {
+                    if (hasActivePlayback && !promptedNotificationPermission) {
+                        promptedNotificationPermission = true
+                        val granted = ContextCompat.checkSelfPermission(
+                            this@MainActivity,
+                            Manifest.permission.POST_NOTIFICATIONS,
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (!granted) {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
                 }
             }
 

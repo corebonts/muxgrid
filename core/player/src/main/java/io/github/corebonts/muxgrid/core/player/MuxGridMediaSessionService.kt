@@ -33,6 +33,9 @@ object PlaybackSessionHost {
     @Volatile
     internal var onZapPrevious: () -> Unit = {}
 
+    @Volatile
+    internal var activeService: MuxGridMediaSessionService? = null
+
     fun register(
         playbackEngine: PlaybackEngine,
         activityClass: Class<*>,
@@ -50,7 +53,7 @@ object PlaybackSessionHost {
     }
 
     fun ensureServiceStarted(context: Context) {
-        if (engine == null) return
+        if (engine == null || activeService != null) return
         val appContext = context.applicationContext
         val intent = Intent(appContext, MuxGridMediaSessionService::class.java)
         // Use regular startService while foregrounded; MediaSessionService promotes itself via
@@ -59,6 +62,11 @@ object PlaybackSessionHost {
         runCatching {
             appContext.startService(intent)
         }
+    }
+
+    @OptIn(UnstableApi::class)
+    fun refreshNotification() {
+        activeService?.triggerNotificationUpdate()
     }
 }
 
@@ -111,7 +119,10 @@ class MuxGridMediaSessionService : MediaSessionService() {
             )
             sessionBuilder.setSessionActivity(pendingIntent)
         }
-        mediaSession = sessionBuilder.build()
+        val session = sessionBuilder.build()
+        mediaSession = session
+        addSession(session)
+        PlaybackSessionHost.activeService = this
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
@@ -125,7 +136,13 @@ class MuxGridMediaSessionService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        if (PlaybackSessionHost.activeService === this) {
+            PlaybackSessionHost.activeService = null
+        }
         mediaSession?.run {
+            if (isSessionAdded(this)) {
+                removeSession(this)
+            }
             player.release()
             release()
         }
