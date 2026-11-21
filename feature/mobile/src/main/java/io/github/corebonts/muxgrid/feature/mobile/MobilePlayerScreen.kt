@@ -581,7 +581,7 @@ internal fun MobilePlayerScreen(
                             )
                         }
                         TopHudIconButton(
-                            icon = MuxGridIcons.Stop,
+                            icon = MuxGridIcons.Close,
                             contentDescription = "Stop playback",
                             onClick = onStop,
                         )
@@ -1074,9 +1074,6 @@ private fun TopHudIconButton(
     Box(
         modifier = Modifier
             .size(34.dp)
-            .clip(MuxGridShapes.Sm)
-            .background(MuxGridColors.ScrimSurface)
-            .border(MuxGridBorders.Divider, MuxGridColors.ScrimControlBorder, MuxGridShapes.Sm)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
