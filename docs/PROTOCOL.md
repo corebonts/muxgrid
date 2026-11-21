@@ -56,7 +56,7 @@ Each `HTSMSG-Field` is laid out as:
    - Request: `method="authenticate"`, `username`, `digest` (`bin`).
    - Reply: `noaccess=1` if denied; empty map on success.
 3. **`enableAsyncMetadata`** (Client -> Server):
-   - Request: `method="enableAsyncMetadata"`, `epg=1`, `epgMaxTime` (epoch seconds, e.g. `now + 7d`).
+   - Request: `method="enableAsyncMetadata"`, `epg=1`, `epgMaxTime` (epoch seconds, e.g. `now + 2w`).
    - Server streams initial snapshot via push events (`tagAdd`, `channelAdd`, `eventAdd`, `dvrEntryAdd`), then sends **`initialSyncCompleted`** (`method="initialSyncCompleted"`).
    - Keep the socket open while active to receive live incremental updates (`*Add`, `*Update`, `*Delete`). Close after a grace period when backgrounded and not playing to save battery.
 

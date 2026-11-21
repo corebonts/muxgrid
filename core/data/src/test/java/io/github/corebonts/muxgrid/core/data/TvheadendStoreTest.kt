@@ -191,4 +191,92 @@ class TvheadendStoreTest {
         assertEquals("Second", store.nowNextByChannel.value[1L]?.now?.title)
         assertNull(store.nowNextByChannel.value[1L]?.next)
     }
+
+    @Test
+    fun `eventDelete retains past events within 5-day retention window and deletes future ones`() {
+        val nowSec = 1_000_000L
+        val store = TvheadendStore(epochSecondsProvider = { nowSec })
+        store.applyEvent(HtspPushEvent.SyncStarting)
+        store.applyEvent(HtspPushEvent.ChannelAdd(Channel(id = 1L, number = 1, name = "M1 HD")))
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 10L, channelId = 1L, startEpochSec = nowSec - 7_200L, stopEpochSec = nowSec - 3_600L, title = "Past Show"),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 11L, channelId = 1L, startEpochSec = nowSec + 3_600L, stopEpochSec = nowSec + 7_200L, title = "Future Show"),
+            ),
+        )
+        store.applyEvent(HtspPushEvent.InitialSyncCompleted)
+
+        store.applyEvents(
+            listOf(
+                HtspPushEvent.EventDelete(10L),
+                HtspPushEvent.EventDelete(11L),
+            ),
+        )
+
+        val remaining = store.epgByChannel.value[1L].orEmpty()
+        assertEquals(listOf(10L), remaining.map { it.id })
+    }
+
+    @Test
+    fun `shadow resync preserves non-overlapping recent past events and prunes events older than 5 days`() {
+        val nowSec = 2_000_000L
+        val store = TvheadendStore(epochSecondsProvider = { nowSec })
+        store.applyEvent(HtspPushEvent.SyncStarting)
+        store.applyEvent(HtspPushEvent.ChannelAdd(Channel(id = 1L, number = 1, name = "M1 HD")))
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(
+                    id = 1L,
+                    channelId = 1L,
+                    startEpochSec = nowSec - 6L * 86_400L,
+                    stopEpochSec = nowSec - 5L * 86_400L - 10L,
+                    title = "Too Old",
+                ),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(
+                    id = 2L,
+                    channelId = 1L,
+                    startEpochSec = nowSec - 2L * 86_400L,
+                    stopEpochSec = nowSec - 2L * 86_400L + 3_600L,
+                    title = "Two Days Ago",
+                ),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(
+                    id = 3L,
+                    channelId = 1L,
+                    startEpochSec = nowSec - 1_800L,
+                    stopEpochSec = nowSec,
+                    title = "Just Ended Old",
+                ),
+            ),
+        )
+        store.applyEvent(HtspPushEvent.InitialSyncCompleted)
+
+        // Resync omits past event 2, replaces slot 3 with corrected event 30, and adds future event 4
+        store.applyEvent(HtspPushEvent.SyncStarting)
+        store.applyEvent(HtspPushEvent.ChannelAdd(Channel(id = 1L, number = 1, name = "M1 HD")))
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 30L, channelId = 1L, startEpochSec = nowSec - 1_800L, stopEpochSec = nowSec + 1_800L, title = "Corrected"),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 4L, channelId = 1L, startEpochSec = nowSec + 1_800L, stopEpochSec = nowSec + 5_400L, title = "Upcoming"),
+            ),
+        )
+        store.applyEvent(HtspPushEvent.InitialSyncCompleted)
+
+        assertEquals(listOf(2L, 30L, 4L), store.epgByChannel.value[1L].orEmpty().map { it.id })
+    }
 }

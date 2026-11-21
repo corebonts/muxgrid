@@ -9,9 +9,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +49,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -1029,5 +1033,62 @@ fun MuxGridModalSheet(
             verticalArrangement = Arrangement.spacedBy(contentSpacing),
             content = content,
         )
+    }
+}
+
+/**
+ * Ensures the item at [index] in a horizontal (or vertical) [LazyListState] stays cleanly inside
+ * the visible viewport, centering it when it is off-screen or partially clipped at an edge.
+ */
+suspend fun scrollItemIntoViewport(
+    listState: LazyListState,
+    index: Int,
+    animate: Boolean,
+) {
+    if (index < 0) return
+    if (listState.layoutInfo.totalItemsCount <= index) {
+        withFrameNanos { }
+        if (listState.layoutInfo.totalItemsCount <= index) return
+    }
+    var info = listState.layoutInfo
+    var viewportWidth = info.viewportEndOffset - info.viewportStartOffset
+    if (viewportWidth <= 0) {
+        listState.scrollToItem(index)
+        withFrameNanos { }
+        info = listState.layoutInfo
+        viewportWidth = info.viewportEndOffset - info.viewportStartOffset
+        if (viewportWidth <= 0) return
+    }
+
+    val visibleItem = info.visibleItemsInfo.firstOrNull { it.index == index }
+    if (visibleItem == null) {
+        listState.scrollToItem(index)
+        withFrameNanos { }
+        val updatedInfo = listState.layoutInfo
+        val measured = updatedInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+        val vpWidth = updatedInfo.viewportEndOffset - updatedInfo.viewportStartOffset
+        if (vpWidth <= 0) return
+        val desiredStart = updatedInfo.viewportStartOffset + (vpWidth - measured.size) / 2
+        val delta = (measured.offset - desiredStart).toFloat()
+        if (abs(delta) > 1f) {
+            listState.scrollBy(delta)
+        }
+        return
+    }
+
+    val itemStart = visibleItem.offset
+    val itemEnd = visibleItem.offset + visibleItem.size
+    if (itemStart >= info.viewportStartOffset && itemEnd <= info.viewportEndOffset) {
+        return
+    }
+
+    val desiredStart = info.viewportStartOffset + (viewportWidth - visibleItem.size) / 2
+    val delta = (itemStart - desiredStart).toFloat()
+    if (abs(delta) > 1f) {
+        if (animate) {
+            listState.animateScrollBy(delta)
+        } else {
+            listState.scrollBy(delta)
+        }
     }
 }

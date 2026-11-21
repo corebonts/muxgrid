@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class TvheadendStore(
     private val epochSecondsProvider: () -> Long = { System.currentTimeMillis() / 1000L },
+    private val pastRetentionSeconds: Long = EPG_PAST_RETENTION_SEC,
 ) {
     private val lock = Any()
 
@@ -73,7 +74,13 @@ class TvheadendStore(
                         shadowDvrEntries.clear()
                     }
                     HtspPushEvent.InitialSyncCompleted -> {
+                        val nowSec = epochSecondsProvider()
+                        val minStopSec = nowSec - pastRetentionSeconds
                         if (shadowSyncActive) {
+                            preserveRecentPastEventsLocked(
+                                nowSec = nowSec,
+                                minStopSec = minStopSec,
+                            )
                             liveChannels.clear()
                             liveChannels.putAll(shadowChannels)
                             liveTags.clear()
@@ -89,6 +96,7 @@ class TvheadendStore(
                             shadowDvrEntries.clear()
                             shadowSyncActive = false
                         }
+                        pruneExpiredEventsLocked(minStopSec)
                         publishAllLocked()
                         dirtyChannels = false
                         dirtyTags = false
@@ -96,6 +104,7 @@ class TvheadendStore(
                         dirtyDvr = false
                     }
                     else -> {
+                        val nowSec = epochSecondsProvider()
                         val targetChannels = if (shadowSyncActive) shadowChannels else liveChannels
                         val targetTags = if (shadowSyncActive) shadowTags else liveTags
                         val targetEvents = if (shadowSyncActive) shadowEvents else liveEvents
@@ -103,6 +112,7 @@ class TvheadendStore(
 
                         val changed = applyMutation(
                             event = event,
+                            nowSec = nowSec,
                             channelsMap = targetChannels,
                             tagsMap = targetTags,
                             eventsMap = targetEvents,
@@ -146,6 +156,27 @@ class TvheadendStore(
         }
     }
 
+    fun seedCachedEvents(events: List<EpgEvent>, clearExisting: Boolean = false) {
+        synchronized(lock) {
+            val nowSec = epochSecondsProvider()
+            val minStopSec = nowSec - pastRetentionSeconds
+            var changed = false
+            if (clearExisting && liveEvents.isNotEmpty()) {
+                liveEvents.clear()
+                changed = true
+            }
+            for (ev in events) {
+                if (ev.stopEpochSec >= minStopSec && !liveEvents.containsKey(ev.id)) {
+                    liveEvents[ev.id] = ev
+                    changed = true
+                }
+            }
+            if (changed && !shadowSyncActive) {
+                publishNowNextLocked(rebuildEpg = true)
+            }
+        }
+    }
+
     fun findConflictingRecording(targetChannelId: Long): DvrEntry? = synchronized(lock) {
         liveDvrEntries.values.firstOrNull { entry ->
             entry.state == DvrState.RECORDING && entry.channelId != targetChannelId
@@ -170,6 +201,7 @@ class TvheadendStore(
 
     private fun applyMutation(
         event: HtspPushEvent,
+        nowSec: Long,
         channelsMap: MutableMap<Long, Channel>,
         tagsMap: MutableMap<Long, ChannelTag>,
         eventsMap: MutableMap<Long, EpgEvent>,
@@ -244,8 +276,15 @@ class TvheadendStore(
             ChangeScope.EVENTS
         }
         is HtspPushEvent.EventDelete -> {
-            eventsMap.remove(event.eventId)
-            ChangeScope.EVENTS
+            val existing = eventsMap[event.eventId]
+            val minStopSec = nowSec - pastRetentionSeconds
+            if (existing != null && existing.stopEpochSec <= nowSec && existing.stopEpochSec >= minStopSec) {
+                // Tvheadend purges EPG events as soon as they finish; keep recent past shows locally.
+                ChangeScope.NONE
+            } else {
+                eventsMap.remove(event.eventId)
+                ChangeScope.EVENTS
+            }
         }
         is HtspPushEvent.DvrEntryAdd -> {
             dvrMap[event.entry.id] = event.entry
@@ -276,6 +315,38 @@ class TvheadendStore(
             ChangeScope.DVR
         }
         HtspPushEvent.SyncStarting, HtspPushEvent.InitialSyncCompleted -> ChangeScope.NONE
+    }
+
+    private fun preserveRecentPastEventsLocked(
+        nowSec: Long,
+        minStopSec: Long,
+    ) {
+        if (liveEvents.isEmpty()) return
+        val shadowIntervalsByChannel = HashMap<Long, MutableList<Pair<Long, Long>>>()
+        for (ev in shadowEvents.values) {
+            shadowIntervalsByChannel
+                .getOrPut(ev.channelId) { ArrayList() }
+                .add(ev.startEpochSec to ev.stopEpochSec)
+        }
+        for (ev in liveEvents.values) {
+            if (shadowEvents.containsKey(ev.id)) continue
+            if (!shadowChannels.containsKey(ev.channelId)) continue
+            if (ev.stopEpochSec > nowSec || ev.stopEpochSec < minStopSec) continue
+            val intervals = shadowIntervalsByChannel[ev.channelId]
+            val overlaps = intervals?.any { (s, e) -> ev.startEpochSec < e && ev.stopEpochSec > s } == true
+            if (!overlaps) {
+                shadowEvents[ev.id] = ev
+            }
+        }
+    }
+
+    private fun pruneExpiredEventsLocked(minStopSec: Long) {
+        val it = liveEvents.values.iterator()
+        while (it.hasNext()) {
+            if (it.next().stopEpochSec < minStopSec) {
+                it.remove()
+            }
+        }
     }
 
     private fun publishAllLocked() {
@@ -347,5 +418,9 @@ class TvheadendStore(
 
     private fun publishDvrLocked() {
         _dvrEntries.value = HashMap(liveDvrEntries)
+    }
+
+    companion object {
+        const val EPG_PAST_RETENTION_SEC = 5L * 86_400L
     }
 }

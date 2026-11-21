@@ -197,7 +197,7 @@ class HtspClientTest {
     }
 
     @Test
-    fun `sends 7-day epgMaxTime and handles DVR RPCs`() = runBlocking {
+    fun `sends 2-week epgMaxTime and handles DVR RPCs`() = runBlocking {
         ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
             val capturedMethods = mutableListOf<String>()
             var capturedEpgWindowSec = 0L
@@ -291,7 +291,7 @@ class HtspClientTest {
                 client.connectionState.first { it is ConnectionState.Connected }
             }
 
-            assertTrue(capturedEpgWindowSec >= 6L * 86_400L)
+            assertTrue(capturedEpgWindowSec >= 13L * 86_400L)
             val newId = client.addDvrEntry(999L)
             assertEquals(777L, newId)
             client.updateDvrEntry(777L, playPositionSec = 123L, playCount = 1)
