@@ -60,6 +60,8 @@ class LocalMediaProxy(
         val fetchedAtMs: Long,
     )
 
+    private class HttpHeaderException(val statusCode: Int, message: String) : IOException(message)
+
     private class ActiveStreamHandle(
         val upstreamSocket: AtomicReference<Socket?> = AtomicReference(null),
         val clientSocket: Socket,
@@ -167,12 +169,16 @@ class LocalMediaProxy(
         var dvrHandle: ActiveStreamHandle? = null
         try {
             clientSocket.soTimeout = 15_000
-            val clientIn = clientSocket.getInputStream()
+            val clientIn = BufferedInputStream(clientSocket.getInputStream(), CLIENT_HEADER_BUFFER_BYTES)
             val requestLine = readHeaderLine(clientIn) ?: return
             var rangeHeader: String? = null
+            var headerCount = 0
             while (true) {
                 val line = readHeaderLine(clientIn) ?: break
                 if (line.isEmpty()) break
+                if (++headerCount > MAX_HEADER_COUNT) {
+                    throw HttpHeaderException(431, "Too many request headers")
+                }
                 if (line.startsWith("Range:", ignoreCase = true)) {
                     rangeHeader = line.substringAfter(':').trim()
                 }
@@ -219,10 +225,12 @@ class LocalMediaProxy(
                     val handle = ActiveStreamHandle(clientSocket = clientSocket)
                     dvrHandle = handle
                     activeDvrUpstreams.add(handle)
-                    relayGrowingDvrStream(method, id, rangeHeader, clientSocket, handle, clientSocket.getOutputStream())
+                    relayGrowingDvrStream(method, id, rangeHeader, clientSocket, clientIn, handle, clientSocket.getOutputStream())
                 }
                 else -> writeHttpError(clientSocket.getOutputStream(), 404, "Not Found")
             }
+        } catch (e: HttpHeaderException) {
+            writeHttpError(clientSocket.getOutputStream(), e.statusCode, e.message ?: "Bad Request")
         } catch (_: IOException) {
             // Client disconnected or stream aborted
         } finally {
@@ -322,7 +330,7 @@ class LocalMediaProxy(
             }
 
             activeUpstreamStatus = "HTTP ${response.statusCode}"
-            val contentType = response.headers["content-type"] ?: "video/mp2t"
+            val contentType = sanitizeHeaderValue(response.headers["content-type"], fallback = "video/mp2t")
             val respHeader = "HTTP/1.1 200 OK\r\nContent-Type: $contentType\r\nConnection: close\r\n\r\n"
             clientOut.write(respHeader.toByteArray(StandardCharsets.US_ASCII))
             clientOut.flush()
@@ -413,11 +421,12 @@ class LocalMediaProxy(
 
             activeUpstreamStatus = "HTTP ${response.statusCode}"
             val respHeaders = buildString {
-                append("HTTP/1.1 ${response.statusCode} ${response.statusReason}\r\n")
-                response.headers["content-type"]?.let { append("Content-Type: $it\r\n") }
-                response.headers["content-length"]?.let { append("Content-Length: $it\r\n") }
-                response.headers["content-range"]?.let { append("Content-Range: $it\r\n") }
-                response.headers["accept-ranges"]?.let { append("Accept-Ranges: $it\r\n") }
+                val safeReason = sanitizeHeaderValue(response.statusReason, fallback = "Response", maxLength = 128)
+                append("HTTP/1.1 ${response.statusCode} $safeReason\r\n")
+                response.headers["content-type"]?.let { append("Content-Type: ${sanitizeHeaderValue(it, "application/octet-stream")}\r\n") }
+                response.headers["content-length"]?.let { append("Content-Length: ${sanitizeHeaderValue(it, "0")}\r\n") }
+                response.headers["content-range"]?.let { append("Content-Range: ${sanitizeHeaderValue(it, "")}\r\n") }
+                response.headers["accept-ranges"]?.let { append("Accept-Ranges: ${sanitizeHeaderValue(it, "bytes")}\r\n") }
                 append("Connection: close\r\n\r\n")
             }
             clientOut.write(respHeaders.toByteArray(StandardCharsets.US_ASCII))
@@ -468,6 +477,7 @@ class LocalMediaProxy(
         dvrId: Long,
         rangeHeader: String?,
         clientSocket: Socket,
+        clientIn: InputStream,
         handle: ActiveStreamHandle,
         clientOut: OutputStream,
     ) {
@@ -538,7 +548,7 @@ class LocalMediaProxy(
                         clientOut.flush()
                         return
                     }
-                    if (!waitForPollOrDisconnect(clientSocket, growingPollIntervalMs, handle)) {
+                    if (!waitForPollOrDisconnect(clientSocket, clientIn, growingPollIntervalMs, handle)) {
                         return
                     }
                 }
@@ -587,7 +597,7 @@ class LocalMediaProxy(
                 if (!stillRecording) {
                     break
                 }
-                if (!waitForPollOrDisconnect(clientSocket, growingPollIntervalMs, handle)) {
+                if (!waitForPollOrDisconnect(clientSocket, clientIn, growingPollIntervalMs, handle)) {
                     return
                 }
             }
@@ -605,6 +615,7 @@ class LocalMediaProxy(
 
     private fun waitForPollOrDisconnect(
         clientSocket: Socket,
+        clientIn: InputStream,
         pollMs: Long,
         handle: ActiveStreamHandle,
     ): Boolean {
@@ -612,7 +623,7 @@ class LocalMediaProxy(
         val prevTimeout = runCatching { clientSocket.soTimeout }.getOrDefault(15_000)
         return try {
             clientSocket.soTimeout = pollMs.toInt().coerceAtLeast(10)
-            clientSocket.getInputStream().read()
+            clientIn.read()
             false
         } catch (_: SocketTimeoutException) {
             !handle.cancelled.get() && !clientSocket.isClosed
@@ -649,10 +660,11 @@ class LocalMediaProxy(
             upstreamSock.connect(InetSocketAddress(endpoint.host, endpoint.port), 5_000)
 
             val reqBytes = buildString {
-                append("$httpMethod $reqPath HTTP/1.1\r\n")
+                val safePath = sanitizeHeaderValue(reqPath, fallback = "/")
+                append("$httpMethod $safePath HTTP/1.1\r\n")
                 append("Host: ${endpoint.host}:${endpoint.port}\r\n")
                 if (!rangeHeader.isNullOrBlank()) {
-                    append("Range: $rangeHeader\r\n")
+                    append("Range: ${sanitizeHeaderValue(rangeHeader, fallback = "")}\r\n")
                 }
                 append("Connection: close\r\n")
                 append("Accept: */*\r\n")
@@ -674,9 +686,13 @@ class LocalMediaProxy(
             val statusCode = parseStatusCode(statusLine)
             val statusReason = parseStatusReason(statusLine, statusCode)
             val headers = LinkedHashMap<String, String>()
+            var headerCount = 0
             while (true) {
                 val headerLine = readHeaderLine(upstreamIn) ?: break
                 if (headerLine.isEmpty()) break
+                if (++headerCount > MAX_HEADER_COUNT) {
+                    throw IOException("Upstream returned too many HTTP headers")
+                }
                 val colon = headerLine.indexOf(':')
                 if (colon > 0) {
                     val name = headerLine.substring(0, colon).trim().lowercase()
@@ -732,6 +748,9 @@ class LocalMediaProxy(
         while (b >= 0) {
             if (b == '\n'.code) break
             if (b != '\r'.code) {
+                if (out.size() >= MAX_HEADER_LINE_BYTES) {
+                    throw HttpHeaderException(431, "HTTP header line exceeds limit")
+                }
                 out.write(b)
             }
             b = input.read()
@@ -788,8 +807,9 @@ class LocalMediaProxy(
     }
 
     private fun writeHttpError(out: OutputStream, code: Int, message: String) {
+        val safeReason = sanitizeHeaderValue(message, fallback = "Error", maxLength = 128)
         val body = message.toByteArray(StandardCharsets.UTF_8)
-        val headers = "HTTP/1.1 $code $message\r\nContent-Type: text/plain\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n"
+        val headers = "HTTP/1.1 $code $safeReason\r\nContent-Type: text/plain\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n"
         runCatching {
             out.write(headers.toByteArray(StandardCharsets.US_ASCII))
             out.write(body)
@@ -797,9 +817,32 @@ class LocalMediaProxy(
         }
     }
 
+    private fun sanitizeHeaderValue(
+        raw: String?,
+        fallback: String,
+        maxLength: Int = Int.MAX_VALUE,
+    ): String {
+        if (raw.isNullOrEmpty()) return fallback
+        val sanitized = buildString(minOf(raw.length, maxLength)) {
+            for (ch in raw) {
+                if (length >= maxLength) break
+                val code = ch.code
+                if (code in 0x20..0x7E) {
+                    append(ch)
+                } else if (ch == '\r' || ch == '\n' || ch == '\t') {
+                    append(' ')
+                }
+            }
+        }.trim()
+        return sanitized.ifEmpty { fallback }
+    }
+
     companion object {
         const val DEFAULT_TICKET_TTL_MS: Long = 240_000L
         const val DEFAULT_GROWING_POLL_INTERVAL_MS: Long = 500L
+        internal const val MAX_HEADER_LINE_BYTES: Int = 8_192
+        internal const val MAX_HEADER_COUNT: Int = 64
+        private const val CLIENT_HEADER_BUFFER_BYTES: Int = 8_192
         private const val GROWING_READ_CHUNK_BYTES: Int = 65_536
         private val CRLF_BYTES = "\r\n".toByteArray(StandardCharsets.US_ASCII)
         private val FINAL_CHUNK_BYTES = "0\r\n\r\n".toByteArray(StandardCharsets.US_ASCII)

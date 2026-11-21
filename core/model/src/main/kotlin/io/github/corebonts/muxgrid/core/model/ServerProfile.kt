@@ -11,6 +11,10 @@ data class ServerProfile(
 ) {
     val isConfigured: Boolean
         get() = host.isNotBlank() && htspPort in 1..65535 && httpPort in 1..65535
+
+    override fun toString(): String =
+        "ServerProfile(id=$id, name=$name, host=$host, htspPort=$htspPort, httpPort=$httpPort, " +
+            "username=$username, password=<redacted>)"
 }
 
 sealed interface ConnectionState {
