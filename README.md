@@ -1,55 +1,82 @@
-# MuxGrid — Tvheadend Android Client (Phone + Android TV)
+# MuxGrid — Tvheadend Client for Android & Android TV
 
 <img src="./docs/assets/muxgrid-icon.svg" alt="MuxGrid icon" width="72" />
 
-A lightweight, native Android & Android TV client for **Tvheadend** (`4.3+`), designed for instant channel zapping, live pause/rewind (timeshift), smooth playback of completed and in-progress recordings, background audio play on mobile, and a calm, iOS/iPadOS-inspired dark interface.
+A lightweight, native Android and Android TV client for **Tvheadend** (`4.3+`), built for sub-second channel zapping, local live pause/rewind (timeshift), smooth playback of completed and actively recording DVR shows, background audio playback on mobile, and a low-glare **Broadcast Monitor** dark interface (Carbon & Signal Amber).
 
-Built as a **single unified APK** targeting both modern Android phones/tablets and Android TV / Google TV devices (such as the TCL C635).
+Built as a **single unified codebase** producing ABI-split APKs for Android phones, tablets, and Android TV / Google TV devices (`minSdk 28`).
 
-## Core Goals
+## Features
 
-- **Snappy & Lightweight:** Fast cold start, sub-second channel zapping on LAN, tiny memory footprint suitable for 2 GB RAM Android TVs.
-- **Broadcast-Native Playback:** Clean playback of `1080i` interlaced H.264, `MP2`/`AC3`/`AAC` audio, DVB bitmap subtitles (`DVBSUB`), and radio channels with zero server-side transcoding.
-- **Complete Live & DVR Experience:** Live TV pause/rewind, completed and **in-progress (growing)** recordings with accurate seeking, EPG browsing, and one-tap recording scheduling.
-- **Phone-First Comforts:** Background audio playback (radio & live TV) with system media controls, Picture-in-Picture (PiP), and fluid touch gestures.
-- **TV-First Ergonomics:** Pure Compose for TV D-pad navigation, instant Channel Up/Down zapping, progressive seek steps, and zero focus traps.
-- **Modern Aesthetic:** Dark-first, content-forward canvas with translucent frosted-glass overlays, tabular typography, and minimal navigation clutter (inspired by Infuse, Channels, and Apple TV).
+- **Live TV & Radio:**
+  - Instant channel zapping on LAN via Tvheadend's `pass` (MPEG-TS) stream profile with zero server-side transcoding.
+  - Native broadcast decoding via `libmpv`: `1080i` interlaced H.264 (with `bwdif` software deinterlacing on mobile and zero-copy hardware decoding on TV), `MP2`/`AC3`/`AAC` audio track switching, and bitmap DVB subtitles (`DVBSUB`).
+  - Channel filtering (`All`, `TV`, `Radio`, `Favorites`, and server channel tags), pull-to-refresh full metadata resync, and clear tuner-conflict notices on single-tuner servers.
+- **Live Timeshift (Pause & Rewind):**
+  - Disk-backed local `libmpv` ring buffer with configurable size limits in Settings (`Off`, `512 MB`, `1 GB`, `2 GB`, `4 GB`), free-space checks, and automatic recovery when pause reaches the forward buffer cap.
+  - Buffered-range seekbar with `-MM:SS · Back to Live` quick jump.
+- **Program Guide (EPG):**
+  - **Phone & Tablet:** Vertical per-channel agenda with search and frosted-glass program detail sheet (**Watch Live**, **Record**, **Cancel Recording**).
+  - **Android TV:** Horizontal timeline grid with sticky channel column, live "Now" hairline, and a dynamic top preview header for focused programs.
+- **DVR & Recording Management:**
+  - Dedicated sections/shelves for **Recording Now**, **Completed** (grouped by series/title), and **Scheduled** timers.
+  - Schedule, stop, cancel, and delete recordings directly via HTSP.
+  - **Watch from Start (Chase-Play):** Seamless playback and seeking of actively growing recordings over an in-process HTSP VFS tail-follow loopback proxy (`LocalMediaProxy`).
+  - Server-side resume position (`playposition`) and watched state (`playcount`) synced across devices, with local fallback for read-only users.
+- **Background Audio & Picture-in-Picture (Phone & Tablet):**
+  - Media3 `MediaSessionService` foreground playback with lock-screen controls, Bluetooth/headset media keys, audio focus handling, headphone-disconnect pause, and Wi-Fi/partial wake locks.
+  - Persistent mini-player bar, `vid=no` audio-only backgrounding for radio and live TV, and automatic/manual Picture-in-Picture (PiP).
+- **Tailored Mobile & 10-ft TV Controls:**
+  - **Mobile:** Double-tap seek (`-10s` / `+30s`), vertical edge drags for brightness and volume, aspect ratio selector, Quick-Zap channel drawer, adaptive tablet/landscape layout, and Haze backdrop blur on non-video chrome.
+  - **Android TV:** Collapsible left Navigation Rail (`androidx.tv:tv-material`), instant `Ch+`/`Ch-` / D-pad Up/Down zapping with minimal OSD, progressive D-pad seeking (`10s → 30s → 1m → 5m`), and an overlay Quick Channel Strip.
 
-## Current Implementation Status
+## Server Setup (Tvheadend)
 
-- **Completed (M0–M3):** Multi-module Gradle project (`compileSdk 37.2`, `targetSdk 36`, `minSdk 28`), HTSP binary client + atomic shadow-store resync + dedicated HTSP VFS connection (`HtspVfsClient`), DataStore + Tink credential storage, Coil HTSP/HTTP picon fetcher, `LocalMediaProxy` (live streams, completed `/dvrfile` Range relay with ticket auto-refresh, and growing recording HTSP tail-follow mode), `libmpv` playback engine (`mediacodec` on TV, `mediacodec-copy` + `bwdif` on phone, disk-backed live timeshift ring buffer with free-space check & buffer-full auto-resume), onboarding Server Setup, Mobile & TV Live/Guide/Recordings tabs with series grouping, DVR management, resume sync, live timeshift seekbar (`-MM:SS · Back to Live`), and "Watch from Start" chase-play for in-progress recordings.
-- **Implemented (M4–M5, awaiting device verification):** Media3 `MediaSessionService` + `SimpleBasePlayer` adapter, explicit `AudioFocusRequest` / `ACTION_AUDIO_BECOMING_NOISY` / `WifiLock` / `PARTIAL_WAKE_LOCK`, `vid=no` audio-only backgrounding, PiP support, mobile gestures (double-tap seek, brightness/volume vertical drag), aspect ratio modes, Quick-Zap channel drawer, Haze 2.1.0 frosted-glass chrome, persistent mini-player, adaptive tablet/landscape navigation rail & grid, TV collapsible Navigation Rail, horizontal timeline EPG with red "Now" hairline, progressive D-pad seeking (`10s → 30s → 1m → 5m`), and TV HUD quick channel strip.
-- **Planned (M6):** Multi-profile switching, automated release signing, and Android 17 `ACCESS_LOCAL_NETWORK` readiness.
+MuxGrid requires **Tvheadend 4.3+** with both **HTSP (`9982/tcp`)** and **HTTP (`9981/tcp`)** reachable over your LAN or VPN, and the **`pass`** stream profile enabled.
 
-## Build, Test & Sideload
+See **[docs/SERVER_SETUP.md](./docs/SERVER_SETUP.md)** for a complete step-by-step guide covering:
+- Stream profiles (`pass`, `htsp`, `matroska`) and DVR profile settings
+- Creating a least-privilege Tvheadend user (full DVR vs. read-only permissions)
+- Server-side vs. local timeshift, single-tuner considerations, and VPN remote access
+- Verification commands (`curl`, `nc`) and troubleshooting
 
-1. **Optional debug defaults:** Create an untracked `.env` in `android-client/` (already ignored by `.gitignore`) if you want `BuildConfig` prefill defaults during local builds:
-   ```properties
-   TVH_HOST=192.168.1.5
-   TVH_USER=androidclient
-   TVH_PASS=...
-   ```
-2. **Run JVM unit tests and build ABI-split debug APKs:**
-   ```bash
-   ./gradlew test assembleDebug
-   ```
-   Outputs:
-   - Phone (`arm64-v8a`): `app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`
-   - 32-bit Android TV (`armeabi-v7a`, e.g., TCL C635): `app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk`
-3. **Install / Sideload:**
-   - Via ADB: `adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk` (or `app-armeabi-v7a-debug.apk` for TV)
-   - Over LAN browser (phone): run `python3 -m http.server 18123 --bind 0.0.0.0 --directory app/build/outputs/apk/debug` and download `http://<host-ip>:18123/app-arm64-v8a-debug.apk` on your phone.
+## Build & Install from Source
 
-## Documentation Map
+### Prerequisites
+- **JDK 17**
+- **Android SDK** with `compileSdk` **37.2** (`release(37)`, minor `2`) and build tools installed (or let Gradle download missing SDK components if configured)
+- Target device running **Android 9 (API 28)** or newer
 
-| Document | Purpose |
-| :--- | :--- |
-| [PLAN.md](./PLAN.md) | Master implementation plan: architecture, tech stack, module boundaries, phased milestones (M0–M6), and dead ends to avoid |
-| [docs/DESIGN.md](./docs/DESIGN.md) | Visual design system, Phone/Tablet & Android TV layouts, player HUD, gestures, and D-pad interaction rules |
-| [docs/muxgrid-prototype.html](./docs/muxgrid-prototype.html) | Self-contained interactive HTML prototype of **MuxGrid** (Android TV 10-ft & Phone portrait modes, animated player HUD, EPG, timeshift, PiP, and mini-player) — open directly in any browser |
-| [docs/assets/muxgrid-icon.svg](./docs/assets/muxgrid-icon.svg) | **MuxGrid** VectorDrawable-ready SVG app icon source (`512×512`) |
-| [docs/PROTOCOL.md](./docs/PROTOCOL.md) | Tvheadend HTSP wire format, RPC subset, HTTP streaming URLs, and the growing-recording loopback bridge contract |
-| [docs/SERVER_SETUP.md](./docs/SERVER_SETUP.md) | Recommended Tvheadend server configuration (profiles, least-privilege ACL user, single-tuner & timeshift notes, verification steps) |
+### Build & Run Tests
+
+```bash
+./gradlew test assembleDebug
+```
+
+ABI-split debug APKs are generated at:
+- **Phone / Tablet / 64-bit TV (`arm64-v8a`):** `app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`
+- **32-bit Android TV (`armeabi-v7a`):** `app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk`
+
+### Sideload via ADB
+
+```bash
+adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+# or for 32-bit Android TV devices:
+adb install -r app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk
+```
+
+### Signed Release Builds (Optional)
+
+To sign release builds (`./gradlew assembleRelease`), create a gitignored `keystore.properties` in the repo root:
+
+```properties
+storeFile=/path/to/your-release.keystore
+storePassword=...
+keyAlias=...
+keyPassword=...
+```
+
+Alternatively, provide `MUXGRID_KEYSTORE_PATH`, `MUXGRID_KEYSTORE_PASSWORD`, `MUXGRID_KEY_ALIAS`, and `MUXGRID_KEY_PASSWORD` environment variables. Without signing credentials, `assembleRelease` produces unsigned minified APKs.
 
 ## Architecture at a Glance
 
@@ -70,26 +97,37 @@ Built as a **single unified APK** targeting both modern Android phones/tablets a
 └──────────────┬──────────────────────────────────┬───────────────────────┘
                │ HTSP (9982/tcp)                  │ HTTP (9981/tcp, pass / dvrfile)
                ▼                                  ▼
-        Tvheadend 4.3+ Server (e.g. tv-server / 192.168.1.5)
+                    Tvheadend 4.3+ Server (LAN / VPN)
 ```
+
+## Documentation
+
+| Document | Purpose |
+| :--- | :--- |
+| [docs/SERVER_SETUP.md](./docs/SERVER_SETUP.md) | Step-by-step Tvheadend server configuration, ACL permissions, verification & troubleshooting |
+| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Multi-module architecture, hybrid HTSP/HTTP proxy design, and verified platform/protocol notes |
+| [docs/DESIGN.md](./docs/DESIGN.md) | Broadcast Monitor visual tokens, mobile/TV layouts, player HUD, gestures & D-pad rules |
+| [docs/PROTOCOL.md](./docs/PROTOCOL.md) | Tvheadend HTSP binary wire format, RPC subset, and `LocalMediaProxy` contract |
+| [CHANGELOG.md](./CHANGELOG.md) | Release and implementation history |
+| [ROADMAP.md](./ROADMAP.md) | Planned features and upcoming platform work |
 
 ## Acknowledgments & Attribution
 
 ### Third-Party Projects & Libraries
-- **[Tvheadend](https://tvheadend.org/)** — For the TV streaming server and the HTSP (Home TV Streaming Protocol) specification implemented by `:core:htsp`.
-- **[mpv](https://mpv.io/)**, **[FFmpeg](https://ffmpeg.org/)**, and **[mpv-android-lib](https://github.com/abdallahmehiz/mpv-android-lib)** (by [Abdallah Mehiz](https://github.com/abdallahmehiz)) — For the native Android `libmpv` playback engine, hardware decoding bridge, and `bwdif` deinterlacing filter.
-- **[Haze](https://github.com/chrisbanes/haze)** (by [Chris Banes](https://github.com/chrisbanes)) — For real-time frosted-glass backdrop blur across mobile and tablet chrome.
-- **[Coil 3](https://coil-kt.github.io/coil/)** — For asynchronous channel picon loading and caching.
-- **[Google Tink](https://developers.google.com/tink)** — For Android Keystore-backed AEAD credential encryption.
-- **[Google Material Symbols](https://fonts.google.com/icons)** — For the Rounded icon vector paths embedded in `:core:designsystem` (`MuxGridIcons.kt`).
-- **[Android Jetpack](https://developer.android.com/jetpack)** & **[Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines)** — Compose, Compose for TV (`androidx.tv`), Media3 (`MediaSessionService`), Navigation, and DataStore.
+- **[Tvheadend](https://tvheadend.org/)** — TV streaming server and the HTSP (Home TV Streaming Protocol) implemented by `:core:htsp`.
+- **[mpv](https://mpv.io/)**, **[FFmpeg](https://ffmpeg.org/)**, and **[mpv-android-lib](https://github.com/abdallahmehiz/mpv-android-lib)** (by [Abdallah Mehiz](https://github.com/abdallahmehiz)) — Native Android `libmpv` playback engine, hardware decoding bridge, and `bwdif` deinterlacing filter.
+- **[Haze](https://github.com/chrisbanes/haze)** (by [Chris Banes](https://github.com/chrisbanes)) — Real-time frosted-glass backdrop blur across mobile and tablet chrome.
+- **[Coil 3](https://coil-kt.github.io/coil/)** & **[OkHttp](https://square.github.io/okhttp/)** — Channel picon fetching (HTSP VFS + HTTP Digest/Basic fallback) and image caching.
+- **[Google Tink](https://developers.google.com/tink)** — Android Keystore-backed AEAD credential encryption.
+- **[Google Material Symbols](https://fonts.google.com/icons)** — Rounded icon vector paths embedded in `:core:designsystem`.
+- **[Android Jetpack](https://developer.android.com/jetpack)** & **[Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines)** — Compose, Compose for TV (`androidx.tv`), Media3 (`MediaSessionService`), and DataStore.
 
 See [NOTICE](./NOTICE) for full third-party copyright and license notices.
 
 ### AI Assistance
-Architected, researched, designed, and implemented with the assistance of **Google Antigravity** (powered by **Gemini**), including the clean-room HTSP protocol implementation, interactive HTML design prototype, SVG iconography, and multi-module Kotlin/Compose codebase.
+Architected, researched, designed, and implemented with the assistance of **Google Antigravity** (powered by **Gemini**), including the clean-room HTSP protocol implementation, SVG iconography, and multi-module Kotlin/Compose codebase.
 
 ## License
 
-- **Source Code ([LICENSE](./LICENSE)):** The original Kotlin source code, documentation, and assets in this repository are licensed under the **[Apache License, Version 2.0](./LICENSE)** (permissive, and one-way compatible with GPLv3).
-- **Compiled Binaries / APKs:** Because compiled builds link and bundle prebuilt `libmpv` and `FFmpeg` native libraries (`io.github.abdallahmehiz:mpv-android-lib`, built with `--enable-gpl --enable-version3`), any distributed APKs are governed by the **GNU General Public License v3.0 or later (GPL-3.0-or-later)**. The playback engine is isolated behind the `PlaybackEngine` interface in `:core:player` so the rest of the codebase remains modular and reusable under Apache-2.0.
+- **Source Code ([LICENSE](./LICENSE)):** The original Kotlin source code, documentation, and assets in this repository are licensed under the **[Apache License, Version 2.0](./LICENSE)**.
+- **Compiled Binaries / APKs:** Compiled builds link and bundle prebuilt `libmpv` and `FFmpeg` native binaries via `io.github.abdallahmehiz:mpv-android-lib:0.2.1` (built with `--enable-gpl --enable-version3`), so distributed APKs are governed by the **GNU General Public License v3.0 or later (GPL-3.0-or-later)**. Upstream source and build scripts for the bundled native libraries are available at [`abdallahmehiz/mpv-android`](https://github.com/abdallahmehiz/mpv-android), [`mpv-player/mpv`](https://github.com/mpv-player/mpv), and [`FFmpeg/FFmpeg`](https://github.com/FFmpeg/FFmpeg). The playback engine is isolated behind the `PlaybackEngine` interface in `:core:player` so the rest of the codebase remains modular and reusable under Apache-2.0.

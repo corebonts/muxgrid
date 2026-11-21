@@ -56,7 +56,7 @@ Each `HTSMSG-Field` is laid out as:
    - Request: `method="authenticate"`, `username`, `digest` (`bin`).
    - Reply: `noaccess=1` if denied; empty map on success.
 3. **`enableAsyncMetadata`** (Client -> Server):
-   - Request: `method="enableAsyncMetadata"`, `epg=1`, `epgMaxTime` (epoch seconds, e.g. `now + 2d` in M1 / `now + 7d` in M2+).
+   - Request: `method="enableAsyncMetadata"`, `epg=1`, `epgMaxTime` (epoch seconds, e.g. `now + 7d`).
    - Server streams initial snapshot via push events (`tagAdd`, `channelAdd`, `eventAdd`, `dvrEntryAdd`), then sends **`initialSyncCompleted`** (`method="initialSyncCompleted"`).
    - Keep the socket open while active to receive live incremental updates (`*Add`, `*Update`, `*Delete`). Close after a grace period when backgrounded and not playing to save battery.
 
@@ -132,19 +132,19 @@ Tvheadend's HTTP `/dvrfile/<id>` snapshots `fstat` once at request open time (an
   - Reply with **`Accept-Ranges: bytes`** and **`Content-Range: bytes X-Y/*`** (unknown total) or `Transfer-Encoding: chunked` without a known total. This keeps FFmpeg's `h->is_streamed = 0` and `s->filesize = UINT64_MAX`, allowing `SEEK_SET`/`SEEK_CUR` without capping EOF.
   - **NEVER** return `416` at the growing write head (FFmpeg treats `416` on an unknown-size resource as EOF). When `fileRead` returns `0`/short bytes while `state == "recording"`, poll `fileStat` every ~500 ms and keep streaming (waiting or clamping if a requested range starts past current size).
   - End the response cleanly only when the DVR entry leaves `recording` (`completed` / `missed`) or the client disconnects.
-- **Growing MKV Note (Verify in M0):** Tvheadend's `src/muxer/muxer_mkv.c` writes an unknown EBML Segment size (`0x01FFFFFFFFFFFFFF`) and a 500-byte `Void` placeholder, writing `Cues`, `SeekHead`, and `Duration` only in `mk_mux_close()`. Seeking an actively recording `.mkv` therefore depends on FFmpeg/`libmpv` linear cluster scanning (with `force-seekable=yes`). Test linear-seek latency on real hardware in **M0**; compute UI total duration as `max(mpvDuration, now - actualStart)` and clamp user seeks slightly behind the write head.
+- **Growing MKV Note:** Tvheadend's `src/muxer/muxer_mkv.c` writes an unknown EBML Segment size (`0x01FFFFFFFFFFFFFF`) and a 500-byte `Void` placeholder, writing `Cues`, `SeekHead`, and `Duration` only in `mk_mux_close()`. Seeking an actively recording `.mkv` therefore depends on FFmpeg/`libmpv` linear cluster scanning (with `force-seekable=yes`). Compute UI total duration as `max(mpvDuration, now - actualStart)` and clamp user seeks slightly behind the write head.
 
 ---
 
 ## 5. Recommended `libmpv` Baseline Options
 
-Lock the hardware decode/deinterlace presets during the **M0 hardware spike** on Phone + TCL C635; keep all options configurable in `PlaybackConfig`:
+Device-appropriate hardware decode/deinterlace presets are configurable in Settings and the player Display Options panel:
 
 | Scenario | Key `libmpv` Options | Rationale |
 | :--- | :--- | :--- |
 | **Android Video Output** | `vo=gpu`, `gpu-context=android`, `opengl-es=yes` (on `SurfaceView`) | Required so bitmap `DVBSUB` subtitles and OSD composite cleanly with both `mediacodec` and `mediacodec-copy`. (`vo=mediacodec_embed` drops `DVBSUB`/OSD.) |
 | **1080i Deinterlacing (Phone / Copy Mode)** | `hwdec=mediacodec-copy`, `deinterlace=yes` | Uses FFmpeg `bwdif` on CPU (requires `mpv-android-lib:0.2.1`, NOT `jdtech:libmpv` which strips `bwdif`). Eliminates 1080i combing on mobile SoCs. |
-| **1080i Playback (Android TV Fast Path)** | `hwdec=mediacodec` (`vo=gpu`) — benchmark vs `mediacodec-copy` + `deinterlace=yes` in M0 | Zero-copy hardware decode (skips mpv's `bwdif` filter; relies on Realtek TV pipeline deinterlacing). User-overridable in Settings. |
+| **1080i Playback (Android TV Fast Path)** | `hwdec=mediacodec` (`vo=gpu`), `deinterlace=no` | Zero-copy hardware decode (skips mpv's `bwdif` filter; relies on TV display pipeline deinterlacing). User-overridable in Settings. |
 | **Fast Live TV Startup** | `demuxer-lavf-o=analyzeduration=500000,probesize=524288` | Avoids multi-second FFmpeg probe stalls on MPEG-TS while still detecting all audio/DVBSUB tracks. (Tune upward if a secondary track is missed.) |
 | **Live Pause / Rewind (Timeshift)** | `cache=yes`, `demuxer-seekable-cache=yes`, `cache-on-disk=yes`, `demuxer-cache-dir=<appCacheDir>/mpv-cache`, `demuxer-max-bytes=<halfCap>`, `demuxer-max-back-bytes=<halfCap>` | **Both** forward (`demuxer-max-bytes`, caps pause duration!) and back (`demuxer-max-back-bytes`, caps rewind) must be sized to half the total disk cap (e.g., `1 GB` max disk = `512 MiB` each on TV [~35 min SD / ~15 min HD], `2 GB` max disk = `1 GiB` each on Phone [~70 min SD / ~30 min HD]). Temp file is append-only (deleted on close); packet metadata stays in RAM (~50 MB/hr). Track seekability via `demuxer-cache-state.seekable-ranges` (`mpv` reports `seekable=false` for live HTTP even while in-cache seeks work). |
 | **Background Audio (Phone)** | `vid=no` when surface detaches (restore `vid=auto` on foreground) | Keeps Radio & Live TV audio playing smoothly with screen off while releasing GPU/video decode resources. |
