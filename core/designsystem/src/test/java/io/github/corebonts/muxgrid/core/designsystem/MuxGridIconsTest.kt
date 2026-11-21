@@ -58,8 +58,9 @@ class MuxGridIconsTest {
             MuxGridIcons.VolumeUp,
             MuxGridIcons.Warning,
             MuxGridIcons.Dns,
+            MuxGridIcons.Info,
         )
-        assertEquals(50, icons.size)
+        assertEquals(51, icons.size)
         icons.forEach { vector ->
             assertEquals(24f, vector.defaultWidth.value, "${vector.name} width")
             assertEquals(24f, vector.defaultHeight.value, "${vector.name} height")

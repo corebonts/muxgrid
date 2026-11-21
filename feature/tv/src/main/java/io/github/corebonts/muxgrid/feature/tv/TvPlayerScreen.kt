@@ -32,6 +32,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -74,6 +75,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
+import io.github.corebonts.muxgrid.core.designsystem.PlaybackInfoPanel
 import io.github.corebonts.muxgrid.core.designsystem.TimeshiftNoticeBanner
 import io.github.corebonts.muxgrid.core.designsystem.TrackAndPresetPanel
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationSec
@@ -115,6 +117,7 @@ internal fun TvPlayerScreen(
     var hudVisible by remember { mutableStateOf(false) }
     var hudInteractionNonce by remember { mutableIntStateOf(0) }
     var trackPanelOpen by remember { mutableStateOf(false) }
+    var infoPanelOpen by remember { mutableStateOf(false) }
     var progressFocused by remember { mutableStateOf(false) }
     var zapOsdTrigger by remember { mutableLongStateOf(0L) }
     var zapOsdVisible by remember { mutableStateOf(true) }
@@ -134,11 +137,22 @@ internal fun TvPlayerScreen(
     val playPauseFocusRequester = remember { FocusRequester() }
     val progressFocusRequester = remember { FocusRequester() }
     val trackButtonFocusRequester = remember { FocusRequester() }
+    val infoButtonFocusRequester = remember { FocusRequester() }
     val activeChannelChipFocusRequester = remember { FocusRequester() }
     val quickStripState = rememberLazyListState()
     var wasTrackPanelOpen by remember { mutableStateOf(false) }
+    var wasInfoPanelOpen by remember { mutableStateOf(false) }
     var backToLiveFocused by remember { mutableStateOf(false) }
     val canSeekTimeline = playbackState.isRecordingPlayback || playbackState.isTimeshiftSeekable
+
+    LaunchedEffect(infoPanelOpen) {
+        playbackEngine.setDiagnosticsEnabled(infoPanelOpen)
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            playbackEngine.setDiagnosticsEnabled(false)
+        }
+    }
 
     LaunchedEffect(playbackState.isCompleted) {
         if (playbackState.isCompleted) {
@@ -179,11 +193,13 @@ internal fun TvPlayerScreen(
         }
     }
 
-    LaunchedEffect(hudVisible, trackPanelOpen) {
+    LaunchedEffect(hudVisible, trackPanelOpen, infoPanelOpen) {
         if (hudVisible) {
-            if (!trackPanelOpen) {
+            if (!trackPanelOpen && !infoPanelOpen) {
                 if (wasTrackPanelOpen) {
                     runCatching { trackButtonFocusRequester.requestFocus() }
+                } else if (wasInfoPanelOpen) {
+                    runCatching { infoButtonFocusRequester.requestFocus() }
                 } else if (!progressFocused) {
                     runCatching { playPauseFocusRequester.requestFocus() }
                 }
@@ -195,6 +211,7 @@ internal fun TvPlayerScreen(
             runCatching { playerFocusRequester.requestFocus() }
         }
         wasTrackPanelOpen = trackPanelOpen
+        wasInfoPanelOpen = infoPanelOpen
     }
 
     LaunchedEffect(hudVisible, playbackState.channelId, channels.size) {
@@ -209,7 +226,7 @@ internal fun TvPlayerScreen(
     LaunchedEffect(playbackState.isBehindLive) {
         if (!playbackState.isBehindLive && backToLiveFocused) {
             backToLiveFocused = false
-            if (hudVisible && !trackPanelOpen) {
+            if (hudVisible && !trackPanelOpen && !infoPanelOpen) {
                 runCatching { playPauseFocusRequester.requestFocus() }
             }
         }
@@ -218,15 +235,15 @@ internal fun TvPlayerScreen(
     LaunchedEffect(canSeekTimeline) {
         if (!canSeekTimeline && progressFocused) {
             progressFocused = false
-            if (hudVisible && !trackPanelOpen) {
+            if (hudVisible && !trackPanelOpen && !infoPanelOpen) {
                 runCatching { playPauseFocusRequester.requestFocus() }
             }
         }
     }
 
     // Keep the HUD on screen while the progress bar is focused or while navigating HUD controls.
-    LaunchedEffect(hudVisible, trackPanelOpen, playbackState.status, progressFocused, hudInteractionNonce) {
-        if (hudVisible && !trackPanelOpen && !progressFocused && playbackState.status == PlaybackStatus.PLAYING) {
+    LaunchedEffect(hudVisible, trackPanelOpen, infoPanelOpen, playbackState.status, progressFocused, hudInteractionNonce) {
+        if (hudVisible && !trackPanelOpen && !infoPanelOpen && !progressFocused && playbackState.status == PlaybackStatus.PLAYING) {
             delay(6_000L)
             hudVisible = false
         }
@@ -269,6 +286,7 @@ internal fun TvPlayerScreen(
     BackHandler {
         when {
             playbackState.error != null -> onExit()
+            infoPanelOpen -> infoPanelOpen = false
             trackPanelOpen -> trackPanelOpen = false
             hudVisible -> hudVisible = false
             else -> onExit()
@@ -301,15 +319,15 @@ internal fun TvPlayerScreen(
                     return@onPreviewKeyEvent false
                 }
                 if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                if (hudVisible && !trackPanelOpen && !isBackKey) {
+                if (hudVisible && !trackPanelOpen && !infoPanelOpen && !isBackKey) {
                     hudInteractionNonce++
                 }
                 when {
-                    isBackKey && (trackPanelOpen || hudVisible) -> {
-                        if (trackPanelOpen) {
-                            trackPanelOpen = false
-                        } else {
-                            hudVisible = false
+                    isBackKey && (infoPanelOpen || trackPanelOpen || hudVisible) -> {
+                        when {
+                            infoPanelOpen -> infoPanelOpen = false
+                            trackPanelOpen -> trackPanelOpen = false
+                            else -> hudVisible = false
                         }
                         suppressNextBackKeyUp = true
                         true
@@ -342,22 +360,22 @@ internal fun TvPlayerScreen(
                         triggerProgressiveSeek(1)
                         true
                     }
-                    !hudVisible && !trackPanelOpen && code == KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    !hudVisible && !trackPanelOpen && !infoPanelOpen && code == KeyEvent.KEYCODE_DPAD_DOWN -> {
                         hudVisible = true
                         true
                     }
-                    !hudVisible && !trackPanelOpen && code == KeyEvent.KEYCODE_DPAD_UP -> {
+                    !hudVisible && !trackPanelOpen && !infoPanelOpen && code == KeyEvent.KEYCODE_DPAD_UP -> {
                         true
                     }
-                    !hudVisible && !trackPanelOpen && canSeekTimeline && code == KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    !hudVisible && !trackPanelOpen && !infoPanelOpen && canSeekTimeline && code == KeyEvent.KEYCODE_DPAD_LEFT -> {
                         triggerProgressiveSeek(-1)
                         true
                     }
-                    !hudVisible && !trackPanelOpen && canSeekTimeline && code == KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    !hudVisible && !trackPanelOpen && !infoPanelOpen && canSeekTimeline && code == KeyEvent.KEYCODE_DPAD_RIGHT -> {
                         triggerProgressiveSeek(1)
                         true
                     }
-                    !hudVisible && !trackPanelOpen && (
+                    !hudVisible && !trackPanelOpen && !infoPanelOpen && (
                         code == KeyEvent.KEYCODE_DPAD_CENTER ||
                             code == KeyEvent.KEYCODE_ENTER ||
                             code == KeyEvent.KEYCODE_NUMPAD_ENTER
@@ -370,7 +388,7 @@ internal fun TvPlayerScreen(
                 }
             }
             .focusRequester(playerFocusRequester)
-            .focusable(enabled = !hudVisible && !trackPanelOpen && playbackState.error == null),
+            .focusable(enabled = !hudVisible && !trackPanelOpen && !infoPanelOpen && playbackState.error == null),
     ) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -399,6 +417,7 @@ internal fun TvPlayerScreen(
             LaunchedEffect(err) {
                 hudVisible = false
                 trackPanelOpen = false
+                infoPanelOpen = false
                 runCatching { okFocusRequester.requestFocus() }
             }
             Box(
@@ -458,7 +477,7 @@ internal fun TvPlayerScreen(
 
         // Minimal 3s zap/start OSD when full HUD is hidden
         AnimatedVisibility(
-            visible = zapOsdVisible && !hudVisible && !trackPanelOpen && !seekOsdVisible,
+            visible = zapOsdVisible && !hudVisible && !trackPanelOpen && !infoPanelOpen && !seekOsdVisible,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier
@@ -548,7 +567,7 @@ internal fun TvPlayerScreen(
 
         // Progressive seek OSD for D-pad Left/Right on DVR & Live Timeshift
         AnimatedVisibility(
-            visible = seekOsdVisible && canSeekTimeline && !hudVisible && !trackPanelOpen,
+            visible = seekOsdVisible && canSeekTimeline && !hudVisible && !trackPanelOpen && !infoPanelOpen,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier
@@ -818,6 +837,7 @@ internal fun TvPlayerScreen(
                         canZap = canZap,
                         playPauseFocusRequester = playPauseFocusRequester,
                         trackButtonFocusRequester = trackButtonFocusRequester,
+                        infoButtonFocusRequester = infoButtonFocusRequester,
                         onFocusProgressBar = { runCatching { progressFocusRequester.requestFocus() } },
                         onSeekBy = { delta -> playbackEngine.seekBy(delta) },
                         onTogglePause = { playbackEngine.togglePause() },
@@ -825,6 +845,7 @@ internal fun TvPlayerScreen(
                         onBackToLiveFocusChanged = { backToLiveFocused = it },
                         onZapDelta = onZapDelta,
                         onToggleTrackPanel = { trackPanelOpen = !trackPanelOpen },
+                        onToggleInfoPanel = { infoPanelOpen = !infoPanelOpen },
                         onExit = onExit,
                     )
 
@@ -871,6 +892,25 @@ internal fun TvPlayerScreen(
                 )
             }
         }
+
+        if (infoPanelOpen) {
+            val diagnostics by playbackEngine.diagnostics.collectAsState()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MuxGridColors.OverlayBackdrop)
+                    .padding(36.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                PlaybackInfoPanel(
+                    playbackState = playbackState,
+                    diagnostics = diagnostics,
+                    hwDecPreset = hwDecPreset,
+                    onClose = { infoPanelOpen = false },
+                    modifier = Modifier.widthIn(max = 680.dp).fillMaxWidth(),
+                )
+            }
+        }
     }
 }
 
@@ -883,6 +923,7 @@ private fun TvHudControlsRow(
     canZap: Boolean,
     playPauseFocusRequester: FocusRequester,
     trackButtonFocusRequester: FocusRequester,
+    infoButtonFocusRequester: FocusRequester,
     onFocusProgressBar: () -> Unit,
     onSeekBy: (Long) -> Unit,
     onTogglePause: () -> Unit,
@@ -890,6 +931,7 @@ private fun TvHudControlsRow(
     onBackToLiveFocusChanged: (Boolean) -> Unit,
     onZapDelta: (Int) -> Unit,
     onToggleTrackPanel: () -> Unit,
+    onToggleInfoPanel: () -> Unit,
     onExit: () -> Unit,
 ) {
     val buttonShape = tvButtonShape()
@@ -952,6 +994,19 @@ private fun TvHudControlsRow(
                 )
             }
         }
+        Button(
+            onClick = onExit,
+            shape = buttonShape,
+            colors = secondaryColors,
+        ) {
+            Icon(
+                imageVector = MuxGridIcons.Stop,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text("Stop")
+        }
         if (isBehindLive) {
             Button(
                 onClick = onSeekToLiveEdge,
@@ -1009,17 +1064,16 @@ private fun TvHudControlsRow(
             )
         }
         Button(
-            onClick = onExit,
+            onClick = onToggleInfoPanel,
+            modifier = Modifier.focusRequester(infoButtonFocusRequester),
             shape = buttonShape,
             colors = secondaryColors,
         ) {
             Icon(
-                imageVector = MuxGridIcons.Stop,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
+                imageVector = MuxGridIcons.Info,
+                contentDescription = "Playback info",
+                modifier = Modifier.size(20.dp),
             )
-            Spacer(Modifier.width(6.dp))
-            Text("Stop")
         }
     }
 }

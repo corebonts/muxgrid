@@ -1,6 +1,8 @@
 package io.github.corebonts.muxgrid.core.player
 
 import android.content.Context
+import android.os.Debug
+import android.os.Process
 import android.os.StatFs
 import android.os.SystemClock
 import android.util.Log
@@ -11,6 +13,7 @@ import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.GrowingDvrFile
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.MediaTrack
+import io.github.corebonts.muxgrid.core.model.PlaybackDiagnostics
 import io.github.corebonts.muxgrid.core.model.PlaybackError
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
@@ -32,6 +35,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
+import java.nio.file.Files
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -80,6 +84,36 @@ class MpvPlaybackEngine(
 
     private val _state = MutableStateFlow(PlaybackState())
     override val state: StateFlow<PlaybackState> = _state.asStateFlow()
+
+    private val _diagnostics = MutableStateFlow(PlaybackDiagnostics())
+    override val diagnostics: StateFlow<PlaybackDiagnostics> = _diagnostics.asStateFlow()
+
+    private data class MemorySnapshot(
+        val totalPssMb: Double?,
+        val nativePssMb: Double?,
+        val jvmUsedMb: Double,
+        val jvmMaxMb: Double,
+    )
+
+    @Volatile
+    private var diagnosticsEnabled: Boolean = false
+
+    @Volatile
+    private var sessionStartElapsedMs: Long = 0L
+
+    @Volatile
+    private var currentCacheOnDisk: Boolean = false
+
+    private var prevProxyBytes: Long = 0L
+    private var prevProxySampleElapsedMs: Long = 0L
+    private var smoothedNetworkRateBps: Long? = null
+    private var prevCpuTimeMs: Long = -1L
+    private var prevCpuWallMs: Long = 0L
+    private var lastCpuPercent: Double? = null
+    private var lastMemorySampleElapsedMs: Long = 0L
+    private var cachedMemoryStats: MemorySnapshot? = null
+    private var lastDiskCacheSampleElapsedMs: Long = 0L
+    private var cachedDiskCacheBytes: Long? = null
 
     @Volatile
     private var mpv: MPV? = null
@@ -244,6 +278,7 @@ class MpvPlaybackEngine(
         lastGrowingTickElapsedMs = 0L
         timeshiftSmoother.reset()
         noticeClearJob?.cancel()
+        resetDiagnosticsSession()
 
         platformLocks.requestFocusForStart(isRadio = channel.isRadio)
 
@@ -308,6 +343,7 @@ class MpvPlaybackEngine(
         lastGrowingTickElapsedMs = 0L
         timeshiftSmoother.reset()
         noticeClearJob?.cancel()
+        resetDiagnosticsSession()
 
         platformLocks.requestFocusForStart(isRadio = explicitAudioOnly)
 
@@ -387,6 +423,9 @@ class MpvPlaybackEngine(
         noticeClearJob = null
         platformLocks.onPlaybackStopped()
         _state.value = PlaybackState(status = PlaybackStatus.IDLE)
+        proxy.resetStreamStats()
+        _diagnostics.value = PlaybackDiagnostics()
+        sessionStartElapsedMs = 0L
 
         mpvExecutor.execute {
             liveStrategy.stopActive()
@@ -538,6 +577,18 @@ class MpvPlaybackEngine(
         }
     }
 
+    override fun setDiagnosticsEnabled(enabled: Boolean) {
+        diagnosticsEnabled = enabled
+        if (enabled && !explicitlyStopped) {
+            mpvExecutor.execute {
+                val instance = mpv ?: return@execute
+                if (instance.isInitialized && !explicitlyStopped) {
+                    collectDiagnosticsLocked(instance)
+                }
+            }
+        }
+    }
+
     override fun attachSurface(surface: Surface, width: Int, height: Int) {
         mpvExecutor.execute {
             val instance = mpv ?: return@execute
@@ -645,6 +696,7 @@ class MpvPlaybackEngine(
     private fun configureLiveTimeshiftLocked(instance: MPV, requested: TimeshiftWindow) {
         val (bytesPerDir, useDisk) = resolveEffectiveTimeshiftBudget(requested)
         effectiveForwardCapBytes = bytesPerDir
+        currentCacheOnDisk = useDisk
         val mb = (bytesPerDir / (1024L * 1024L)).coerceAtLeast(64L)
         instance.setPropertyString("cache-on-disk", if (useDisk) "yes" else "no")
         instance.setPropertyString(
@@ -661,6 +713,7 @@ class MpvPlaybackEngine(
 
     private fun configureDvrCacheLocked(instance: MPV, isGrowing: Boolean) {
         effectiveForwardCapBytes = DEFAULT_RAM_CACHE_BYTES
+        currentCacheOnDisk = false
         instance.setPropertyString("cache-on-disk", "no")
         instance.setPropertyString("demuxer-seekable-cache", "auto")
         instance.setPropertyString("demuxer-max-bytes", "64MiB")
@@ -698,6 +751,11 @@ class MpvPlaybackEngine(
                         updateGrowingDvrStateLocked(dvrEntry)
                     } else if (activeChannel != null) {
                         updateLiveTimeshiftStateLocked(instance)
+                    }
+                    if (diagnosticsEnabled) {
+                        collectDiagnosticsLocked(instance)
+                    } else {
+                        updateNetworkRateSampleLocked(SystemClock.elapsedRealtime())
                     }
                 }
             }
@@ -1204,6 +1262,219 @@ class MpvPlaybackEngine(
                 selectedSubtitleId = selectedSub,
             )
         }
+    }
+
+    private fun resetDiagnosticsSession() {
+        sessionStartElapsedMs = SystemClock.elapsedRealtime()
+        prevProxyBytes = 0L
+        prevProxySampleElapsedMs = sessionStartElapsedMs
+        smoothedNetworkRateBps = null
+        prevCpuTimeMs = Process.getElapsedCpuTime()
+        prevCpuWallMs = sessionStartElapsedMs
+        lastCpuPercent = null
+        lastMemorySampleElapsedMs = 0L
+        cachedMemoryStats = null
+        lastDiskCacheSampleElapsedMs = 0L
+        cachedDiskCacheBytes = null
+        proxy.resetStreamStats()
+        _diagnostics.value = PlaybackDiagnostics()
+    }
+
+    private fun updateNetworkRateSampleLocked(nowElapsed: Long): LocalMediaProxy.ProxyStreamStats {
+        val proxyStats = proxy.snapshotStreamStats()
+        val prevMs = prevProxySampleElapsedMs
+        if (prevMs > 0L) {
+            val dtMs = nowElapsed - prevMs
+            if (dtMs >= 250L) {
+                val deltaBytes = (proxyStats.totalBytesRead - prevProxyBytes).coerceAtLeast(0L)
+                val instantBps = (deltaBytes * 8_000L) / dtMs
+                smoothedNetworkRateBps = smoothedNetworkRateBps?.let { prev ->
+                    ((prev * 0.6) + (instantBps * 0.4)).toLong()
+                } ?: instantBps
+                prevProxyBytes = proxyStats.totalBytesRead
+                prevProxySampleElapsedMs = nowElapsed
+            }
+        } else {
+            prevProxyBytes = proxyStats.totalBytesRead
+            prevProxySampleElapsedMs = nowElapsed
+        }
+        return proxyStats
+    }
+
+    private fun collectDiagnosticsLocked(instance: MPV) {
+        val currentState = _state.value
+        if (currentState.status == PlaybackStatus.IDLE || currentState.status == PlaybackStatus.ERROR) return
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val proxyStats = updateNetworkRateSampleLocked(nowElapsed)
+
+        val fileFormat = runCatching { instance.getPropertyString("file-format") }.getOrNull()?.takeIf { it.isNotBlank() }
+        val speed = runCatching { instance.getPropertyDouble("speed") }.getOrNull() ?: 1.0
+        val pausedForCache = runCatching { instance.getPropertyBoolean("paused-for-cache") }.getOrNull() ?: false
+        val cacheBufferingPercent = runCatching { instance.getPropertyLong("cache-buffering-state")?.toInt() }.getOrNull()
+
+        val videoCodec = (
+            runCatching { instance.getPropertyString("video-format") }.getOrNull()?.takeIf { it.isNotBlank() }
+                ?: runCatching { instance.getPropertyString("video-codec") }.getOrNull()?.takeIf { it.isNotBlank() }
+            )
+        val displayWidth = runCatching { instance.getPropertyLong("video-params/dw")?.toInt() }.getOrNull() ?: 0
+        val displayHeight = runCatching { instance.getPropertyLong("video-params/dh")?.toInt() }.getOrNull() ?: 0
+        val pixelFormat = runCatching { instance.getPropertyString("video-params/pixelformat") }.getOrNull()?.takeIf { it.isNotBlank() }
+        val hwPixelFormat = runCatching { instance.getPropertyString("video-params/hw-pixelformat") }.getOrNull()?.takeIf { it.isNotBlank() }
+        val colorMatrix = runCatching { instance.getPropertyString("video-params/colormatrix") }.getOrNull()?.takeIf { it.isNotBlank() }
+        val primaries = runCatching { instance.getPropertyString("video-params/primaries") }.getOrNull()?.takeIf { it.isNotBlank() }
+        val gamma = runCatching { instance.getPropertyString("video-params/gamma") }.getOrNull()?.takeIf { it.isNotBlank() }
+        val colorInfo = buildList {
+            colorMatrix?.let { add(it) }
+            if (primaries != null && primaries != colorMatrix) add(primaries)
+            if (gamma != null && gamma != "bt.1886" && gamma != "auto") add(gamma)
+        }.joinToString(" · ").takeIf { it.isNotBlank() }
+
+        val containerFps = runCatching { instance.getPropertyDouble("container-fps") }.getOrNull()?.takeIf { it > 0.0 }
+        val actualFps = runCatching { instance.getPropertyDouble("estimated-vf-fps") }.getOrNull()?.takeIf { it > 0.0 }
+        val videoBitrateBps = runCatching { instance.getPropertyDouble("video-bitrate")?.toLong() }.getOrNull()?.takeIf { it > 0L }
+        val hwdecCurrent = runCatching { instance.getPropertyString("hwdec-current") }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?: currentState.hwdecCurrent
+        val videoOutput = runCatching { instance.getPropertyString("current-vo") }.getOrNull()?.takeIf { it.isNotBlank() }
+        val droppedVo = runCatching { instance.getPropertyLong("frame-drop-count") }.getOrNull()
+        val droppedDec = runCatching { instance.getPropertyLong("decoder-frame-drop-count") }.getOrNull()
+        val delayedVo = runCatching { instance.getPropertyLong("vo-delayed-frame-count") }.getOrNull()
+        val avSyncMs = runCatching { instance.getPropertyDouble("avsync")?.times(1000.0) }.getOrNull()
+
+        val audioCodec = (
+            runCatching { instance.getPropertyString("audio-codec-name") }.getOrNull()?.takeIf { it.isNotBlank() }
+                ?: runCatching { instance.getPropertyString("audio-codec") }.getOrNull()?.takeIf { it.isNotBlank() }
+            )
+        val audioChannels = runCatching { instance.getPropertyString("audio-params/hr-channels") }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?: runCatching { instance.getPropertyLong("audio-params/channel-count")?.toString() }.getOrNull()
+        val audioSampleRate = runCatching { instance.getPropertyLong("audio-params/samplerate")?.toInt() }.getOrNull()?.takeIf { it > 0 }
+        val audioBitrateBps = runCatching { instance.getPropertyDouble("audio-bitrate")?.toLong() }.getOrNull()?.takeIf { it > 0L }
+        val audioOutput = runCatching { instance.getPropertyString("current-ao") }.getOrNull()?.takeIf { it.isNotBlank() }
+
+        val cacheMap = runCatching { instance.getPropertyNode("demuxer-cache-state")?.asMap() }.getOrNull()
+        val cacheTotalBytes = runCatching { cacheMap?.get("total-bytes")?.asInt() }.getOrNull()
+        val cacheFwBytes = runCatching { cacheMap?.get("fw-bytes")?.asInt() }.getOrNull()
+        val cacheBackBytes = if (cacheTotalBytes != null && cacheFwBytes != null) {
+            (cacheTotalBytes - cacheFwBytes).coerceAtLeast(0L)
+        } else {
+            null
+        }
+        val rawInputRateBytes = runCatching { cacheMap?.get("raw-input-rate")?.asInt() }.getOrNull()
+        val demuxerInputRateBps = rawInputRateBytes?.takeIf { it >= 0L }?.times(8L)
+        val cacheUnderrun = runCatching { cacheMap?.get("underrun")?.asBoolean() }.getOrNull() ?: false
+        val cacheDurationSec = runCatching { cacheMap?.get("cache-duration")?.asDouble() }.getOrNull()
+            ?: runCatching { instance.getPropertyDouble("demuxer-cache-duration") }.getOrNull()
+
+        val cpuCores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        val nowCpuMs = Process.getElapsedCpuTime()
+        if (prevCpuTimeMs >= 0L && nowElapsed - prevCpuWallMs >= 400L) {
+            val cpuDelta = (nowCpuMs - prevCpuTimeMs).coerceAtLeast(0L)
+            val wallDelta = (nowElapsed - prevCpuWallMs).coerceAtLeast(1L)
+            lastCpuPercent = ((cpuDelta.toDouble() / (wallDelta.toDouble() * cpuCores)) * 100.0).coerceIn(0.0, 100.0)
+            prevCpuTimeMs = nowCpuMs
+            prevCpuWallMs = nowElapsed
+        } else if (prevCpuTimeMs < 0L) {
+            prevCpuTimeMs = nowCpuMs
+            prevCpuWallMs = nowElapsed
+        }
+
+        if (cachedMemoryStats == null || nowElapsed - lastMemorySampleElapsedMs >= 1_500L) {
+            lastMemorySampleElapsedMs = nowElapsed
+            cachedMemoryStats = sampleMemoryStats()
+        }
+        if (currentCacheOnDisk && (cachedDiskCacheBytes == null || nowElapsed - lastDiskCacheSampleElapsedMs >= 2_000L)) {
+            lastDiskCacheSampleElapsedMs = nowElapsed
+            cachedDiskCacheBytes = runCatching { directorySizeBytes(mpvCacheDir) }.getOrNull()
+        } else if (!currentCacheOnDisk) {
+            cachedDiskCacheBytes = null
+        }
+
+        val mem = cachedMemoryStats
+        _diagnostics.value = PlaybackDiagnostics(
+            transportLabel = proxyStats.transportMode,
+            containerFormat = fileFormat,
+            upstreamHost = proxyStats.upstreamHost,
+            upstreamStatus = proxyStats.upstreamStatus,
+            sessionUptimeMs = if (sessionStartElapsedMs > 0L) (nowElapsed - sessionStartElapsedMs).coerceAtLeast(0L) else 0L,
+            playbackSpeed = speed,
+            pausedForCache = pausedForCache,
+            cacheBufferingPercent = cacheBufferingPercent,
+            videoCodec = videoCodec,
+            videoWidth = currentState.videoWidth,
+            videoHeight = currentState.videoHeight,
+            displayWidth = displayWidth,
+            displayHeight = displayHeight,
+            pixelFormat = pixelFormat,
+            hwPixelFormat = hwPixelFormat,
+            colorInfo = colorInfo,
+            containerFps = containerFps,
+            actualFps = actualFps,
+            videoBitrateBps = videoBitrateBps,
+            hwdecCurrent = hwdecCurrent,
+            deinterlaceActive = currentState.deinterlaceActive,
+            videoOutput = videoOutput,
+            droppedFramesVo = droppedVo,
+            droppedFramesDecoder = droppedDec,
+            delayedFramesVo = delayedVo,
+            avSyncMs = avSyncMs,
+            audioCodec = audioCodec,
+            audioChannels = audioChannels,
+            audioSampleRateHz = audioSampleRate,
+            audioBitrateBps = audioBitrateBps,
+            audioOutput = audioOutput,
+            networkRateBps = smoothedNetworkRateBps,
+            demuxerInputRateBps = demuxerInputRateBps,
+            totalBytesReceived = proxyStats.totalBytesRead,
+            cacheUsedBytes = cacheTotalBytes,
+            cacheForwardBytes = cacheFwBytes,
+            cacheBackBytes = cacheBackBytes,
+            cacheDurationSec = cacheDurationSec,
+            cacheBudgetPerDirBytes = effectiveForwardCapBytes,
+            cacheOnDisk = currentCacheOnDisk,
+            diskCacheBytes = cachedDiskCacheBytes,
+            cacheUnderrun = cacheUnderrun,
+            processCpuPercent = lastCpuPercent,
+            cpuCores = cpuCores,
+            processPssMb = mem?.totalPssMb,
+            nativePssMb = mem?.nativePssMb,
+            jvmHeapUsedMb = mem?.jvmUsedMb,
+            jvmHeapMaxMb = mem?.jvmMaxMb,
+        )
+    }
+
+    private fun sampleMemoryStats(): MemorySnapshot {
+        val memInfo = runCatching {
+            Debug.MemoryInfo().also { Debug.getMemoryInfo(it) }
+        }.getOrNull()
+        val rt = Runtime.getRuntime()
+        val jvmUsedMb = (rt.totalMemory() - rt.freeMemory()).coerceAtLeast(0L) / (1024.0 * 1024.0)
+        val jvmMaxMb = rt.maxMemory().coerceAtLeast(1L) / (1024.0 * 1024.0)
+        return MemorySnapshot(
+            totalPssMb = memInfo?.totalPss?.takeIf { it > 0 }?.div(1024.0),
+            nativePssMb = memInfo?.nativePss?.takeIf { it > 0 }?.div(1024.0),
+            jvmUsedMb = jvmUsedMb,
+            jvmMaxMb = jvmMaxMb,
+        )
+    }
+
+    private fun directorySizeBytes(root: File): Long {
+        if (!root.exists() || Files.isSymbolicLink(root.toPath())) return 0L
+        if (root.isFile) return root.length().coerceAtLeast(0L)
+        var total = 0L
+        val stack = ArrayDeque<File>()
+        stack.addLast(root)
+        while (stack.isNotEmpty()) {
+            val current = stack.removeLast()
+            val children = current.listFiles() ?: continue
+            for (child in children) {
+                if (Files.isSymbolicLink(child.toPath())) continue
+                if (child.isDirectory) {
+                    stack.addLast(child)
+                } else if (child.isFile) {
+                    total += child.length().coerceAtLeast(0L)
+                }
+            }
+        }
+        return total
     }
 
     companion object {

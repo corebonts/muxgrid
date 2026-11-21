@@ -1,0 +1,674 @@
+package io.github.corebonts.muxgrid.core.designsystem
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import io.github.corebonts.muxgrid.core.model.HwDecPreset
+import io.github.corebonts.muxgrid.core.model.PlaybackDiagnostics
+import io.github.corebonts.muxgrid.core.model.PlaybackState
+import io.github.corebonts.muxgrid.core.model.PlaybackStatus
+import kotlinx.coroutines.launch
+import java.util.Locale
+import kotlin.math.abs
+
+@Composable
+fun PlaybackInfoPanel(
+    playbackState: PlaybackState,
+    diagnostics: PlaybackDiagnostics,
+    hwDecPreset: HwDecPreset,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val closeFocusRequester = remember { FocusRequester() }
+    val scrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        runCatching { closeFocusRequester.requestFocus() }
+    }
+
+    val sections = remember(playbackState, diagnostics, hwDecPreset) {
+        buildPlaybackInfoSections(playbackState, diagnostics, hwDecPreset)
+    }
+
+    Column(
+        modifier = modifier
+            .heightIn(max = 540.dp)
+            .clip(MuxGridShapes.Dialog)
+            .background(MuxGridColors.CardSurface)
+            .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {},
+            )
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (keyEvent.nativeKeyEvent.keyCode) {
+                    android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        scope.launch { scrollState.scrollTo((scrollState.value + 160).coerceAtMost(scrollState.maxValue)) }
+                        true
+                    }
+                    android.view.KeyEvent.KEYCODE_DPAD_UP -> {
+                        scope.launch { scrollState.scrollTo((scrollState.value - 160).coerceAtLeast(0)) }
+                        true
+                    }
+                    else -> false
+                }
+            }
+            .focusProperties { onExit = { cancelFocusChange() } }
+            .focusGroup()
+            .verticalScroll(scrollState)
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    imageVector = MuxGridIcons.Info,
+                    contentDescription = null,
+                    tint = MuxGridColors.AccentSoft,
+                    modifier = Modifier.size(22.dp),
+                )
+                Column {
+                    Text(
+                        text = "Playback Info",
+                        style = MuxGridType.Title,
+                        fontSize = 19.sp,
+                    )
+                    val titleLine = buildString {
+                        val name = if (playbackState.isRecordingPlayback) {
+                            playbackState.programTitle ?: playbackState.channelName ?: "Recording"
+                        } else {
+                            listOfNotNull(
+                                playbackState.channelNumber?.takeIf { it != "0" },
+                                playbackState.channelName,
+                            ).joinToString(" · ").ifBlank { "Live Stream" }
+                        }
+                        append(name)
+                        if (diagnostics.sessionUptimeMs > 0L) {
+                            append(" · ")
+                            append(formatDurationSec(diagnostics.sessionUptimeMs / 1000L))
+                        }
+                    }
+                    Text(
+                        text = titleLine,
+                        style = MuxGridType.TabularSmall,
+                        color = MuxGridColors.TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PanelActionPill(
+                    label = "Copy",
+                    onClick = {
+                        val report = formatPlaybackInfoReport(playbackState, diagnostics, hwDecPreset)
+                        copyPlaybackInfoToClipboard(context, report)
+                    },
+                )
+                var closeFocused by remember { mutableStateOf(false) }
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .focusRequester(closeFocusRequester)
+                        .onFocusChanged { closeFocused = it.isFocused }
+                        .clip(MuxGridShapes.Sm)
+                        .background(if (closeFocused) MuxGridColors.FocusBorder else MuxGridColors.CardSurfaceElevated)
+                        .clickable(onClick = onClose),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = MuxGridIcons.Close,
+                        contentDescription = "Close",
+                        tint = if (closeFocused) MuxGridColors.CanvasTv else MuxGridColors.TextSecondary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+
+        // Live pipeline summary badges
+        PlaybackStatusStrip(playbackState = playbackState, diagnostics = diagnostics)
+
+        // Responsive 1- or 2-column grid of telemetry cards
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val useTwoColumns = maxWidth >= 500.dp
+            if (useTwoColumns) {
+                val left = sections.filterIndexed { index, _ -> index % 2 == 0 }
+                val right = sections.filterIndexed { index, _ -> index % 2 == 1 }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        left.forEach { section ->
+                            InfoSectionCard(section = section, diagnostics = diagnostics)
+                        }
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        right.forEach { section ->
+                            InfoSectionCard(section = section, diagnostics = diagnostics)
+                        }
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    sections.forEach { section ->
+                        InfoSectionCard(section = section, diagnostics = diagnostics)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PanelActionPill(
+    label: String,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier
+            .onFocusChanged { focused = it.isFocused }
+            .clip(MuxGridShapes.Sm)
+            .background(if (focused) MuxGridColors.FocusBorder else MuxGridColors.CardSurfaceElevated)
+            .border(MuxGridBorders.Hairline, MuxGridColors.HairlineBorder, MuxGridShapes.Sm)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = if (focused) MuxGridColors.CanvasTv else MuxGridColors.TextPrimary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun PlaybackStatusStrip(
+    playbackState: PlaybackState,
+    diagnostics: PlaybackDiagnostics,
+) {
+    val (statusColor, statusText) = when {
+        diagnostics.pausedForCache -> MuxGridColors.AmberWarn to "Buffering for cache"
+        playbackState.status == PlaybackStatus.BUFFERING -> {
+            val pct = diagnostics.cacheBufferingPercent
+            MuxGridColors.AmberWarn to if (pct != null) "Buffering ($pct%)" else "Buffering"
+        }
+        playbackState.status == PlaybackStatus.PAUSED -> MuxGridColors.TextSecondary to "Paused"
+        playbackState.isRecordingPlayback && playbackState.isGrowingRecording -> MuxGridColors.CoralLive to "Recording (Live tail)"
+        playbackState.isRecordingPlayback -> MuxGridColors.AccentSoft to "DVR Playback"
+        playbackState.isBehindLive -> MuxGridColors.AccentSoft to "Timeshift"
+        playbackState.isRadio -> MuxGridColors.CoralLive to "Live Radio"
+        else -> MuxGridColors.EmeraldOk to "Playing Live"
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MuxGridShapes.Card)
+            .background(MuxGridColors.CanvasPhone)
+            .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(statusColor),
+            )
+            Text(
+                text = statusText,
+                color = MuxGridColors.TextPrimary,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        val rightSummary = listOfNotNull(
+            diagnostics.transportLabel,
+            diagnostics.networkRateBps?.let { formatBitrateBps(it) },
+        ).joinToString(" · ")
+        if (rightSummary.isNotBlank()) {
+            Text(
+                text = rightSummary,
+                style = MuxGridType.TabularSmall,
+                color = MuxGridColors.AccentSoft,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+private enum class InfoTone {
+    NORMAL,
+    ACCENT,
+    GOOD,
+    WARN,
+    BAD,
+}
+
+private data class InfoRow(
+    val label: String,
+    val value: String,
+    val tone: InfoTone = InfoTone.NORMAL,
+)
+
+private data class InfoSection(
+    val id: String,
+    val title: String,
+    val rows: List<InfoRow>,
+    val bufferFillFraction: Float? = null,
+)
+
+@Composable
+private fun InfoSectionCard(
+    section: InfoSection,
+    diagnostics: PlaybackDiagnostics,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MuxGridShapes.Card)
+            .background(MuxGridColors.CanvasPhone)
+            .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = section.title,
+            style = MuxGridType.Eyebrow,
+        )
+        section.rows.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = row.label,
+                    color = MuxGridColors.TextSecondary,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    modifier = Modifier.padding(end = 12.dp),
+                )
+                Text(
+                    text = row.value,
+                    style = MuxGridType.TabularSmall,
+                    color = when (row.tone) {
+                        InfoTone.NORMAL -> MuxGridColors.TextPrimary
+                        InfoTone.ACCENT -> MuxGridColors.AccentSoft
+                        InfoTone.GOOD -> MuxGridColors.EmeraldOk
+                        InfoTone.WARN -> MuxGridColors.AmberWarn
+                        InfoTone.BAD -> MuxGridColors.CoralLive
+                    },
+                    textAlign = TextAlign.End,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        if (section.bufferFillFraction != null) {
+            Spacer(Modifier.height(2.dp))
+            LiveProgressBar(
+                progress = section.bufferFillFraction,
+                fillColor = if (diagnostics.cacheUnderrun) MuxGridColors.CoralLive else MuxGridColors.Accent,
+                height = 3.dp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+private fun buildPlaybackInfoSections(
+    state: PlaybackState,
+    diag: PlaybackDiagnostics,
+    hwDecPreset: HwDecPreset,
+): List<InfoSection> {
+    val sections = ArrayList<InfoSection>(5)
+
+    // 1. Stream & Transport
+    val streamRows = buildList {
+        add(
+            InfoRow(
+                label = "Mode",
+                value = when {
+                    state.isRecordingPlayback && state.isGrowingRecording -> "Growing Recording"
+                    state.isRecordingPlayback -> "Recorded DVR"
+                    state.isRadio -> "Live Radio"
+                    state.isAudioOnly -> "Background Audio"
+                    else -> "Live TV"
+                },
+            ),
+        )
+        diag.transportLabel?.let { add(InfoRow("Transport", it)) }
+        diag.containerFormat?.let { add(InfoRow("Container", it.uppercase(Locale.US))) }
+        diag.upstreamHost?.let { host ->
+            val statusSuffix = diag.upstreamStatus?.let { " ($it)" }.orEmpty()
+            add(InfoRow("Upstream", "$host$statusSuffix"))
+        }
+        if (abs(diag.playbackSpeed - 1.0) > 0.01) {
+            add(InfoRow("Speed", String.format(Locale.US, "%.2fx", diag.playbackSpeed)))
+        }
+        val activeAudio = state.audioTracks.firstOrNull { it.id == state.selectedAudioId || it.isSelected }
+        activeAudio?.let { add(InfoRow("Audio Track", it.displayLabel)) }
+        val activeSub = state.subtitleTracks.firstOrNull { it.id == state.selectedSubtitleId || it.isSelected }
+        add(InfoRow("Subtitles", activeSub?.displayLabel ?: "Off"))
+    }
+    sections += InfoSection("stream", "STREAM & TRANSPORT", streamRows)
+
+    // 2. Video & Decoder
+    if (!state.isRadio) {
+        val videoRows = buildList {
+            if (state.isAudioOnly) {
+                add(InfoRow("Video", "Disabled (Audio-only)", InfoTone.ACCENT))
+            } else {
+                diag.videoCodec?.let { add(InfoRow("Codec", it.uppercase(Locale.US))) }
+                val w = diag.videoWidth.takeIf { it > 0 } ?: state.videoWidth
+                val h = diag.videoHeight.takeIf { it > 0 } ?: state.videoHeight
+                if (w > 0 && h > 0) {
+                    val resText = if (diag.displayWidth > 0 && diag.displayHeight > 0 &&
+                        (diag.displayWidth != w || diag.displayHeight != h)
+                    ) {
+                        "${w}x${h} -> ${diag.displayWidth}x${diag.displayHeight}"
+                    } else {
+                        "${w}x${h}"
+                    }
+                    add(InfoRow("Resolution", resText))
+                }
+                val actualFps = diag.actualFps
+                val containerFps = diag.containerFps
+                val fpsValue = when {
+                    actualFps != null && containerFps != null &&
+                        abs(actualFps - containerFps) >= 0.5 ->
+                        String.format(Locale.US, "%.2f / %.2f fps", actualFps, containerFps)
+                    actualFps != null ->
+                        String.format(Locale.US, "%.2f fps", actualFps)
+                    containerFps != null ->
+                        String.format(Locale.US, "%.2f fps", containerFps)
+                    else -> null
+                }
+                fpsValue?.let { add(InfoRow("Frame Rate", it)) }
+                diag.videoBitrateBps?.let { add(InfoRow("Video Bitrate", formatBitrateBps(it))) }
+
+                val hwdec = diag.hwdecCurrent ?: state.hwdecCurrent
+                val hwLabel = when {
+                    hwdec.isNullOrBlank() || hwdec == "no" -> "Software (CPU)"
+                    else -> hwdec
+                }
+                val hwTone = if (hwdec.isNullOrBlank() || hwdec == "no") InfoTone.WARN else InfoTone.GOOD
+                add(InfoRow("Decoder", "$hwLabel (${presetShortName(hwDecPreset)})", hwTone))
+
+                val deintActive = diag.deinterlaceActive || state.deinterlaceActive
+                add(
+                    InfoRow(
+                        label = "Deinterlace",
+                        value = if (deintActive) "Active" else "Off",
+                        tone = if (deintActive) InfoTone.ACCENT else InfoTone.NORMAL,
+                    ),
+                )
+
+                val fmtParts = listOfNotNull(
+                    diag.hwPixelFormat ?: diag.pixelFormat,
+                    diag.colorInfo,
+                )
+                if (fmtParts.isNotEmpty()) {
+                    add(InfoRow("Pixel / Color", fmtParts.joinToString(" · ")))
+                }
+                diag.videoOutput?.let { add(InfoRow("Video Out", it)) }
+
+                val voDrops = diag.droppedFramesVo ?: 0L
+                val decDrops = diag.droppedFramesDecoder ?: 0L
+                val delayed = diag.delayedFramesVo ?: 0L
+                if (diag.droppedFramesVo != null || diag.droppedFramesDecoder != null) {
+                    val dropText = buildString {
+                        append("$voDrops VO · $decDrops dec")
+                        if (delayed > 0L) append(" · $delayed delayed")
+                    }
+                    val totalDrops = voDrops + decDrops
+                    val dropTone = when {
+                        totalDrops == 0L -> InfoTone.GOOD
+                        totalDrops < 10L -> InfoTone.WARN
+                        else -> InfoTone.BAD
+                    }
+                    add(InfoRow("Dropped Frames", dropText, dropTone))
+                }
+                diag.avSyncMs?.let { syncMs ->
+                    val syncTone = if (abs(syncMs) > 80.0) InfoTone.WARN else InfoTone.NORMAL
+                    add(InfoRow("A/V Sync", String.format(Locale.US, "%+.1f ms", syncMs), syncTone))
+                }
+            }
+        }
+        if (videoRows.isNotEmpty()) {
+            sections += InfoSection("video", "VIDEO & DECODER", videoRows)
+        }
+    }
+
+    // 3. Audio
+    val audioRows = buildList {
+        diag.audioCodec?.let { add(InfoRow("Codec", it.uppercase(Locale.US))) }
+        val chRate = listOfNotNull(
+            diag.audioChannels,
+            diag.audioSampleRateHz?.let { String.format(Locale.US, "%.1f kHz", it / 1000.0) },
+        ).joinToString(" · ")
+        if (chRate.isNotBlank()) add(InfoRow("Format", chRate))
+        diag.audioBitrateBps?.let { add(InfoRow("Audio Bitrate", formatBitrateBps(it))) }
+        diag.audioOutput?.let { add(InfoRow("Audio Out", it)) }
+    }
+    if (audioRows.isNotEmpty()) {
+        sections += InfoSection("audio", "AUDIO", audioRows)
+    }
+
+    // 4. Network & Cache
+    // mpv applies cacheBudgetPerDirBytes independently to forward (demuxer-max-bytes) and rewind (demuxer-max-back-bytes).
+    val totalCacheBudgetBytes = (diag.cacheBudgetPerDirBytes * 2L).coerceAtLeast(0L)
+    val cacheUsed = diag.cacheUsedBytes
+    val bufferFill = if (totalCacheBudgetBytes > 0L && cacheUsed != null) {
+        (cacheUsed.toFloat() / totalCacheBudgetBytes.toFloat()).coerceIn(0f, 1f)
+    } else {
+        null
+    }
+    val netCacheRows = buildList {
+        diag.networkRateBps?.let {
+            add(InfoRow("Network Rate", formatBitrateBps(it), InfoTone.ACCENT))
+        }
+        diag.demuxerInputRateBps?.let {
+            add(InfoRow("Demuxer Read", formatBitrateBps(it)))
+        }
+        add(InfoRow("Data Received", formatByteCount(diag.totalBytesReceived)))
+        add(InfoRow("Cache Mode", if (diag.cacheOnDisk) "Disk Ring Buffer" else "RAM Buffer"))
+        if (cacheUsed != null) {
+            val budgetText = if (totalCacheBudgetBytes > 0L) " / ${formatByteCount(totalCacheBudgetBytes)}" else ""
+            add(InfoRow("Cache Used", "${formatByteCount(cacheUsed)}$budgetText"))
+        }
+        if (diag.cacheForwardBytes != null || diag.cacheBackBytes != null) {
+            val ahead = diag.cacheForwardBytes?.let { formatByteCount(it) } ?: "0 B"
+            val rewind = diag.cacheBackBytes?.let { formatByteCount(it) } ?: "0 B"
+            add(InfoRow("Ahead / Rewind", "$ahead / $rewind"))
+        }
+        val diskBytes = diag.diskCacheBytes
+        if (diag.cacheOnDisk && diskBytes != null) {
+            add(InfoRow("Disk Cache File", formatByteCount(diskBytes)))
+        }
+        val cachedSec = diag.cacheDurationSec ?: if (state.bufferWindowMs > 0L) state.bufferWindowMs / 1000.0 else null
+        cachedSec?.let { sec ->
+            add(
+                InfoRow(
+                    label = "Buffered Time",
+                    value = formatDurationSec(sec.toLong().coerceAtLeast(0L)),
+                    tone = if (diag.cacheUnderrun) InfoTone.BAD else InfoTone.NORMAL,
+                ),
+            )
+        }
+        if (diag.cacheUnderrun) {
+            add(InfoRow("Buffer Health", "Underrun", InfoTone.BAD))
+        }
+    }
+    sections += InfoSection("net_cache", "NETWORK & CACHE", netCacheRows, bufferFillFraction = bufferFill)
+
+    // 5. Device / App Usage
+    val usageRows = buildList {
+        diag.processCpuPercent?.let { cpu ->
+            val coresLabel = if (diag.cpuCores > 0) " (${diag.cpuCores} cores)" else ""
+            val cpuTone = when {
+                cpu >= 75.0 -> InfoTone.WARN
+                else -> InfoTone.NORMAL
+            }
+            add(InfoRow("App CPU", String.format(Locale.US, "%.1f%%%s", cpu, coresLabel), cpuTone))
+        }
+        diag.processPssMb?.let { pss ->
+            val nativeSuffix = diag.nativePssMb?.let { n ->
+                String.format(Locale.US, " (native %.0f MB)", n)
+            }.orEmpty()
+            add(InfoRow("Process Memory", String.format(Locale.US, "%.0f MB PSS%s", pss, nativeSuffix)))
+        }
+        if (diag.jvmHeapUsedMb != null && diag.jvmHeapMaxMb != null) {
+            add(
+                InfoRow(
+                    label = "JVM Heap",
+                    value = String.format(Locale.US, "%.1f / %.0f MB", diag.jvmHeapUsedMb, diag.jvmHeapMaxMb),
+                ),
+            )
+        }
+    }
+    if (usageRows.isNotEmpty()) {
+        sections += InfoSection("usage", "APP USAGE", usageRows)
+    }
+
+    return sections
+}
+
+fun formatPlaybackInfoReport(
+    playbackState: PlaybackState,
+    diagnostics: PlaybackDiagnostics,
+    hwDecPreset: HwDecPreset,
+): String {
+    val sections = buildPlaybackInfoSections(playbackState, diagnostics, hwDecPreset)
+    return buildString {
+        val headerName = if (playbackState.isRecordingPlayback) {
+            playbackState.programTitle ?: playbackState.channelName ?: "Recording"
+        } else {
+            listOfNotNull(
+                playbackState.channelNumber?.takeIf { it != "0" },
+                playbackState.channelName,
+            ).joinToString(" · ").ifBlank { "Live Stream" }
+        }
+        appendLine("MuxGrid Playback Info — $headerName")
+        if (diagnostics.sessionUptimeMs > 0L) {
+            appendLine("Session Uptime: ${formatDurationSec(diagnostics.sessionUptimeMs / 1000L)}")
+        }
+        sections.forEach { section ->
+            appendLine()
+            appendLine("[${section.title}]")
+            section.rows.forEach { row ->
+                appendLine("${row.label}: ${row.value}")
+            }
+        }
+    }.trimEnd()
+}
+
+private fun presetShortName(preset: HwDecPreset): String = when (preset) {
+    HwDecPreset.MEDIACODEC_ZERO_COPY -> "zero-copy"
+    HwDecPreset.MEDIACODEC_COPY_BWDIF -> "hw-copy + bwdif"
+}
+
+internal fun formatBitrateBps(bps: Long): String {
+    val clamped = bps.coerceAtLeast(0L)
+    return when {
+        clamped < 1_000L -> "$clamped bps"
+        clamped < 1_000_000L -> String.format(Locale.US, "%.0f kbps", clamped / 1_000.0)
+        else -> String.format(Locale.US, "%.2f Mbps", clamped / 1_000_000.0)
+    }
+}
+
+private fun copyPlaybackInfoToClipboard(
+    context: Context,
+    report: String,
+) {
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+    cm.setPrimaryClip(ClipData.newPlainText("MuxGrid Playback Info", report))
+    Toast.makeText(context, "Playback info copied", Toast.LENGTH_SHORT).show()
+}
