@@ -2,6 +2,41 @@
 
 All notable changes to **MuxGrid** are documented in this file.
 
+## [0.7.0] — 2026-11-21 — Scroll without borders
+
+### Continuous Program Guide (EPG) & Tablet/Landscape Grid
+- Replaced the stepped EPG time window with a **continuous horizontal timeline** (`GuideTimeline`) across Android TV and mobile landscape/tablet, with placement-only horizontal scrolling and draw-phase sticky channel/program labels.
+- Added a **2D horizontal multi-channel EPG timeline grid** in mobile landscape and tablet mode (`>= 600dp`) with keyboard/gamepad focus auto-follow.
+- Extended the HTSP EPG sync window from 7 days to **2 weeks (`+14d`)** and kept selected day/channel items scrolled into the viewport.
+- Refined EPG focus navigation to avoid unnecessary horizontal scrolling on already-visible or wide cells and prevent `BringIntoViewNode` from shifting horizontally on Up/Down focus moves.
+- Offloaded EPG search to background threads (`searchEpgEvents`), optimized TV guide search rows, and scoped high-frequency `StateFlow` collection to active tabs.
+
+### Player Controls, Diagnostics & Preferences
+- Added an in-player **Playback Info** panel (`PlaybackInfoPanel`) displaying live stream, decoder, cache, and proxy diagnostics, and reordered the player stop button.
+- Persisted **subtitle on/off state and preferred language** across playbacks.
+- Added **tap-ladder and gear-locked hold seeking** on Android TV (`10s → 30s → 1m → 5m → 10m`, continuous hold capped at `30s`) backed by shared seek bounds (`TvSeekController`).
+- Unified mobile **Background Playback** into a single `Off` / `Audio` / `PiP` selector (`BackgroundPlaybackMode`) and streamlined player HUD minimize controls.
+- Fixed video restoration after audio-only mode by configuring `vo=gpu` before `vid=auto` and resyncing live playback to the live head.
+- Fixed measuring unlinked `mpv` disk-cache files and clarified network cache metrics.
+
+### Settings, Themes & Navigation Polish
+- Added **Auto / Light / Dark** theme selection under **Settings → General → Theme** (introducing the Daylight Monitor light palette while keeping fullscreen players dark).
+- Added a **Start Screen** setting (`Live`, `Guide`, `Recordings`) across mobile and Android TV.
+- Added an **App Info** section in Settings displaying app version, build ABI/Git SHA, and a **copyable debug info report** (`DebugInfoReport`).
+- Redesigned Settings with full-width and responsive **two-column layouts** on wide screens and Android TV, with clamped TV column focus.
+- Polished Android TV **Navigation Rail** focus, back-key behavior, and slide animation, and fixed underline selection highlight widths.
+
+### Security, Stability & Lifecycle Hardening
+- Hardened HTTP Digest authentication (server host/port scoping, algorithm/qop validation, quoted-string escaping), `HtsMsgCodec` overflow-safe bounds and nesting depth limits, Google Tink Keystore recovery without silently wiping credentials, and `LocalMediaProxy` header limits and CR/LF sanitization.
+- Hardened HTSP session lifecycle, picon fetching, EPG/DVR cache integrity, and kept the `Syncing` state visible until initial HTSP metadata is published.
+- Hardened player lifecycle, `PlaybackPlatformLocks`, DVR progress tracking, `MainActivity` PiP/intent lifecycle, and Onboarding Server Setup host/IP validation.
+- Consolidated shared DVR/playback helpers, design tokens, and constants.
+
+### Build, CI & Documentation
+- Added an automated signed **GitHub Release** workflow (`.github/workflows/release.yml`).
+- Added the `noDebug` build type (`isDebuggable = false` with debug signing) for fast local ART AOT testing on Android TV and enabled Gradle configuration cache.
+- Added anonymized Android phone and Android TV screenshots to `README.md`, a local mock Tvheadend server (`scripts/mock_tvh_server.py`), and a screenshot capture skill.
+
 ## [0.6.0] — 2026-11-21
 
 ### Android TV Performance & Playback Smoothness

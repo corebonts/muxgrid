@@ -27,7 +27,7 @@ MuxGrid uses a low-glare **Broadcast Monitor** dark visual language (`Carbon & S
   - Snappy transitions (~180–250ms) and subtle `2dp` focus borders + mild scale on TV cards without jumpy layouts.
 - **Dialogs, Sheets & Confirmations:**
   - Modal sheets and action/confirmation dialogs use `CardSurfaceElevated` (`#1D1D22`), `12dp` corners (`MuxGridShapes.Dialog` / `MuxGridShapes.SheetTop`), and `1dp` `HairlineBorder` (or `CoralLive` at 55% alpha for playback errors); settings/options panels (**Server Setup**, **Display Options**) use `CardSurface` (`#141417`) with `CardSurfaceElevated` (`#1D1D22`) inner controls and `0.5dp` `HairlineBorder`.
-  - Player overlays (**Display Options**, **Playback Error**, **Quick Zap**) render in-window over `OverlayBackdrop` (`#99000000`) rather than separate `Dialog` windows over `SurfaceView`, trap D-pad focus inside modal panels (**Display Options** focuses the first content option on open and uses `selectedAudioId`/`selectedSubtitleId` as the single source of truth), and always intercept `Back` to close the overlay first.
+  - Player overlays (**Display Options**, **Playback Info**, **Playback Error**, **Quick Zap**) render in-window over `OverlayBackdrop` (`#99000000`) rather than separate `Dialog` windows over `SurfaceView`, trap D-pad focus inside modal panels (**Display Options** focuses the first content option on open and uses `selectedAudioId`/`selectedSubtitleId` as the single source of truth), and always intercept `Back` to close the overlay first.
   - **Server Setup** validates hostnames, IPv4, and IPv6 literals (rejecting schemes, paths, spaces, and port suffixes) and preserves unsaved form input across configuration changes.
   - Disruptive or irreversible DVR actions (**Stop & Save**, **Abort Recording**, **Cancel Timer**, **Delete Recording**) always require confirmation on both Mobile and TV, with TV destructive confirmations defaulting initial focus to **Cancel**.
 
@@ -40,7 +40,7 @@ Navigation stays minimal and consistent across both form factors:
 1. **Live** — Channel cards/rows with Now/Next program, live progress bar, and one-tap/click playback.
 2. **Guide** — Electronic Program Guide (EPG) for browsing upcoming broadcasts and scheduling recordings.
 3. **Recordings** — Active (`Recording Now`), Completed (grouped cleanly by series/title), and Scheduled timers.
-4. **Settings** — Server card (connection status, error details, quick Retry & Edit), Decoder/Deinterlace preset, Timeshift cache limit, and (on mobile) Background Play & PiP toggles.
+4. **Settings** — Responsive full-width / two-column layout with Server card (connection status, error details, quick Retry & Edit), General (**Start Screen**, **Theme** `Auto` / `Light` / `Dark`), Decoder/Deinterlace preset, Timeshift cache limit, unified mobile **Background Playback** selector (`Off` / `Audio` / `PiP`), and **App Info** (version, build ABI/Git SHA, copyable debug report).
 
 ---
 
@@ -68,7 +68,7 @@ Navigation stays minimal and consistent across both form factors:
 ### Mobile Fullscreen Player
 - Edge-to-edge immersive video.
 - **Tap** video: toggles top & bottom dark scrim HUD (auto-hides while playing).
-- **Top bar:** Back button, Channel picon + Title + Current Show, **PiP**, **Background Audio** (`vid=no`), and **Display Options** (Audio / Subtitles / Aspect / Decoder preset).
+- **Top bar:** Back button, Channel picon + Title + Current Show, minimize/background action (**PiP** or **Background Audio** depending on mode), **Playback Info**, and **Display Options** (Audio / Subtitles / Aspect / Decoder preset).
 - **Bottom bar:**
   - Smooth scrub bar showing buffered timeshift range (Live) or growing/total duration (Recordings).
   - **`-MM:SS · Back to Live`** pill when behind the live edge.
@@ -98,7 +98,7 @@ Designed strictly for **10-foot viewing** and a standard TV remote (`D-pad`, `OK
 
 ### TV Fullscreen Player (Zero-Friction Remote Controls)
 - **Channel Zapping (`Ch+`/`Ch-` or `D-pad Up` while HUD hidden):** Stops the previous stream cleanly, tunes the next/previous channel, and displays a minimal bottom-left OSD pill fading after 3 seconds.
-- **HUD Open (`OK`/`Select` or `D-pad Down` while HUD hidden):** Reveals the translucent dark scrim bottom HUD with focusable seek bar, `Play/Pause`, `Back to Live` pill, **Display Options**, and horizontal **Quick Channel Strip**.
+- **HUD Open (`OK`/`Select` or `D-pad Down` while HUD hidden):** Reveals the translucent dark scrim bottom HUD with focusable seek bar, `Play/Pause`, `Back to Live` pill, **Playback Info**, **Display Options**, and horizontal **Quick Channel Strip**.
 - **Progressive Seeking (`D-pad Left`/`Right` while HUD hidden or on focused seek bar):** Quick taps follow an exact-target ladder (`10s → 30s → 1m → 5m → 10m`, then `+5m` per tap, stepping back down on opposite taps), while holding scrubs continuously at the active tap's step size (capped at `30s` per throttled tick) with instant preview timestamp and settle/release commit.
 - **Back key:** Dismisses open panels or the HUD first; otherwise stops playback cleanly and returns to the previous screen.
 - **Single-Tuner Notice:** Auto-dismissing top-right toast naming the blocking active recording rather than an infinite loading spinner.

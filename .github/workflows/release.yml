@@ -115,6 +115,16 @@ jobs:
       - name: Generate release notes
         run: |
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          CHANGELOG_HEADER="$(awk -v ver="$VERSION_NAME" '
+            $0 ~ "^## \\[" ver "\\]" { print; exit }
+          ' CHANGELOG.md)"
+          RELEASE_TAGLINE="$(printf '%s' "$CHANGELOG_HEADER" | sed -nE 's/^## \[[^]]+\][[:space:]]+[—-][[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[—-][[:space:]]+(.+)$/\1/p')"
+          if [[ -n "$RELEASE_TAGLINE" ]]; then
+            echo "RELEASE_TITLE=MuxGrid ${RELEASE_TAG}: ${RELEASE_TAGLINE}" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TITLE=MuxGrid ${RELEASE_TAG}" >> "$GITHUB_ENV"
+          fi
+
           CHANGELOG_SECTION="$(awk -v ver="$VERSION_NAME" '
             $0 ~ "^## \\[" ver "\\]" { in_section = 1; next }
             in_section && /^## \[/ { exit }
@@ -157,13 +167,13 @@ jobs:
               "release-assets/muxgrid-${RELEASE_TAG}-armeabi-v7a.apk" \
               "release-assets/SHA256SUMS.txt" \
               --clobber
-            gh release edit "$RELEASE_TAG" --title "MuxGrid ${RELEASE_TAG}" --notes-file "$NOTES_FILE"
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TITLE" --notes-file "$NOTES_FILE"
           else
             gh release create "$RELEASE_TAG" \
               "release-assets/muxgrid-${RELEASE_TAG}-arm64-v8a.apk" \
               "release-assets/muxgrid-${RELEASE_TAG}-armeabi-v7a.apk" \
               "release-assets/SHA256SUMS.txt" \
-              --title "MuxGrid ${RELEASE_TAG}" \
+              --title "$RELEASE_TITLE" \
               --notes-file "$NOTES_FILE" \
               $PRERELEASE_FLAG
           fi
