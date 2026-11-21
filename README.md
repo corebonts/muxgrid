@@ -6,8 +6,18 @@ A lightweight, native Android and Android TV client for **Tvheadend** (`4.3+`), 
 
 Built as a **single unified codebase** producing ABI-split APKs for Android phones, tablets, and Android TV / Google TV devices (`minSdk 28`).
 
-## Screenshots (Android TV)
+## Screenshots
 
+### Android Phone
+| Live Channels | Program Guide (EPG) | DVR & Recordings |
+| :---: | :---: | :---: |
+| ![Phone Live Channels](./docs/assets/screenshots/mobile-channels.png) | ![Phone Program Guide](./docs/assets/screenshots/mobile-epg.png) | ![Phone Recordings](./docs/assets/screenshots/mobile-dvr.png) |
+
+<p align="center">
+  <img src="./docs/assets/screenshots/mobile-player.png" alt="Phone Live Player & Timeshift HUD" width="760" />
+</p>
+
+### Android TV
 | Live Channels | Program Guide (EPG) |
 | :---: | :---: |
 | ![Android TV Live Channels](./docs/assets/screenshots/tv-channels.png) | ![Android TV Program Guide](./docs/assets/screenshots/tv-epg.png) |
