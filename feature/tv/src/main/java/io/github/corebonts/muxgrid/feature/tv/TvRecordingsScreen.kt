@@ -6,6 +6,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -36,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.tv.material3.Border
 import androidx.tv.material3.Button
 import androidx.tv.material3.ClickableSurfaceDefaults
@@ -61,6 +64,7 @@ import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun TvRecordingsScreen(
     dvrEntries: Map<Long, DvrEntry>,
@@ -180,10 +184,13 @@ internal fun TvRecordingsScreen(
             runCatching { primaryFocusRequester.requestFocus() }
         }
 
-        Dialog(onDismissRequest = { if (!actionBusy) selectedEntry = null }) {
+        Dialog(
+            onDismissRequest = { if (!actionBusy) selectedEntry = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
             Column(
                 modifier = Modifier
-                    .widthIn(min = 380.dp, max = 560.dp)
+                    .widthIn(min = 440.dp, max = 680.dp)
                     .clip(MuxGridShapes.Dialog)
                     .background(MuxGridColors.CardSurfaceElevated)
                     .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
@@ -230,7 +237,10 @@ internal fun TvRecordingsScreen(
                     Text(err, color = MuxGridColors.CoralLive, fontSize = 13.sp)
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     when (entry.state) {
                         DvrState.RECORDING -> {
                             Button(
@@ -249,7 +259,12 @@ internal fun TvRecordingsScreen(
                                     modifier = Modifier.size(16.dp),
                                 )
                                 Spacer(Modifier.width(4.dp))
-                                Text(if (entry.hasResumePosition) "Resume" else "Watch from Start", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = if (entry.hasResumePosition) "Resume" else "Watch from Start",
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                )
                             }
                             if (ch != null) {
                                 Button(
@@ -258,11 +273,11 @@ internal fun TvRecordingsScreen(
                                         onWatchLiveChannel(ch)
                                     },
                                     shape = tvButtonShape(),
-                                    colors = tvSecondaryButtonColors(),
+                                    colors = tvDialogSecondaryButtonColors(),
                                 ) {
                                     Icon(MuxGridIcons.Live, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    Text("Watch Live")
+                                    Text("Watch Live", maxLines = 1, softWrap = false)
                                 }
                             }
                             Button(
@@ -278,11 +293,11 @@ internal fun TvRecordingsScreen(
                                     }
                                 },
                                 shape = tvButtonShape(),
-                                colors = tvSecondaryButtonColors(),
+                                colors = tvDialogSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Stop & Save")
+                                Text("Stop & Save", maxLines = 1, softWrap = false)
                             }
                             Button(
                                 enabled = !actionBusy,
@@ -297,11 +312,11 @@ internal fun TvRecordingsScreen(
                                     }
                                 },
                                 shape = tvButtonShape(),
-                                colors = tvSecondaryButtonColors(),
+                                colors = tvDialogSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Abort")
+                                Text("Abort", maxLines = 1, softWrap = false)
                             }
                         }
                         DvrState.COMPLETED -> {
@@ -318,7 +333,12 @@ internal fun TvRecordingsScreen(
                                 ) {
                                     Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    Text(if (entry.hasResumePosition) "Resume" else "Play", fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        text = if (entry.hasResumePosition) "Resume" else "Play",
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                    )
                                 }
                                 if (entry.hasResumePosition) {
                                     Button(
@@ -327,11 +347,11 @@ internal fun TvRecordingsScreen(
                                             onPlayRecording(entry, ch, 0L)
                                         },
                                         shape = tvButtonShape(),
-                                        colors = tvSecondaryButtonColors(),
+                                        colors = tvDialogSecondaryButtonColors(),
                                     ) {
                                         Icon(MuxGridIcons.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(4.dp))
-                                        Text("Start Over")
+                                        Text("Start Over", maxLines = 1, softWrap = false)
                                     }
                                 }
                                 Button(
@@ -346,11 +366,11 @@ internal fun TvRecordingsScreen(
                                         }
                                     },
                                     shape = tvButtonShape(),
-                                    colors = tvSecondaryButtonColors(),
+                                    colors = tvDialogSecondaryButtonColors(),
                                 ) {
                                     Icon(MuxGridIcons.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    Text(if (entry.isWatched) "Unwatched" else "Watched")
+                                    Text(if (entry.isWatched) "Unwatched" else "Watched", maxLines = 1, softWrap = false)
                                 }
                             }
                             Button(
@@ -366,11 +386,11 @@ internal fun TvRecordingsScreen(
                                 },
                                 modifier = if (entry.isFileMissing) Modifier.focusRequester(primaryFocusRequester) else Modifier,
                                 shape = tvButtonShape(),
-                                colors = tvSecondaryButtonColors(),
+                                colors = tvDialogSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Delete")
+                                Text("Delete", maxLines = 1, softWrap = false)
                             }
                         }
                         DvrState.SCHEDULED -> {
@@ -387,11 +407,11 @@ internal fun TvRecordingsScreen(
                                 },
                                 modifier = Modifier.focusRequester(primaryFocusRequester),
                                 shape = tvButtonShape(),
-                                colors = tvSecondaryButtonColors(),
+                                colors = tvDialogSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Cancel Timer")
+                                Text("Cancel Timer", maxLines = 1, softWrap = false)
                             }
                         }
                         else -> {
@@ -408,11 +428,11 @@ internal fun TvRecordingsScreen(
                                 },
                                 modifier = Modifier.focusRequester(primaryFocusRequester),
                                 shape = tvButtonShape(),
-                                colors = tvSecondaryButtonColors(),
+                                colors = tvDialogSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Remove")
+                                Text("Remove", maxLines = 1, softWrap = false)
                             }
                         }
                     }
@@ -420,11 +440,11 @@ internal fun TvRecordingsScreen(
                         enabled = !actionBusy,
                         onClick = { selectedEntry = null },
                         shape = tvButtonShape(),
-                        colors = tvSecondaryButtonColors(),
+                        colors = tvDialogSecondaryButtonColors(),
                     ) {
                         Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Close")
+                        Text("Close", maxLines = 1, softWrap = false)
                     }
                 }
             }

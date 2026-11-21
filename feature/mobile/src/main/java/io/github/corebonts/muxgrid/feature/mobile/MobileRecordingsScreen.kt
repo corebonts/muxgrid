@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -52,6 +53,7 @@ import io.github.corebonts.muxgrid.core.designsystem.DvrSeriesGroup
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridCompactButton
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
@@ -561,41 +563,20 @@ private fun RecordingNowCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Button(
+                MuxGridCompactButton(
+                    text = if (entry.hasResumePosition) "Resume" else "Chase Play",
+                    leadingIcon = if (entry.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
+                    containerColor = MuxGridColors.Accent,
+                    contentColor = MuxGridColors.OnAccent,
                     onClick = onWatchFromStart,
-                    shape = MuxGridShapes.Sm,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MuxGridColors.Accent,
-                        contentColor = MuxGridColors.OnAccent,
-                    ),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                ) {
-                    Icon(
-                        imageVector = if (entry.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
-                        contentDescription = null,
-                        modifier = Modifier.size(15.dp),
-                    )
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        text = if (entry.hasResumePosition) "Resume" else "Chase Play",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                    )
-                }
-                Button(
+                )
+                MuxGridCompactButton(
+                    text = "Stop",
+                    leadingIcon = MuxGridIcons.Stop,
+                    containerColor = Color.Transparent,
+                    contentColor = MuxGridColors.TextPrimary,
                     onClick = onStop,
-                    shape = MuxGridShapes.Sm,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MuxGridColors.CardSurface,
-                        contentColor = MuxGridColors.TextPrimary,
-                    ),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                ) {
-                    Icon(MuxGridIcons.Stop, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Stop", fontSize = 12.sp, maxLines = 1)
-                }
+                )
                 Spacer(Modifier.weight(1f))
                 Box(
                     modifier = Modifier
@@ -605,7 +586,7 @@ private fun RecordingNowCard(
                 ) {
                     Text(
                         text = "•••",
-                        color = MuxGridColors.TextSecondary,
+                        color = MuxGridColors.TextMuted,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                     )

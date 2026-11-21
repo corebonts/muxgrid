@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -110,6 +111,14 @@ internal fun tvPrimaryButtonColors() = ButtonDefaults.colors(
 @Composable
 internal fun tvSecondaryButtonColors() = ButtonDefaults.colors(
     containerColor = MuxGridColors.CardSurfaceElevated,
+    contentColor = MuxGridColors.TextPrimary,
+    focusedContainerColor = MuxGridColors.FocusBorder,
+    focusedContentColor = MuxGridColors.CanvasTv,
+)
+
+@Composable
+internal fun tvDialogSecondaryButtonColors() = ButtonDefaults.colors(
+    containerColor = MuxGridColors.CardSurface,
     contentColor = MuxGridColors.TextPrimary,
     focusedContainerColor = MuxGridColors.FocusBorder,
     focusedContentColor = MuxGridColors.CanvasTv,
@@ -364,6 +373,7 @@ private fun TvMvpContent(
             if (settingsOpen) {
                 TvSettingsDialog(
                     profile = currentProfile,
+                    connectionState = connectionState,
                     hwDecPreset = hwDecPreset,
                     timeshiftWindow = timeshiftWindow,
                     onSelectPreset = { preset ->
@@ -785,6 +795,7 @@ private fun TvChannelCard(
 @Composable
 private fun TvSettingsDialog(
     profile: ServerProfile,
+    connectionState: ConnectionState,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
     onSelectPreset: (HwDecPreset) -> Unit,
@@ -792,117 +803,157 @@ private fun TvSettingsDialog(
     onOpenServerSetup: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
         Column(
             modifier = Modifier
-                .widthIn(min = 440.dp, max = 640.dp)
+                .widthIn(min = 500.dp, max = 660.dp)
                 .clip(MuxGridShapes.Dialog)
                 .background(MuxGridColors.CardSurfaceElevated)
                 .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
-                .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Icon(
-                    imageVector = MuxGridIcons.Settings,
-                    contentDescription = null,
-                    tint = MuxGridColors.AccentSoft,
-                    modifier = Modifier.size(22.dp),
-                )
-                Text("Settings", style = MuxGridType.Title, fontSize = 20.sp)
-            }
+            Text(
+                text = "Video Decoder & Timeshift",
+                style = MuxGridType.Title,
+                fontSize = 19.sp,
+            )
 
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("VIDEO DECODER & DEINTERLACER", style = MuxGridType.Eyebrow)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Hardware Decode Preset",
+                    style = MuxGridType.CardSubtitle,
+                    fontSize = 12.sp,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     listOf(
                         HwDecPreset.MEDIACODEC_ZERO_COPY to "Zero-Copy (TV Default)",
                         HwDecPreset.MEDIACODEC_COPY_BWDIF to "Copy + bwdif",
                     ).forEach { (preset, label) ->
-                        FilterChip(
+                        TvUnderlineOption(
+                            label = label,
                             selected = hwDecPreset == preset,
                             onClick = { onSelectPreset(preset) },
-                            shape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm),
-                            colors = FilterChipDefaults.colors(
-                                containerColor = MuxGridColors.CardSurface,
-                                contentColor = MuxGridColors.TextPrimary,
-                                selectedContainerColor = MuxGridColors.Accent,
-                                selectedContentColor = MuxGridColors.OnAccent,
-                                focusedContainerColor = MuxGridColors.FocusBorder,
-                                focusedContentColor = MuxGridColors.CanvasTv,
-                                focusedSelectedContainerColor = MuxGridColors.FocusBorder,
-                                focusedSelectedContentColor = MuxGridColors.CanvasTv,
-                            ),
-                        ) {
-                            Text(label, fontSize = 13.sp)
-                        }
+                        )
                     }
                 }
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("LIVE TIMESHIFT CACHE LIMIT", style = MuxGridType.Eyebrow)
+                Text(
+                    text = "Live Timeshift Cache Limit",
+                    style = MuxGridType.CardSubtitle,
+                    fontSize = 12.sp,
+                )
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     TimeshiftWindow.entries.forEach { option ->
-                        FilterChip(
+                        TvUnderlineOption(
+                            label = option.shortLabel,
                             selected = timeshiftWindow == option,
                             onClick = { onSelectTimeshiftWindow(option) },
-                            shape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm),
-                            colors = FilterChipDefaults.colors(
-                                containerColor = MuxGridColors.CardSurface,
-                                contentColor = MuxGridColors.TextPrimary,
-                                selectedContainerColor = MuxGridColors.Accent,
-                                selectedContentColor = MuxGridColors.OnAccent,
-                                focusedContainerColor = MuxGridColors.FocusBorder,
-                                focusedContentColor = MuxGridColors.CanvasTv,
-                                focusedSelectedContainerColor = MuxGridColors.FocusBorder,
-                                focusedSelectedContentColor = MuxGridColors.CanvasTv,
-                            ),
-                        ) {
-                            Text(option.shortLabel, fontSize = 13.sp)
-                        }
+                        )
                     }
                 }
                 Text(
                     text = "${timeshiftWindow.description} · split pause/rewind · applies on next tune",
                     style = MuxGridType.TabularSmall,
-                    color = MuxGridColors.AccentSoft,
+                    color = MuxGridColors.TextMuted,
                 )
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 MuxGridDivider()
-                Text(
-                    text = "Server: ${profile.host}:${profile.htspPort} (HTTP ${profile.httpPort})",
-                    style = MuxGridType.TabularSmall,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(
-                        onClick = onOpenServerSetup,
-                        shape = tvButtonShape(),
-                        colors = tvPrimaryButtonColors(),
-                    ) {
-                        Icon(MuxGridIcons.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Edit Server Connection", fontWeight = FontWeight.SemiBold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val connSuffix = when (connectionState) {
+                        is ConnectionState.Connected -> "Connected"
+                        ConnectionState.Connecting -> "Connecting…"
+                        is ConnectionState.Syncing -> "Syncing…"
+                        is ConnectionState.Error -> "Error"
+                        ConnectionState.Disconnected -> "Offline"
                     }
-                    Button(
-                        onClick = onDismiss,
-                        shape = tvButtonShape(),
-                        colors = tvSecondaryButtonColors(),
-                    ) {
-                        Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Close")
+                    Text(
+                        text = "Server: ${profile.host}:${profile.htspPort} · $connSuffix",
+                        style = MuxGridType.TabularSmall,
+                        color = MuxGridColors.TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = onOpenServerSetup,
+                            shape = tvButtonShape(),
+                            colors = tvPrimaryButtonColors(),
+                        ) {
+                            Icon(MuxGridIcons.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Edit Server", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                        }
+                        Button(
+                            onClick = onDismiss,
+                            shape = tvButtonShape(),
+                            colors = tvDialogSecondaryButtonColors(),
+                        ) {
+                            Text("Close", maxLines = 1, softWrap = false)
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun TvUnderlineOption(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Color.Transparent,
+            contentColor = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextMuted,
+            focusedContainerColor = MuxGridColors.FocusBorder,
+            focusedContentColor = MuxGridColors.CanvasTv,
+        ),
+        border = ClickableSurfaceDefaults.border(
+            border = Border.None,
+            focusedBorder = Border.None,
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = label,
+                fontSize = 13.5.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false,
+            )
+            Spacer(Modifier.height(5.dp))
+            Box(
+                modifier = Modifier
+                    .width(if (selected) 28.dp else 0.dp)
+                    .height(2.dp)
+                    .background(if (selected) MuxGridColors.Accent else Color.Transparent),
+            )
         }
     }
 }

@@ -684,6 +684,7 @@ internal fun TvPlayerScreen(
                             LiveProgressBar(
                                 progress = (playbackState.positionMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f),
                                 fillColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.Accent,
+                                height = 4.dp,
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             Row(
@@ -703,6 +704,7 @@ internal fun TvPlayerScreen(
                             LiveProgressBar(
                                 progress = frac,
                                 fillColor = MuxGridColors.Accent,
+                                height = 4.dp,
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             Row(

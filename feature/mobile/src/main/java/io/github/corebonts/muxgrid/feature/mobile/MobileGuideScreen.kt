@@ -307,7 +307,7 @@ internal fun MobileGuideScreen(
                                     Text(
                                         text = formatEpochHm(event.startEpochSec),
                                         style = MuxGridType.TabularNumber,
-                                        color = if (isLiveNow) MuxGridColors.AccentSoft else MuxGridColors.TextPrimary,
+                                        color = MuxGridColors.TextPrimary,
                                     )
                                     Text(
                                         text = formatEpochHm(event.stopEpochSec),
@@ -464,31 +464,33 @@ internal fun MobileGuideScreen(
                     )
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    if (detailChannel != null) {
-                        Button(
-                            onClick = {
-                                selectedEvent = null
-                                onWatchChannel(detailChannel)
-                            },
-                            shape = MuxGridShapes.Sm,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MuxGridColors.Accent,
-                                contentColor = MuxGridColors.OnAccent,
-                            ),
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text(if (isLiveNow) "Watch Live" else "Watch Channel", fontWeight = FontWeight.SemiBold)
+                if (linkedDvr?.state == DvrState.RECORDING) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        if (detailChannel != null) {
+                            Button(
+                                onClick = {
+                                    selectedEvent = null
+                                    onWatchChannel(detailChannel)
+                                },
+                                shape = MuxGridShapes.Sm,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MuxGridColors.Accent,
+                                    contentColor = MuxGridColors.OnAccent,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(if (isLiveNow) "Watch Live" else "Watch Channel", fontWeight = FontWeight.SemiBold)
+                            }
                         }
-                    }
-
-                    when (linkedDvr?.state) {
-                        DvrState.RECORDING -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
                             OutlinedButton(
                                 enabled = !actionBusy,
                                 shape = MuxGridShapes.Sm,
@@ -501,7 +503,7 @@ internal fun MobileGuideScreen(
                             ) {
                                 Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.AccentSoft, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Watch from Start", color = MuxGridColors.AccentSoft)
+                                Text("Chase Play", color = MuxGridColors.AccentSoft, maxLines = 1)
                             }
                             OutlinedButton(
                                 enabled = !actionBusy,
@@ -520,52 +522,80 @@ internal fun MobileGuideScreen(
                             ) {
                                 Icon(MuxGridIcons.Stop, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Stop & Save", color = MuxGridColors.TextPrimary)
+                                Text("Stop & Save", color = MuxGridColors.TextPrimary, maxLines = 1)
                             }
                         }
-                        DvrState.SCHEDULED -> {
-                            OutlinedButton(
-                                enabled = !actionBusy,
-                                shape = MuxGridShapes.Sm,
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        if (detailChannel != null) {
+                            Button(
                                 onClick = {
-                                    scope.launch {
-                                        actionBusy = true
-                                        actionError = null
-                                        onCancelRecording(linkedDvr.id)
-                                            .onSuccess { selectedEvent = null }
-                                            .onFailure { actionError = it.message ?: "Failed to cancel timer" }
-                                        actionBusy = false
-                                    }
+                                    selectedEvent = null
+                                    onWatchChannel(detailChannel)
                                 },
+                                shape = MuxGridShapes.Sm,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MuxGridColors.Accent,
+                                    contentColor = MuxGridColors.OnAccent,
+                                ),
                                 modifier = Modifier.weight(1f),
                             ) {
-                                Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
+                                Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Cancel Timer", color = MuxGridColors.CoralLive)
+                                Text(if (isLiveNow) "Watch Live" else "Watch Channel", fontWeight = FontWeight.SemiBold, maxLines = 1)
                             }
                         }
-                        else -> {
-                            OutlinedButton(
-                                enabled = !actionBusy,
-                                shape = MuxGridShapes.Sm,
-                                onClick = {
-                                    scope.launch {
-                                        actionBusy = true
-                                        actionError = null
-                                        onScheduleRecording(detailEvent.id)
-                                            .onSuccess { selectedEvent = null }
-                                            .onFailure { actionError = it.message ?: "Failed to schedule recording" }
-                                        actionBusy = false
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Icon(MuxGridIcons.Record, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text(
-                                    text = if (isLiveNow) "Record Now" else "Record",
-                                    color = MuxGridColors.CoralLive,
-                                )
+
+                        when (linkedDvr?.state) {
+                            DvrState.SCHEDULED -> {
+                                OutlinedButton(
+                                    enabled = !actionBusy,
+                                    shape = MuxGridShapes.Sm,
+                                    onClick = {
+                                        scope.launch {
+                                            actionBusy = true
+                                            actionError = null
+                                            onCancelRecording(linkedDvr.id)
+                                                .onSuccess { selectedEvent = null }
+                                                .onFailure { actionError = it.message ?: "Failed to cancel timer" }
+                                            actionBusy = false
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Cancel Timer", color = MuxGridColors.CoralLive, maxLines = 1)
+                                }
+                            }
+                            else -> {
+                                OutlinedButton(
+                                    enabled = !actionBusy,
+                                    shape = MuxGridShapes.Sm,
+                                    onClick = {
+                                        scope.launch {
+                                            actionBusy = true
+                                            actionError = null
+                                            onScheduleRecording(detailEvent.id)
+                                                .onSuccess { selectedEvent = null }
+                                                .onFailure { actionError = it.message ?: "Failed to schedule recording" }
+                                            actionBusy = false
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Icon(MuxGridIcons.Record, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(14.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        text = if (isLiveNow) "Record Now" else "Record",
+                                        color = MuxGridColors.CoralLive,
+                                        maxLines = 1,
+                                    )
+                                }
                             }
                         }
                     }

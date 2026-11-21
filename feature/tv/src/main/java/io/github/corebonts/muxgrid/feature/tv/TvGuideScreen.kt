@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -44,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.tv.material3.Border
 import androidx.tv.material3.Button
 import androidx.tv.material3.ClickableSurfaceDefaults
@@ -87,7 +90,7 @@ private data class TimelineCell(
     val stopEpochSec: Long,
 )
 
-@OptIn(ExperimentalTvMaterial3Api::class)
+@OptIn(ExperimentalTvMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun TvGuideScreen(
     channels: List<Channel>,
@@ -442,7 +445,7 @@ internal fun TvGuideScreen(
                                                         Text(
                                                             text = "${formatEpochHm(ev.startEpochSec)}–${formatEpochHm(ev.stopEpochSec)}",
                                                             style = MuxGridType.TabularSmall,
-                                                            color = if (isLiveNow) MuxGridColors.AccentSoft else MuxGridColors.TextMuted,
+                                                            color = MuxGridColors.TextMuted,
                                                             maxLines = 1,
                                                         )
                                                     }
@@ -544,10 +547,13 @@ internal fun TvGuideScreen(
             runCatching { primaryFocusRequester.requestFocus() }
         }
 
-        Dialog(onDismissRequest = { if (!actionBusy) actionEvent = null }) {
+        Dialog(
+            onDismissRequest = { if (!actionBusy) actionEvent = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
             Column(
                 modifier = Modifier
-                    .widthIn(min = 380.dp, max = 560.dp)
+                    .widthIn(min = 440.dp, max = 680.dp)
                     .clip(MuxGridShapes.Dialog)
                     .background(MuxGridColors.CardSurfaceElevated)
                     .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
@@ -591,7 +597,10 @@ internal fun TvGuideScreen(
                     Text(err, color = MuxGridColors.CoralLive, fontSize = 13.sp)
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     if (ch != null) {
                         Button(
                             onClick = {
@@ -604,7 +613,12 @@ internal fun TvGuideScreen(
                         ) {
                             Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text(if (isLiveNow) "Watch Live" else "Watch Channel", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = if (isLiveNow) "Watch Live" else "Watch Channel",
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
                         }
                     }
 
@@ -625,11 +639,11 @@ internal fun TvGuideScreen(
                                 },
                                 modifier = recordButtonModifier,
                                 shape = tvButtonShape(),
-                                colors = tvSecondaryButtonColors(),
+                                colors = tvDialogSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Watch from Start")
+                                Text("Watch from Start", maxLines = 1, softWrap = false)
                             }
                             Button(
                                 enabled = !actionBusy,
@@ -644,11 +658,11 @@ internal fun TvGuideScreen(
                                     }
                                 },
                                 shape = tvButtonShape(),
-                                colors = tvSecondaryButtonColors(),
+                                colors = tvDialogSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Stop & Save")
+                                Text("Stop & Save", maxLines = 1, softWrap = false)
                             }
                         }
                         DvrState.SCHEDULED -> {
@@ -666,11 +680,11 @@ internal fun TvGuideScreen(
                                 },
                                 modifier = recordButtonModifier,
                                 shape = tvButtonShape(),
-                                colors = tvSecondaryButtonColors(),
+                                colors = tvDialogSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Cancel Timer")
+                                Text("Cancel Timer", maxLines = 1, softWrap = false)
                             }
                         }
                         else -> {
@@ -688,11 +702,11 @@ internal fun TvGuideScreen(
                                 },
                                 modifier = recordButtonModifier,
                                 shape = tvButtonShape(),
-                                colors = tvSecondaryButtonColors(),
+                                colors = tvDialogSecondaryButtonColors(),
                             ) {
                                 Icon(MuxGridIcons.Record, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text(if (isLiveNow) "Record Now" else "Record")
+                                Text(if (isLiveNow) "Record Now" else "Record", maxLines = 1, softWrap = false)
                             }
                         }
                     }
@@ -701,11 +715,11 @@ internal fun TvGuideScreen(
                         enabled = !actionBusy,
                         onClick = { actionEvent = null },
                         shape = tvButtonShape(),
-                        colors = tvSecondaryButtonColors(),
+                        colors = tvDialogSecondaryButtonColors(),
                     ) {
                         Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Close")
+                        Text("Close", maxLines = 1, softWrap = false)
                     }
                 }
             }
