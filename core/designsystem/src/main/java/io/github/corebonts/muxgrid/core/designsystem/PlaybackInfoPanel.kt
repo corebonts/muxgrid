@@ -1,9 +1,5 @@
 package io.github.corebonts.muxgrid.core.designsystem
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -136,14 +132,10 @@ fun PlaybackInfoPanel(
                         fontSize = 19.sp,
                     )
                     val titleLine = buildString {
-                        val name = if (playbackState.isRecordingPlayback) {
-                            playbackState.programTitle ?: playbackState.channelName ?: "Recording"
-                        } else {
-                            listOfNotNull(
-                                playbackState.channelNumber?.takeIf { it != "0" },
-                                playbackState.channelName,
-                            ).joinToString(" · ").ifBlank { "Live Stream" }
-                        }
+                        val name = playbackState.displayTitle(
+                            recordingFallback = playbackState.channelName ?: "Recording",
+                            liveFallback = "Live Stream",
+                        )
                         append(name)
                         if (diagnostics.sessionUptimeMs > 0L) {
                             append(" · ")
@@ -168,7 +160,12 @@ fun PlaybackInfoPanel(
                     label = "Copy",
                     onClick = {
                         val report = formatPlaybackInfoReport(playbackState, diagnostics, hwDecPreset)
-                        copyPlaybackInfoToClipboard(context, report)
+                        copyTextToClipboard(
+                            context = context,
+                            label = "MuxGrid Playback Info",
+                            text = report,
+                            toastMessage = "Playback info copied",
+                        )
                     },
                 )
                 var closeFocused by remember { mutableStateOf(false) }
@@ -185,7 +182,7 @@ fun PlaybackInfoPanel(
                     Icon(
                         imageVector = MuxGridIcons.Close,
                         contentDescription = "Close",
-                        tint = if (closeFocused) MuxGridColors.CanvasTv else MuxGridColors.TextSecondary,
+                        tint = if (closeFocused) MuxGridColors.OnFocusBorder else MuxGridColors.TextSecondary,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -255,7 +252,7 @@ private fun PanelActionPill(
     ) {
         Text(
             text = label,
-            color = if (focused) MuxGridColors.CanvasTv else MuxGridColors.TextPrimary,
+            color = if (focused) MuxGridColors.OnFocusBorder else MuxGridColors.TextPrimary,
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
         )
@@ -660,14 +657,10 @@ fun formatPlaybackInfoReport(
 ): String {
     val sections = buildPlaybackInfoSections(playbackState, diagnostics, hwDecPreset)
     return buildString {
-        val headerName = if (playbackState.isRecordingPlayback) {
-            playbackState.programTitle ?: playbackState.channelName ?: "Recording"
-        } else {
-            listOfNotNull(
-                playbackState.channelNumber?.takeIf { it != "0" },
-                playbackState.channelName,
-            ).joinToString(" · ").ifBlank { "Live Stream" }
-        }
+        val headerName = playbackState.displayTitle(
+            recordingFallback = playbackState.channelName ?: "Recording",
+            liveFallback = "Live Stream",
+        )
         appendLine("MuxGrid Playback Info — $headerName")
         if (diagnostics.sessionUptimeMs > 0L) {
             appendLine("Session Uptime: ${formatDurationSec(diagnostics.sessionUptimeMs / 1000L)}")
@@ -694,13 +687,4 @@ internal fun formatBitrateBps(bps: Long): String {
         clamped < 1_000_000L -> String.format(Locale.US, "%.0f kbps", clamped / 1_000.0)
         else -> String.format(Locale.US, "%.2f Mbps", clamped / 1_000_000.0)
     }
-}
-
-private fun copyPlaybackInfoToClipboard(
-    context: Context,
-    report: String,
-) {
-    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-    cm.setPrimaryClip(ClipData.newPlainText("MuxGrid Playback Info", report))
-    Toast.makeText(context, "Playback info copied", Toast.LENGTH_SHORT).show()
 }

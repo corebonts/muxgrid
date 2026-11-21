@@ -42,7 +42,7 @@ internal class HttpPassStrategy(
         val end = cacheEndMs.coerceAtLeast(start)
         val window = (end - start).coerceAtLeast(0L)
         val offset = (end - positionMs.coerceAtLeast(0L)).coerceAtLeast(0L)
-        val isTimeshiftSeekable = timeshiftEnabled && window >= 2_000L
+        val isTimeshiftSeekable = timeshiftEnabled && window >= MIN_TIMESHIFT_SEEKABLE_WINDOW_MS
         return LiveTimeshiftMetrics(
             bufferStartMs = start,
             bufferEndMs = end,
@@ -50,6 +50,10 @@ internal class HttpPassStrategy(
             liveEdgeOffsetMs = offset,
             isTimeshiftSeekable = isTimeshiftSeekable,
         )
+    }
+
+    companion object {
+        private const val MIN_TIMESHIFT_SEEKABLE_WINDOW_MS = 2_000L
     }
 }
 

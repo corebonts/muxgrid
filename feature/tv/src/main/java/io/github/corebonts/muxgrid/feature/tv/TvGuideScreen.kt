@@ -79,6 +79,7 @@ import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrConfirmKind
 import io.github.corebonts.muxgrid.core.designsystem.DvrLookupIndex
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
+import io.github.corebonts.muxgrid.core.designsystem.HALF_HOUR_SEC
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
@@ -88,6 +89,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.buildAvailableGuideDays
 import io.github.corebonts.muxgrid.core.designsystem.computeGuideEventBounds
+import io.github.corebonts.muxgrid.core.designsystem.floorToHalfHour
 import io.github.corebonts.muxgrid.core.designsystem.formatDayLabel
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochDayHm
@@ -314,7 +316,7 @@ internal fun TvGuideScreen(
     }
 
     val slotStarts = remember(windowStartEpochSec) {
-        List(6) { idx -> windowStartEpochSec + idx * 1800L } // 6 x 30-min markers
+        List(6) { idx -> windowStartEpochSec + idx * HALF_HOUR_SEC } // 6 x 30-min markers
     }
     val slotLabels = remember(slotStarts) {
         slotStarts.map { formatEpochHm(it) }
@@ -504,9 +506,9 @@ internal fun TvGuideScreen(
                                 selectedContainerColor = MuxGridColors.Accent,
                                 selectedContentColor = MuxGridColors.OnAccent,
                                 focusedContainerColor = MuxGridColors.FocusBorder,
-                                focusedContentColor = MuxGridColors.CanvasTv,
+                                focusedContentColor = MuxGridColors.OnFocusBorder,
                                 focusedSelectedContainerColor = MuxGridColors.FocusBorder,
-                                focusedSelectedContentColor = MuxGridColors.CanvasTv,
+                                focusedSelectedContentColor = MuxGridColors.OnFocusBorder,
                             ),
                             border = FilterChipDefaults.border(
                                 border = Border.None,
@@ -1058,8 +1060,7 @@ internal fun TvGuideScreen(
                             enabled = !actionBusy,
                             onClick = {
                                 actionEventKey = null
-                                val startSec = if (linkedDvr.hasResumePosition) linkedDvr.playPositionSec else 0L
-                                onPlayRecording(linkedDvr, ch, startSec)
+                                onPlayRecording(linkedDvr, ch, linkedDvr.effectiveStartSec)
                             },
                             modifier = recordButtonModifier,
                             shape = tvButtonShape(),
@@ -1106,8 +1107,7 @@ internal fun TvGuideScreen(
                             enabled = !actionBusy,
                             onClick = {
                                 actionEventKey = null
-                                val startSec = if (linkedDvr.hasResumePosition) linkedDvr.playPositionSec else 0L
-                                onPlayRecording(linkedDvr, ch, startSec)
+                                onPlayRecording(linkedDvr, ch, linkedDvr.effectiveStartSec)
                             },
                             modifier = recordButtonModifier,
                             shape = tvButtonShape(),
@@ -1186,11 +1186,7 @@ internal fun TvGuideScreen(
                         result
                             .onSuccess { actionEventKey = null }
                             .onFailure { err ->
-                                actionError = err.message ?: when (kind) {
-                                    DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop"
-                                    DvrConfirmKind.CANCEL_TIMER -> "Failed to cancel"
-                                    else -> "Action failed"
-                                }
+                                actionError = err.message ?: spec.failureFallbackMessage
                             }
                     } finally {
                         actionBusy = false
@@ -1273,8 +1269,6 @@ private fun TvGuidePreviewBar(
         }
     }
 }
-
-private fun floorToHalfHour(epochSec: Long): Long = (epochSec / 1800L) * 1800L
 
 private fun buildRowTimelineCells(
     channelId: Long,

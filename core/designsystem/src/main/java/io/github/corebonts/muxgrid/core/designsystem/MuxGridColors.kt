@@ -24,6 +24,7 @@ data class MuxGridPalette(
     val hairlineBorder: Color,
     val scrimControlBorder: Color,
     val focusBorder: Color,
+    val onFocusBorder: Color,
     val accent: Color,
     val accentSoft: Color,
     val onAccent: Color,
@@ -32,6 +33,7 @@ data class MuxGridPalette(
     val emeraldOk: Color,
     val amberWarn: Color,
     val progressFill: Color,
+    val seekThumb: Color,
     val textPrimary: Color,
     val textSecondary: Color,
     val textMuted: Color,
@@ -55,6 +57,7 @@ val MuxGridDarkPalette = MuxGridPalette(
     hairlineBorder = Color(0x17FFFFFF),
     scrimControlBorder = Color(0x33FFFFFF),
     focusBorder = Color(0xFFF4F4F5),
+    onFocusBorder = Color(0xFF09090B),
     accent = Color(0xFFE5A00D),
     accentSoft = Color(0xFFF5B82E),
     onAccent = Color(0xFF09090B),
@@ -63,6 +66,7 @@ val MuxGridDarkPalette = MuxGridPalette(
     emeraldOk = Color(0xFF3E9B63),
     amberWarn = Color(0xFFE5A00D),
     progressFill = Color(0xFFD4D4D8),
+    seekThumb = Color(0xFFFFFFFF),
     textPrimary = Color(0xFFF4F4F5),
     textSecondary = Color(0xFF9A9AA3),
     textMuted = Color(0xFF5E5E66),
@@ -86,6 +90,7 @@ val MuxGridLightPalette = MuxGridPalette(
     hairlineBorder = Color(0x1F000000),
     scrimControlBorder = Color(0x33000000),
     focusBorder = Color(0xFF18181B),
+    onFocusBorder = Color(0xFFF4F4F5),
     accent = Color(0xFFE5A00D),
     accentSoft = Color(0xFFB87600),
     onAccent = Color(0xFF09090B),
@@ -94,6 +99,7 @@ val MuxGridLightPalette = MuxGridPalette(
     emeraldOk = Color(0xFF2E7D4F),
     amberWarn = Color(0xFFC98600),
     progressFill = Color(0xFF52525B),
+    seekThumb = Color(0xFF18181B),
     textPrimary = Color(0xFF141417),
     textSecondary = Color(0xFF52525B),
     textMuted = Color(0xFF71717A),
@@ -119,6 +125,7 @@ object MuxGridColors {
     val HairlineBorder: Color @Composable @ReadOnlyComposable get() = LocalMuxGridColors.current.hairlineBorder
     val ScrimControlBorder: Color @Composable @ReadOnlyComposable get() = LocalMuxGridColors.current.scrimControlBorder
     val FocusBorder: Color @Composable @ReadOnlyComposable get() = LocalMuxGridColors.current.focusBorder
+    val OnFocusBorder: Color @Composable @ReadOnlyComposable get() = LocalMuxGridColors.current.onFocusBorder
     val Accent: Color @Composable @ReadOnlyComposable get() = LocalMuxGridColors.current.accent
     val AccentSoft: Color @Composable @ReadOnlyComposable get() = LocalMuxGridColors.current.accentSoft
     val OnAccent: Color @Composable @ReadOnlyComposable get() = LocalMuxGridColors.current.onAccent
@@ -127,6 +134,7 @@ object MuxGridColors {
     val EmeraldOk: Color @Composable @ReadOnlyComposable get() = LocalMuxGridColors.current.emeraldOk
     val AmberWarn: Color @Composable @ReadOnlyComposable get() = LocalMuxGridColors.current.amberWarn
     val ProgressFill: Color @Composable @ReadOnlyComposable get() = LocalMuxGridColors.current.progressFill
+    val SeekThumb: Color @Composable @ReadOnlyComposable get() = LocalMuxGridColors.current.seekThumb
     val TextPrimary: Color @Composable @ReadOnlyComposable get() = LocalMuxGridColors.current.textPrimary
     val TextSecondary: Color @Composable @ReadOnlyComposable get() = LocalMuxGridColors.current.textSecondary
     val TextMuted: Color @Composable @ReadOnlyComposable get() = LocalMuxGridColors.current.textMuted

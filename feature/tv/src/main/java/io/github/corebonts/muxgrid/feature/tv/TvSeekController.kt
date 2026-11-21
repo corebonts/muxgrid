@@ -1,5 +1,6 @@
 package io.github.corebonts.muxgrid.feature.tv
 
+import io.github.corebonts.muxgrid.core.model.PlaybackSeekDefaults
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import kotlin.math.abs
 
@@ -205,15 +206,15 @@ internal class TvSeekController {
 
     companion object {
         private val TAP_LADDER_MS = longArrayOf(
-            10_000L,   // 1 tap: 10s
-            30_000L,   // 2 taps: 30s
+            PlaybackSeekDefaults.SEEK_BACK_STEP_MS,    // 1 tap: 10s
+            PlaybackSeekDefaults.SEEK_FORWARD_STEP_MS, // 2 taps: 30s
             60_000L,   // 3 taps: 1m
             300_000L,  // 4 taps: 5m
             600_000L,  // 5 taps: 10m
         )
         private const val EXTRA_TAP_STEP_MS = 300_000L
-        const val MIN_HOLD_GEAR_MS = 10_000L
-        const val MAX_HOLD_GEAR_MS = 30_000L
+        const val MIN_HOLD_GEAR_MS = PlaybackSeekDefaults.SEEK_BACK_STEP_MS
+        const val MAX_HOLD_GEAR_MS = PlaybackSeekDefaults.SEEK_FORWARD_STEP_MS
         const val HOLD_TICK_INTERVAL_MS = 240L
         const val TAP_COMMIT_DELAY_MS = 650L
         const val TAP_COMMIT_AFTER_KEY_UP_MS = 500L

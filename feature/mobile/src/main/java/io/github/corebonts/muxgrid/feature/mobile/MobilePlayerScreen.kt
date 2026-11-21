@@ -80,9 +80,11 @@ import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridAlphas
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridCompactButton
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridDurations
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridSeekBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
@@ -90,8 +92,11 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.PlaybackInfoPanel
 import io.github.corebonts.muxgrid.core.designsystem.TimeshiftNoticeBanner
 import io.github.corebonts.muxgrid.core.designsystem.TrackAndPresetPanel
+import io.github.corebonts.muxgrid.core.designsystem.displayDetail
+import io.github.corebonts.muxgrid.core.designsystem.displayTitle
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationSec
 import io.github.corebonts.muxgrid.core.designsystem.rememberStableDurationSec
+import io.github.corebonts.muxgrid.core.designsystem.streamBadgeText
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
@@ -233,14 +238,14 @@ internal fun MobilePlayerScreen(
         if (hudVisible && !trackPanelOpen && !infoPanelOpen && !quickZapOpen && !isScrubbing && !isInPip &&
             playbackState.status == PlaybackStatus.PLAYING && !isAudioStage
         ) {
-            delay(3_500L)
+            delay(MuxGridDurations.MobileHudAutoHideMs)
             hudVisible = false
         }
     }
 
     LaunchedEffect(seekFeedback?.nonce) {
         if (seekFeedback != null) {
-            delay(900L)
+            delay(MuxGridDurations.SeekFeedbackMs)
             seekFeedback = null
             accumulatedSeekDelta = 0
         }
@@ -545,14 +550,7 @@ internal fun MobilePlayerScreen(
                             Spacer(Modifier.width(8.dp))
                         }
                         Column {
-                            val titleText = if (playbackState.isRecordingPlayback) {
-                                playbackState.programTitle ?: "Recording"
-                            } else {
-                                listOfNotNull(
-                                    playbackState.channelNumber?.takeIf { it != "0" },
-                                    playbackState.channelName ?: activeChannel?.name,
-                                ).joinToString(" · ")
-                            }
+                            val titleText = playbackState.displayTitle(fallbackChannelName = activeChannel?.name)
                             val subtitleText = if (playbackState.isRecordingPlayback) {
                                 playbackState.channelName ?: activeChannel?.name
                             } else {
@@ -707,7 +705,7 @@ internal fun MobilePlayerScreen(
                         val sliderFraction = (displayPosMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
                         val animatedFraction by animateFloatAsState(
                             targetValue = sliderFraction,
-                            animationSpec = tween(durationMillis = 220, easing = LinearEasing),
+                            animationSpec = tween(durationMillis = MuxGridDurations.Progress, easing = LinearEasing),
                             label = "recSliderProgress",
                         )
                         val stablePosSec = rememberStableDurationSec(displayPosMs, playbackState.dvrEntryId)
@@ -727,11 +725,16 @@ internal fun MobilePlayerScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                PlaybackInfoHudButton(
+                                CompactHudButton(
+                                    icon = MuxGridIcons.Info,
+                                    label = "Playback info",
                                     showLabel = !isPortrait,
                                     onClick = { infoPanelOpen = !infoPanelOpen },
                                 )
-                                OptionsHudButton(
+                                CompactHudButton(
+                                    icon = MuxGridIcons.Tracks,
+                                    label = "Options",
+                                    contentDescription = "Display Options",
                                     showLabel = !isPortrait,
                                     onClick = { trackPanelOpen = !trackPanelOpen },
                                 )
@@ -761,26 +764,23 @@ internal fun MobilePlayerScreen(
                                     style = MuxGridType.TabularSmall,
                                     color = Color.White,
                                 )
-                                if (playbackState.videoWidth > 0 && !isAudioStage) {
+                                val recStreamStatsText = if (!isAudioStage) playbackState.streamBadgeText() else null
+                                if (recStreamStatsText != null) {
                                     Text(
-                                        text = "${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}",
+                                        text = recStreamStatsText,
                                         style = MuxGridType.TabularSmall,
-                                        color = Color.White.copy(alpha = 0.78f),
+                                        color = Color.White.copy(alpha = MuxGridAlphas.SecondaryText),
                                     )
                                 }
                                 Text(
                                     text = formatDurationSec(stableDurSec),
                                     style = MuxGridType.TabularSmall,
-                                    color = Color.White.copy(alpha = 0.85f),
+                                    color = Color.White.copy(alpha = MuxGridAlphas.BodyText),
                                 )
                             }
                         }
                     } else {
-                        val streamStatsText = if (playbackState.videoWidth > 0 && !isAudioStage) {
-                            "${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"}"
-                        } else {
-                            null
-                        }
+                        val streamStatsText = if (!isAudioStage) playbackState.streamBadgeText() else null
 
                         // Live status / Back to Live button + Channels drawer button
                         Row(
@@ -824,11 +824,16 @@ internal fun MobilePlayerScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                PlaybackInfoHudButton(
+                                CompactHudButton(
+                                    icon = MuxGridIcons.Info,
+                                    label = "Playback info",
                                     showLabel = !isPortrait,
                                     onClick = { infoPanelOpen = !infoPanelOpen },
                                 )
-                                OptionsHudButton(
+                                CompactHudButton(
+                                    icon = MuxGridIcons.Tracks,
+                                    label = "Options",
+                                    contentDescription = "Display Options",
                                     showLabel = !isPortrait,
                                     onClick = { trackPanelOpen = !trackPanelOpen },
                                 )
@@ -838,7 +843,7 @@ internal fun MobilePlayerScreen(
                                         leadingIcon = MuxGridIcons.ChannelsList,
                                         containerColor = MuxGridColors.ScrimSurface,
                                         contentColor = Color.White,
-                                        borderColor = Color.White.copy(alpha = 0.22f),
+                                        borderColor = Color.White.copy(alpha = MuxGridAlphas.ScrimBorder),
                                         onClick = { quickZapOpen = true },
                                     )
                                 }
@@ -857,7 +862,7 @@ internal fun MobilePlayerScreen(
                             val sliderFraction = ((displayPosMs - bufStart).toFloat() / bufWindow.toFloat()).coerceIn(0f, 1f)
                             val animatedFraction by animateFloatAsState(
                                 targetValue = sliderFraction,
-                                animationSpec = tween(durationMillis = 220, easing = LinearEasing),
+                                animationSpec = tween(durationMillis = MuxGridDurations.Progress, easing = LinearEasing),
                                 label = "liveSliderProgress",
                             )
                             val displayOffsetMs = (bufEnd - displayPosMs).coerceAtLeast(0L)
@@ -1130,7 +1135,7 @@ internal fun MobilePlayerScreen(
                         .background(MuxGridColors.CardSurfaceElevated)
                         .border(
                             width = MuxGridBorders.Hairline,
-                            color = MuxGridColors.CoralLive.copy(alpha = 0.55f),
+                            color = MuxGridColors.CoralLive.copy(alpha = MuxGridAlphas.BorderEmphasis),
                             shape = MuxGridShapes.Dialog,
                         )
                         .clickable(
@@ -1142,7 +1147,7 @@ internal fun MobilePlayerScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
-                        text = if (err is PlaybackError.TunerBusy) "Tuner Busy" else "Playback Error",
+                        text = err.displayTitle(),
                         style = MuxGridType.Title,
                         fontSize = 18.sp,
                         color = MuxGridColors.TextPrimary,
@@ -1153,9 +1158,9 @@ internal fun MobilePlayerScreen(
                         fontSize = 14.sp,
                         color = MuxGridColors.TextSecondary,
                     )
-                    if (err is PlaybackError.TunerBusy) {
+                    err.displayDetail()?.let { detail ->
                         Text(
-                            text = "The single tuner is currently busy recording on another mux.",
+                            text = detail,
                             style = MuxGridType.TabularSmall,
                             color = MuxGridColors.TextMuted,
                         )
@@ -1201,17 +1206,21 @@ private fun TopHudIconButton(
 }
 
 @Composable
-private fun PlaybackInfoHudButton(
+private fun CompactHudButton(
+    icon: ImageVector,
+    label: String,
     showLabel: Boolean,
     onClick: () -> Unit,
+    contentDescription: String = label,
 ) {
+    val borderColor = Color.White.copy(alpha = MuxGridAlphas.ScrimBorder)
     if (showLabel) {
         MuxGridCompactButton(
-            text = "Playback info",
-            leadingIcon = MuxGridIcons.Info,
+            text = label,
+            leadingIcon = icon,
             containerColor = MuxGridColors.ScrimSurface,
             contentColor = Color.White,
-            borderColor = Color.White.copy(alpha = 0.22f),
+            borderColor = borderColor,
             onClick = onClick,
         )
     } else {
@@ -1220,47 +1229,13 @@ private fun PlaybackInfoHudButton(
                 .size(32.dp)
                 .clip(MuxGridShapes.Sm)
                 .background(MuxGridColors.ScrimSurface)
-                .border(MuxGridBorders.Hairline, Color.White.copy(alpha = 0.22f), MuxGridShapes.Sm)
+                .border(MuxGridBorders.Hairline, borderColor, MuxGridShapes.Sm)
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = MuxGridIcons.Info,
-                contentDescription = "Playback info",
-                tint = Color.White,
-                modifier = Modifier.size(16.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun OptionsHudButton(
-    showLabel: Boolean,
-    onClick: () -> Unit,
-) {
-    if (showLabel) {
-        MuxGridCompactButton(
-            text = "Options",
-            leadingIcon = MuxGridIcons.Tracks,
-            containerColor = MuxGridColors.ScrimSurface,
-            contentColor = Color.White,
-            borderColor = Color.White.copy(alpha = 0.22f),
-            onClick = onClick,
-        )
-    } else {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(MuxGridShapes.Sm)
-                .background(MuxGridColors.ScrimSurface)
-                .border(MuxGridBorders.Hairline, Color.White.copy(alpha = 0.22f), MuxGridShapes.Sm)
-                .clickable(onClick = onClick),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = MuxGridIcons.Tracks,
-                contentDescription = "Display Options",
+                imageVector = icon,
+                contentDescription = contentDescription,
                 tint = Color.White,
                 modifier = Modifier.size(16.dp),
             )

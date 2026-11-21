@@ -99,6 +99,16 @@ data class DvrEntry(
     val hasResumePosition: Boolean
         get() = playCount == 0 && playPositionSec > MIN_RESUME_POSITION_SEC
 
+    val effectiveStartSec: Long
+        get() = if (hasResumePosition) playPositionSec else 0L
+
+    fun recordingProgressFraction(nowEpochSec: Long): Float {
+        val dur = durationSec
+        if (dur <= 0L) return 0f
+        val elapsed = (nowEpochSec - startEpochSec).coerceIn(0L, dur)
+        return elapsed.toFloat() / dur.toFloat()
+    }
+
     fun resumeProgressFraction(): Float {
         if (playCount > 0) return 1f
         val dur = durationSec

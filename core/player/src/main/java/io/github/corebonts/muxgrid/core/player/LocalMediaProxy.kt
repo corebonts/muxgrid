@@ -180,7 +180,7 @@ class LocalMediaProxy(
         var liveHandle: ActiveStreamHandle? = null
         var dvrHandle: ActiveStreamHandle? = null
         try {
-            clientSocket.soTimeout = 15_000
+            clientSocket.soTimeout = SOCKET_READ_TIMEOUT_MS
             val clientIn = BufferedInputStream(clientSocket.getInputStream(), CLIENT_HEADER_BUFFER_BYTES)
             val requestLine = readHeaderLine(clientIn) ?: return
             var rangeHeader: String? = null
@@ -652,7 +652,7 @@ class LocalMediaProxy(
         handle: ActiveStreamHandle,
     ): Boolean {
         if (handle.cancelled.get() || clientSocket.isClosed) return false
-        val prevTimeout = runCatching { clientSocket.soTimeout }.getOrDefault(15_000)
+        val prevTimeout = runCatching { clientSocket.soTimeout }.getOrDefault(SOCKET_READ_TIMEOUT_MS)
         return try {
             clientSocket.soTimeout = pollMs.toInt().coerceAtLeast(10)
             clientIn.read()
@@ -694,9 +694,9 @@ class LocalMediaProxy(
         }
         var activeSock: Socket = tcpSock
         return try {
-            tcpSock.soTimeout = 15_000
+            tcpSock.soTimeout = SOCKET_READ_TIMEOUT_MS
             val connectHost = endpoint.host.removePrefix("[").removeSuffix("]")
-            tcpSock.connect(InetSocketAddress(connectHost, endpoint.port), 5_000)
+            tcpSock.connect(InetSocketAddress(connectHost, endpoint.port), UPSTREAM_CONNECT_TIMEOUT_MS)
 
             if (endpoint.isHttps) {
                 val sslSock = sslSocketFactoryProvider().createSocket(
@@ -709,7 +709,7 @@ class LocalMediaProxy(
                 sslSock.sslParameters = sslSock.sslParameters.apply {
                     endpointIdentificationAlgorithm = "HTTPS"
                 }
-                sslSock.soTimeout = 15_000
+                sslSock.soTimeout = SOCKET_READ_TIMEOUT_MS
                 handle.upstreamSocket.set(sslSock)
                 if (handle.cancelled.get()) {
                     handle.upstreamSocket.compareAndSet(sslSock, null)
@@ -736,7 +736,7 @@ class LocalMediaProxy(
                 flush()
             }
 
-            val upstreamIn = BufferedInputStream(activeSock.getInputStream(), 32_768)
+            val upstreamIn = BufferedInputStream(activeSock.getInputStream(), STREAM_BUFFER_BYTES)
             val statusLine = readHeaderLine(upstreamIn)
             if (statusLine == null) {
                 runCatching { activeSock.close() }
@@ -788,7 +788,7 @@ class LocalMediaProxy(
         output: OutputStream,
         handle: ActiveStreamHandle,
     ): Long {
-        val buffer = ByteArray(32_768)
+        val buffer = ByteArray(STREAM_BUFFER_BYTES)
         var totalCopied = 0L
         while (!handle.cancelled.get()) {
             val sizeLine = readHeaderLine(input) ?: break
@@ -846,7 +846,7 @@ class LocalMediaProxy(
         handle: ActiveStreamHandle,
         maxBytes: Long?,
     ): Long {
-        val buffer = ByteArray(32_768)
+        val buffer = ByteArray(STREAM_BUFFER_BYTES)
         var totalCopied = 0L
         while (!handle.cancelled.get()) {
             val toRead = if (maxBytes != null) {
@@ -969,7 +969,10 @@ class LocalMediaProxy(
         const val DEFAULT_GROWING_POLL_INTERVAL_MS: Long = 500L
         internal const val MAX_HEADER_LINE_BYTES: Int = 8_192
         internal const val MAX_HEADER_COUNT: Int = 64
+        private const val SOCKET_READ_TIMEOUT_MS: Int = 15_000
+        private const val UPSTREAM_CONNECT_TIMEOUT_MS: Int = 5_000
         private const val CLIENT_HEADER_BUFFER_BYTES: Int = 8_192
+        private const val STREAM_BUFFER_BYTES: Int = 32_768
         private const val GROWING_READ_CHUNK_BYTES: Int = 65_536
         private val CRLF_BYTES = "\r\n".toByteArray(StandardCharsets.US_ASCII)
         private val FINAL_CHUNK_BYTES = "0\r\n\r\n".toByteArray(StandardCharsets.US_ASCII)

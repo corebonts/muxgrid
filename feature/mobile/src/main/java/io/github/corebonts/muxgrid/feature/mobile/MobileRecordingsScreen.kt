@@ -206,8 +206,7 @@ internal fun MobileRecordingsScreen(
                                 nowEpochSec = nowEpochSec,
                                 imageLoader = imageLoader,
                                 onWatchFromStart = {
-                                    val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
-                                    onPlayRecording(entry, ch, startSec)
+                                    onPlayRecording(entry, ch, entry.effectiveStartSec)
                                 },
                                 onStop = {
                                     pendingConfirm = DvrConfirmKind.STOP_AND_SAVE to entry
@@ -233,8 +232,7 @@ internal fun MobileRecordingsScreen(
                                     nowEpochSec = nowEpochSec,
                                     imageLoader = imageLoader,
                                     onResumeOrPlay = {
-                                        val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
-                                        onPlayRecording(entry, channelById[entry.channelId], startSec)
+                                        onPlayRecording(entry, channelById[entry.channelId], entry.effectiveStartSec)
                                     },
                                     onOpenMenu = {
                                         sheetError = null
@@ -349,8 +347,7 @@ internal fun MobileRecordingsScreen(
                     enabled = !sheetBusy,
                     onClick = {
                         actionEntryId = null
-                        val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
-                        onPlayRecording(entry, ch, startSec)
+                        onPlayRecording(entry, ch, entry.effectiveStartSec)
                     },
                     shape = MuxGridShapes.Sm,
                     colors = ButtonDefaults.buttonColors(
@@ -412,8 +409,7 @@ internal fun MobileRecordingsScreen(
                         enabled = !sheetBusy,
                         onClick = {
                             actionEntryId = null
-                            val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
-                            onPlayRecording(entry, ch, startSec)
+                            onPlayRecording(entry, ch, entry.effectiveStartSec)
                         },
                         shape = MuxGridShapes.Sm,
                         colors = ButtonDefaults.buttonColors(
@@ -508,13 +504,7 @@ internal fun MobileRecordingsScreen(
                         result
                             .onSuccess { actionEntryId = null }
                             .onFailure { err ->
-                                val fallback = when (kind) {
-                                    DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop recording"
-                                    DvrConfirmKind.ABORT_RECORDING -> "Failed to abort recording"
-                                    DvrConfirmKind.CANCEL_TIMER -> "Failed to cancel timer"
-                                    DvrConfirmKind.DELETE_RECORDING -> "Failed to delete recording"
-                                }
-                                val msg = err.message ?: fallback
+                                val msg = err.message ?: spec.failureFallbackMessage
                                 if (actionEntryId != null) {
                                     sheetError = msg
                                 } else {
@@ -552,7 +542,7 @@ private fun RecordingNowCard(
     val shape = MuxGridShapes.Card
     val dur = entry.durationSec.coerceAtLeast(1L)
     val elapsed = (nowEpochSec - entry.startEpochSec).coerceIn(0L, dur)
-    val progress = elapsed.toFloat() / dur.toFloat()
+    val progress = entry.recordingProgressFraction(nowEpochSec)
 
     Row(
         modifier = Modifier
@@ -817,8 +807,7 @@ private fun SeriesGroupRow(
                         imageLoader = imageLoader,
                         startPadding = 28.dp,
                         onResumeOrPlay = {
-                            val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
-                            onPlayEntry(entry, startSec)
+                            onPlayEntry(entry, entry.effectiveStartSec)
                         },
                         onOpenMenu = { onOpenMenu(entry) },
                     )

@@ -1,9 +1,13 @@
 package io.github.corebonts.muxgrid.core.designsystem
 
 import io.github.corebonts.muxgrid.core.model.Channel
+import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.EpgEvent
+import io.github.corebonts.muxgrid.core.model.PlaybackError
+import io.github.corebonts.muxgrid.core.model.PlaybackState
+import io.github.corebonts.muxgrid.core.model.ServerProfile
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -301,12 +305,73 @@ fun formatDurationMinutes(startEpochSec: Long, stopEpochSec: Long): String {
     }
 }
 
-fun formatFileSize(bytes: Long): String {
-    if (bytes <= 0L) return ""
-    val mb = bytes / (1024.0 * 1024.0)
-    return if (mb >= 1024.0) {
-        String.format(Locale.US, "%.1f GB", mb / 1024.0)
-    } else {
-        String.format(Locale.US, "%.0f MB", mb.coerceAtLeast(1.0))
+fun formatByteCount(bytes: Long): String {
+    val clamped = bytes.coerceAtLeast(0L)
+    return when {
+        clamped < 1024L -> "$clamped B"
+        clamped < 1024L * 1024L -> String.format(Locale.US, "%.0f KB", clamped / 1024.0)
+        clamped < 1024L * 1024L * 1024L -> String.format(Locale.US, "%.1f MB", clamped / (1024.0 * 1024.0))
+        else -> String.format(Locale.US, "%.1f GB", clamped / (1024.0 * 1024.0 * 1024.0))
     }
+}
+
+fun formatFileSize(bytes: Long): String =
+    if (bytes <= 0L) "" else formatByteCount(bytes)
+
+const val HALF_HOUR_SEC = 1800L
+
+fun floorToHalfHour(epochSec: Long): Long = (epochSec / HALF_HOUR_SEC) * HALF_HOUR_SEC
+
+fun PlaybackState.displayTitle(
+    fallbackChannelName: String? = null,
+    recordingFallback: String = "Recording",
+    liveFallback: String = "",
+): String = if (isRecordingPlayback) {
+    programTitle ?: recordingFallback
+} else {
+    listOfNotNull(
+        channelNumber?.takeIf { it.isNotBlank() && it != "0" },
+        channelName ?: fallbackChannelName,
+    ).joinToString(" · ").ifBlank { liveFallback }
+}
+
+fun PlaybackState.streamBadgeText(includeDeinterlace: Boolean = false): String? {
+    if (videoWidth <= 0) return null
+    val base = "${videoWidth}×${videoHeight} · ${hwdecCurrent ?: "sw"}"
+    return if (includeDeinterlace) "$base · deint=$deinterlaceActive" else base
+}
+
+fun PlaybackError.displayTitle(): String = when (this) {
+    is PlaybackError.TunerBusy -> "Tuner Busy"
+    is PlaybackError.StreamOpenFailed,
+    is PlaybackError.PlaybackFailed,
+    -> "Playback Error"
+}
+
+fun PlaybackError.displayDetail(): String? = when (this) {
+    is PlaybackError.TunerBusy -> "The single tuner is currently busy recording on another mux."
+    is PlaybackError.StreamOpenFailed,
+    is PlaybackError.PlaybackFailed,
+    -> null
+}
+
+fun serverHeadline(
+    profile: ServerProfile,
+    connectionState: ConnectionState,
+): String = if (connectionState is ConnectionState.Connected) {
+    "${connectionState.serverName} · ${profile.host}:${profile.htspPort}"
+} else {
+    "${profile.host}:${profile.htspPort}"
+}
+
+fun connectionStatusText(
+    profile: ServerProfile,
+    connectionState: ConnectionState,
+): String = when (connectionState) {
+    is ConnectionState.Connected ->
+        "Connected · ${connectionState.serverVersion} · HTSP v${connectionState.htspVersion}"
+    ConnectionState.Connecting -> "Connecting…"
+    is ConnectionState.Syncing -> "Syncing…"
+    is ConnectionState.Error -> connectionState.message
+    ConnectionState.Disconnected -> "Disconnected · HTTP ${profile.httpPort}"
 }

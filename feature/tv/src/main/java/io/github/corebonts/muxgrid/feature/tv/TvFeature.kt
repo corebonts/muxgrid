@@ -95,9 +95,11 @@ import io.github.corebonts.muxgrid.core.data.TvheadendRepository
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.ConnectionStatusDot
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridAlphas
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridDurations
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
@@ -105,13 +107,18 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
 import io.github.corebonts.muxgrid.core.designsystem.collectDebugEnvironmentSnapshot
+import io.github.corebonts.muxgrid.core.designsystem.connectionStatusColor
 import io.github.corebonts.muxgrid.core.designsystem.connectionStatusDotColor
-import io.github.corebonts.muxgrid.core.designsystem.copyDebugInfoToClipboard
+import io.github.corebonts.muxgrid.core.designsystem.connectionStatusText
+import io.github.corebonts.muxgrid.core.designsystem.copyTextToClipboard
 import io.github.corebonts.muxgrid.core.designsystem.filterChannels
+import io.github.corebonts.muxgrid.core.designsystem.floorToHalfHour
 import io.github.corebonts.muxgrid.core.designsystem.formatDebugInfoReport
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
+import io.github.corebonts.muxgrid.core.designsystem.icon
 import io.github.corebonts.muxgrid.core.designsystem.label
 import io.github.corebonts.muxgrid.core.designsystem.rememberNowEpochSec
+import io.github.corebonts.muxgrid.core.designsystem.serverHeadline
 import io.github.corebonts.muxgrid.core.model.AppBuildInfo
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ThemeMode
@@ -159,12 +166,15 @@ internal class TvFocusMemory {
     var settingsTarget: TvSettingsFocusTarget = TvSettingsFocusTarget.PRIMARY
 }
 
+private val TV_RAIL_COLLAPSED_WIDTH = 68.dp
+private val TV_RAIL_EXPANDED_WIDTH = 186.dp
+
 @Composable
 internal fun tvPrimaryButtonColors() = ButtonDefaults.colors(
     containerColor = MuxGridColors.Accent,
     contentColor = MuxGridColors.OnAccent,
     focusedContainerColor = MuxGridColors.FocusBorder,
-    focusedContentColor = MuxGridColors.CanvasTv,
+    focusedContentColor = MuxGridColors.OnFocusBorder,
 )
 
 @Composable
@@ -172,7 +182,7 @@ internal fun tvSecondaryButtonColors() = ButtonDefaults.colors(
     containerColor = MuxGridColors.CardSurfaceElevated,
     contentColor = MuxGridColors.TextPrimary,
     focusedContainerColor = MuxGridColors.FocusBorder,
-    focusedContentColor = MuxGridColors.CanvasTv,
+    focusedContentColor = MuxGridColors.OnFocusBorder,
 )
 
 @Composable
@@ -180,7 +190,7 @@ internal fun tvDialogSecondaryButtonColors() = ButtonDefaults.colors(
     containerColor = MuxGridColors.CardSurface,
     contentColor = MuxGridColors.TextPrimary,
     focusedContainerColor = MuxGridColors.FocusBorder,
-    focusedContentColor = MuxGridColors.CanvasTv,
+    focusedContentColor = MuxGridColors.OnFocusBorder,
 )
 
 @Composable
@@ -243,7 +253,7 @@ internal fun TvConfirmDialog(
         onDismissRequest = { if (enabled) onDismiss() },
         minWidth = 380.dp,
         maxWidth = 520.dp,
-        borderColor = if (isDestructive) MuxGridColors.CoralLive.copy(alpha = 0.45f) else MuxGridColors.HairlineBorder,
+        borderColor = if (isDestructive) MuxGridColors.CoralLive.copy(alpha = MuxGridAlphas.BorderSubtle) else MuxGridColors.HairlineBorder,
     ) {
         Text(
             text = title,
@@ -356,7 +366,7 @@ private fun TvContent(
     var hasUserAdjustedGuideWindow by remember { mutableStateOf(false) }
     LaunchedEffect(activeTab, offsetMs) {
         if (activeTab == MainTab.GUIDE && !hasUserAdjustedGuideWindow) {
-            guideWindowStartEpochSec = (((System.currentTimeMillis() + offsetMs) / 1000L) / 1800L) * 1800L
+            guideWindowStartEpochSec = floorToHalfHour((System.currentTimeMillis() + offsetMs) / 1000L)
         }
     }
     val recordingsListState = rememberLazyListState()
@@ -443,7 +453,7 @@ private fun TvContent(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(start = 68.dp + 20.dp, end = 24.dp, top = 16.dp, bottom = 12.dp)
+                        .padding(start = TV_RAIL_COLLAPSED_WIDTH + 20.dp, end = 24.dp, top = 16.dp, bottom = 12.dp)
                         .focusGroup()
                         .focusRestorer(),
                 ) {
@@ -455,12 +465,7 @@ private fun TvContent(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = when (activeTab) {
-                                MainTab.LIVE -> "Live"
-                                MainTab.GUIDE -> "Guide"
-                                MainTab.RECORDINGS -> "Recordings"
-                                MainTab.SETTINGS -> "Settings"
-                            },
+                            text = activeTab.label(),
                             style = MuxGridType.ScreenTitle,
                         )
                         Row(
@@ -468,37 +473,19 @@ private fun TvContent(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             if (activeTab == MainTab.GUIDE) {
-                                Surface(
+                                TvIconButton(
                                     onClick = { isGuideSearchOpen = !isGuideSearchOpen },
-                                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
-                                    colors = ClickableSurfaceDefaults.colors(
-                                        containerColor = if (isGuideSearchOpen) MuxGridColors.CardSurfaceElevated else Color.Transparent,
-                                        contentColor = if (isGuideSearchOpen) MuxGridColors.AccentSoft else MuxGridColors.TextSecondary,
-                                        focusedContainerColor = MuxGridColors.FocusBorder,
-                                        focusedContentColor = MuxGridColors.CanvasTv,
-                                    ),
-                                    border = ClickableSurfaceDefaults.border(
-                                        border = Border.None,
-                                        focusedBorder = Border(
-                                            border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                                            shape = MuxGridShapes.Sm,
-                                        ),
-                                    ),
-                                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+                                    containerColor = if (isGuideSearchOpen) MuxGridColors.CardSurfaceElevated else Color.Transparent,
+                                    contentColor = if (isGuideSearchOpen) MuxGridColors.AccentSoft else MuxGridColors.TextSecondary,
                                 ) {
-                                    Box(
-                                        modifier = Modifier.size(38.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Icon(
-                                            imageVector = if (isGuideSearchOpen) MuxGridIcons.Close else MuxGridIcons.Search,
-                                            contentDescription = if (isGuideSearchOpen) "Close search" else "Search programs",
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
+                                    Icon(
+                                        imageVector = if (isGuideSearchOpen) MuxGridIcons.Close else MuxGridIcons.Search,
+                                        contentDescription = if (isGuideSearchOpen) "Close search" else "Search programs",
+                                        modifier = Modifier.size(18.dp),
+                                    )
                                 }
                             }
-                            Surface(
+                            TvIconButton(
                                 onClick = {
                                     if (!isRefreshing) {
                                         scope.launch {
@@ -511,39 +498,19 @@ private fun TvContent(
                                         }
                                     }
                                 },
-                                shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
-                                colors = ClickableSurfaceDefaults.colors(
-                                    containerColor = Color.Transparent,
-                                    contentColor = MuxGridColors.TextSecondary,
-                                    focusedContainerColor = MuxGridColors.FocusBorder,
-                                    focusedContentColor = MuxGridColors.CanvasTv,
-                                ),
-                                border = ClickableSurfaceDefaults.border(
-                                    border = Border.None,
-                                    focusedBorder = Border(
-                                        border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                                        shape = MuxGridShapes.Sm,
-                                    ),
-                                ),
-                                scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
                             ) {
-                                Box(
-                                    modifier = Modifier.size(38.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    if (isRefreshing) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(18.dp),
-                                            strokeWidth = 2.dp,
-                                            color = MuxGridColors.AccentSoft,
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = MuxGridIcons.Refresh,
-                                            contentDescription = "Refresh",
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
+                                if (isRefreshing) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MuxGridColors.AccentSoft,
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = MuxGridIcons.Refresh,
+                                        contentDescription = "Refresh",
+                                        modifier = Modifier.size(18.dp),
+                                    )
                                 }
                             }
                         }
@@ -594,7 +561,7 @@ private fun TvContent(
                                     nowEpochSec = nowEpochSec,
                                     imageLoader = repository.imageLoader,
                                     listState = guideListState,
-                                    windowStartEpochSec = guideWindowStartEpochSec.takeIf { it > 0L } ?: ((nowEpochSec / 1800L) * 1800L),
+                                    windowStartEpochSec = guideWindowStartEpochSec.takeIf { it > 0L } ?: floorToHalfHour(nowEpochSec),
                                     onWindowStartChange = {
                                         hasUserAdjustedGuideWindow = true
                                         guideWindowStartEpochSec = it
@@ -787,8 +754,8 @@ private fun TvNavigationRail(
     modifier: Modifier = Modifier,
 ) {
     val railWidth by animateDpAsState(
-        targetValue = if (expanded) 186.dp else 68.dp,
-        animationSpec = tween(durationMillis = 140),
+        targetValue = if (expanded) TV_RAIL_EXPANDED_WIDTH else TV_RAIL_COLLAPSED_WIDTH,
+        animationSpec = tween(durationMillis = MuxGridDurations.RailExpand),
         label = "tvRailWidth",
     )
     val activeFocusRequester = remember { FocusRequester() }
@@ -810,16 +777,12 @@ private fun TvNavigationRail(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                listOf(
-                    Triple(MainTab.LIVE, MuxGridIcons.Live to MuxGridIcons.LiveFilled, "Live"),
-                    Triple(MainTab.GUIDE, MuxGridIcons.Guide to MuxGridIcons.GuideFilled, "Guide"),
-                    Triple(MainTab.RECORDINGS, MuxGridIcons.Recordings to MuxGridIcons.RecordingsFilled, "Recordings"),
-                ).forEach { (tab, icons, label) ->
+                listOf(MainTab.LIVE, MainTab.GUIDE, MainTab.RECORDINGS).forEach { tab ->
                     val selected = tab == activeTab
                     val itemModifier = if (selected) Modifier.focusRequester(activeFocusRequester) else Modifier
                     TvRailItem(
-                        icon = if (selected) icons.second else icons.first,
-                        label = label,
+                        icon = tab.icon(selected),
+                        label = tab.label(),
                         expanded = expanded,
                         selected = selected,
                         onClick = { onSelectTab(tab) },
@@ -830,8 +793,8 @@ private fun TvNavigationRail(
 
             val settingsSelected = activeTab == MainTab.SETTINGS
             TvRailItem(
-                icon = if (settingsSelected) MuxGridIcons.SettingsFilled else MuxGridIcons.Settings,
-                label = "Settings",
+                icon = MainTab.SETTINGS.icon(settingsSelected),
+                label = MainTab.SETTINGS.label(),
                 expanded = expanded,
                 selected = settingsSelected,
                 statusDotColor = settingsStatusDotColor,
@@ -866,7 +829,7 @@ private fun TvRailItem(
             containerColor = if (selected) MuxGridColors.CardSurfaceElevated else Color.Transparent,
             contentColor = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextMuted,
             focusedContainerColor = MuxGridColors.FocusBorder,
-            focusedContentColor = MuxGridColors.CanvasTv,
+            focusedContentColor = MuxGridColors.OnFocusBorder,
         ),
         border = ClickableSurfaceDefaults.border(
             border = Border.None,
@@ -981,9 +944,9 @@ private fun TvLiveChannelsTab(
         selectedContainerColor = MuxGridColors.Accent,
         selectedContentColor = MuxGridColors.OnAccent,
         focusedContainerColor = MuxGridColors.FocusBorder,
-        focusedContentColor = MuxGridColors.CanvasTv,
+        focusedContentColor = MuxGridColors.OnFocusBorder,
         focusedSelectedContainerColor = MuxGridColors.FocusBorder,
-        focusedSelectedContentColor = MuxGridColors.CanvasTv,
+        focusedSelectedContentColor = MuxGridColors.OnFocusBorder,
     )
     val chipBorder = FilterChipDefaults.border(
         border = Border.None,
@@ -1002,12 +965,7 @@ private fun TvLiveChannelsTab(
         ) {
             filters.forEachIndexed { idx, filter ->
                 val selected = filter == activeFilter
-                val filterIcon = when (filter) {
-                    LiveFilter.Tv -> MuxGridIcons.Tv
-                    LiveFilter.Radio -> MuxGridIcons.Radio
-                    LiveFilter.Favorites -> MuxGridIcons.StarFilled
-                    else -> null
-                }
+                val filterIcon = filter.icon()
                 val isFallbackFilterTarget = selected || (idx == 0 && filters.none { it == activeFilter })
                 FilterChip(
                     selected = selected,
@@ -1306,7 +1264,7 @@ private fun TvSettingsTab(
                 .background(MuxGridColors.CardSurface)
                 .border(
                     width = if (isServerError) MuxGridBorders.Hairline else MuxGridBorders.Divider,
-                    color = if (isServerError) MuxGridColors.CoralLive.copy(alpha = 0.45f) else MuxGridColors.HairlineBorder,
+                    color = if (isServerError) MuxGridColors.CoralLive.copy(alpha = MuxGridAlphas.BorderSubtle) else MuxGridColors.HairlineBorder,
                     shape = MuxGridShapes.Card,
                 )
                 .padding(20.dp),
@@ -1327,31 +1285,17 @@ private fun TvSettingsTab(
                         .padding(end = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    val serverHeadline = if (connectionState is ConnectionState.Connected) {
-                        "${connectionState.serverName} · ${profile.host}:${profile.htspPort}"
-                    } else {
-                        "${profile.host}:${profile.htspPort}"
-                    }
                     Text(
-                        text = serverHeadline,
+                        text = serverHeadline(profile, connectionState),
                         style = MuxGridType.TabularNumber,
                         fontSize = 15.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    val (statusText, statusColor) = when (connectionState) {
-                        is ConnectionState.Connected -> {
-                            "Connected · ${connectionState.serverVersion} · HTSP v${connectionState.htspVersion}" to MuxGridColors.EmeraldOk
-                        }
-                        ConnectionState.Connecting -> "Connecting…" to MuxGridColors.AmberWarn
-                        is ConnectionState.Syncing -> "Syncing…" to MuxGridColors.AmberWarn
-                        is ConnectionState.Error -> connectionState.message to MuxGridColors.CoralLive
-                        ConnectionState.Disconnected -> "Disconnected · HTTP ${profile.httpPort}" to MuxGridColors.TextMuted
-                    }
                     Text(
-                        text = statusText,
+                        text = connectionStatusText(profile, connectionState),
                         style = MuxGridType.TabularSmall,
-                        color = statusColor,
+                        color = connectionStatusColor(connectionState),
                         maxLines = if (isServerError) 3 else 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -1361,66 +1305,32 @@ private fun TvSettingsTab(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (canRetryConnect) {
-                        Surface(
+                        TvIconButton(
                             onClick = onRetryConnect,
                             modifier = Modifier.focusRequester(reconnectFocusRequester),
-                            shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
-                            colors = ClickableSurfaceDefaults.colors(
-                                containerColor = MuxGridColors.CardSurfaceElevated,
-                                contentColor = MuxGridColors.AccentSoft,
-                                focusedContainerColor = MuxGridColors.FocusBorder,
-                                focusedContentColor = MuxGridColors.CanvasTv,
-                            ),
-                            border = ClickableSurfaceDefaults.border(
-                                border = Border.None,
-                                focusedBorder = Border(
-                                    border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                                    shape = MuxGridShapes.Sm,
-                                ),
-                            ),
-                            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
-                        ) {
-                            Box(
-                                modifier = Modifier.size(44.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    imageVector = MuxGridIcons.Refresh,
-                                    contentDescription = "Reconnect",
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-                        }
-                    }
-                    Surface(
-                        onClick = onOpenServerSetup,
-                        modifier = Modifier.focusRequester(editServerFocusRequester),
-                        shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
-                        colors = ClickableSurfaceDefaults.colors(
+                            size = 44.dp,
                             containerColor = MuxGridColors.CardSurfaceElevated,
-                            contentColor = MuxGridColors.TextPrimary,
-                            focusedContainerColor = MuxGridColors.FocusBorder,
-                            focusedContentColor = MuxGridColors.CanvasTv,
-                        ),
-                        border = ClickableSurfaceDefaults.border(
-                            border = Border.None,
-                            focusedBorder = Border(
-                                border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                                shape = MuxGridShapes.Sm,
-                            ),
-                        ),
-                        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
-                    ) {
-                        Box(
-                            modifier = Modifier.size(44.dp),
-                            contentAlignment = Alignment.Center,
+                            contentColor = MuxGridColors.AccentSoft,
                         ) {
                             Icon(
-                                imageVector = MuxGridIcons.Edit,
-                                contentDescription = "Edit Server",
+                                imageVector = MuxGridIcons.Refresh,
+                                contentDescription = "Reconnect",
                                 modifier = Modifier.size(20.dp),
                             )
                         }
+                    }
+                    TvIconButton(
+                        onClick = onOpenServerSetup,
+                        modifier = Modifier.focusRequester(editServerFocusRequester),
+                        size = 44.dp,
+                        containerColor = MuxGridColors.CardSurfaceElevated,
+                        contentColor = MuxGridColors.TextPrimary,
+                    ) {
+                        Icon(
+                            imageVector = MuxGridIcons.Edit,
+                            contentDescription = "Edit Server",
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
                 }
             }
@@ -1617,7 +1527,10 @@ private fun TvSettingsTab(
 
             MuxGridDivider()
 
-            Surface(
+            TvSettingsActionRow(
+                title = "GitHub",
+                subtitle = appInfo.githubDisplayUrl,
+                contentDescription = "Open GitHub",
                 onClick = {
                     runCatching {
                         uriHandler.openUri(appInfo.githubUrl)
@@ -1625,53 +1538,12 @@ private fun TvSettingsTab(
                         Toast.makeText(context, appInfo.githubUrl, Toast.LENGTH_LONG).show()
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
-                shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
-                colors = ClickableSurfaceDefaults.colors(
-                    containerColor = MuxGridColors.CardSurfaceElevated,
-                    contentColor = MuxGridColors.TextPrimary,
-                    focusedContainerColor = MuxGridColors.FocusBorder,
-                    focusedContentColor = MuxGridColors.CanvasTv,
-                ),
-                border = ClickableSurfaceDefaults.border(
-                    border = Border.None,
-                    focusedBorder = Border(
-                        border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                        shape = MuxGridShapes.Sm,
-                    ),
-                ),
-                scale = ClickableSurfaceDefaults.scale(focusedScale = 1.015f),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text(
-                            text = "GitHub",
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text = appInfo.githubDisplayUrl,
-                            fontSize = 12.sp,
-                            color = LocalContentColor.current.copy(alpha = 0.78f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Icon(
-                        imageVector = MuxGridIcons.ChevronRight,
-                        contentDescription = "Open GitHub",
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
+            )
 
-            Surface(
+            TvSettingsActionRow(
+                title = "Debug Info",
+                subtitle = "Device, OS, and playback environment",
+                contentDescription = "Show Debug Info",
                 onClick = {
                     scope.launch {
                         debugReport = withContext(Dispatchers.IO) {
@@ -1689,51 +1561,7 @@ private fun TvSettingsTab(
                         }
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
-                shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
-                colors = ClickableSurfaceDefaults.colors(
-                    containerColor = MuxGridColors.CardSurfaceElevated,
-                    contentColor = MuxGridColors.TextPrimary,
-                    focusedContainerColor = MuxGridColors.FocusBorder,
-                    focusedContentColor = MuxGridColors.CanvasTv,
-                ),
-                border = ClickableSurfaceDefaults.border(
-                    border = Border.None,
-                    focusedBorder = Border(
-                        border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                        shape = MuxGridShapes.Sm,
-                    ),
-                ),
-                scale = ClickableSurfaceDefaults.scale(focusedScale = 1.015f),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text(
-                            text = "Debug Info",
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text = "Device, OS, and playback environment",
-                            fontSize = 12.sp,
-                            color = LocalContentColor.current.copy(alpha = 0.78f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Icon(
-                        imageVector = MuxGridIcons.ChevronRight,
-                        contentDescription = "Show Debug Info",
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
+            )
         }
     }
 
@@ -1787,7 +1615,14 @@ private fun TvSettingsTab(
                     Text("Close", maxLines = 1, softWrap = false)
                 }
                 Button(
-                    onClick = { copyDebugInfoToClipboard(context, report) },
+                    onClick = {
+                        copyTextToClipboard(
+                            context = context,
+                            label = "MuxGrid Debug Info",
+                            text = report,
+                            toastMessage = "Debug info copied",
+                        )
+                    },
                     modifier = Modifier.focusRequester(copyFocusRequester),
                     shape = tvButtonShape(),
                     colors = tvPrimaryButtonColors(),
@@ -1795,6 +1630,99 @@ private fun TvSettingsTab(
                     Text("Copy", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun TvIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: Dp = 38.dp,
+    containerColor: Color = Color.Transparent,
+    contentColor: Color = MuxGridColors.TextSecondary,
+    content: @Composable () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = containerColor,
+            contentColor = contentColor,
+            focusedContainerColor = MuxGridColors.FocusBorder,
+            focusedContentColor = MuxGridColors.OnFocusBorder,
+        ),
+        border = ClickableSurfaceDefaults.border(
+            border = Border.None,
+            focusedBorder = Border(
+                border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
+                shape = MuxGridShapes.Sm,
+            ),
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+    ) {
+        Box(
+            modifier = Modifier.size(size),
+            contentAlignment = Alignment.Center,
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun TvSettingsActionRow(
+    title: String,
+    subtitle: String,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = MuxGridColors.CardSurfaceElevated,
+            contentColor = MuxGridColors.TextPrimary,
+            focusedContainerColor = MuxGridColors.FocusBorder,
+            focusedContentColor = MuxGridColors.OnFocusBorder,
+        ),
+        border = ClickableSurfaceDefaults.border(
+            border = Border.None,
+            focusedBorder = Border(
+                border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
+                shape = MuxGridShapes.Sm,
+            ),
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.015f),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                Text(
+                    text = title,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = subtitle,
+                    fontSize = 12.sp,
+                    color = LocalContentColor.current.copy(alpha = MuxGridAlphas.SecondaryText),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(
+                imageVector = MuxGridIcons.ChevronRight,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }
@@ -1812,7 +1740,7 @@ private fun TvUnderlineOption(
             containerColor = Color.Transparent,
             contentColor = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextMuted,
             focusedContainerColor = MuxGridColors.FocusBorder,
-            focusedContentColor = MuxGridColors.CanvasTv,
+            focusedContentColor = MuxGridColors.OnFocusBorder,
         ),
         border = ClickableSurfaceDefaults.border(
             border = Border.None,

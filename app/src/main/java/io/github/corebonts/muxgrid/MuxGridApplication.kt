@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import io.github.corebonts.muxgrid.core.data.TvheadendRepository
+import io.github.corebonts.muxgrid.core.designsystem.isDebuggableBuild
 import io.github.corebonts.muxgrid.core.model.FormFactor
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
@@ -22,6 +23,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.File
+
+internal const val LAST_CRASH_FILENAME = "last_crash.txt"
+
+internal fun lastCrashFile(context: Context): File = File(context.filesDir, LAST_CRASH_FILENAME)
 
 /**
  * Tracks active DVR playback state and reports resume position / completion back to Tvheadend.
@@ -250,7 +256,7 @@ class MuxGridApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        if ((applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+        if (isDebuggableBuild()) {
             installCrashRecorder()
         }
         container = MuxGridAppContainer(this)
@@ -261,7 +267,7 @@ class MuxGridApplication : Application() {
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             runCatching {
                 val trace = android.util.Log.getStackTraceString(throwable)
-                java.io.File(filesDir, "last_crash.txt").writeText(
+                lastCrashFile(this).writeText(
                     "Thread: ${thread.name}\n$trace",
                 )
             }

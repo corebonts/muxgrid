@@ -29,6 +29,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextFieldColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -95,10 +96,6 @@ fun OnboardingServerScreen(
     var saving by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<ConnectionTestResult?>(null) }
     var validationError by remember { mutableStateOf<String?>(null) }
-
-    var testFocused by remember { mutableStateOf(false) }
-    var saveFocused by remember { mutableStateOf(false) }
-    var cancelFocused by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         if (isTv) {
@@ -287,70 +284,16 @@ fun OnboardingServerScreen(
                 )
             }
 
-            if (isTv) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    OutlinedTextField(
-                        value = username,
-                        onValueChange = { username = it },
-                        label = { Text("Username") },
-                        placeholder = { Text("muxgrid") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                        colors = fieldColors,
-                        modifier = Modifier.weight(1f).then(dpadFieldModifier),
-                    )
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = { password = it },
-                        label = { Text("Password") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Password,
-                            imeAction = ImeAction.Done,
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onDone = { doSave() },
-                        ),
-                        colors = fieldColors,
-                        modifier = Modifier.weight(1f).then(dpadFieldModifier),
-                    )
-                }
-            } else {
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = { Text("Username") },
-                    placeholder = { Text("muxgrid") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                    colors = fieldColors,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(dpadFieldModifier),
-                )
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Password") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        imeAction = ImeAction.Done,
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onDone = { doSave() },
-                    ),
-                    colors = fieldColors,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(dpadFieldModifier),
-                )
-            }
+            CredentialsFields(
+                isTv = isTv,
+                username = username,
+                onUsernameChange = { username = it },
+                password = password,
+                onPasswordChange = { password = it },
+                fieldColors = fieldColors,
+                fieldModifier = dpadFieldModifier,
+                onDone = doSave,
+            )
 
             validationError?.let { err ->
                 Text(
@@ -363,12 +306,12 @@ fun OnboardingServerScreen(
             testResult?.let { res ->
                 val (bg, textColor, msg) = when (res) {
                     is ConnectionTestResult.Success -> Triple(
-                        MuxGridColors.EmeraldOk.copy(alpha = 0.14f),
+                        MuxGridColors.EmeraldOk.copy(alpha = MuxGridAlphas.SubtleFill),
                         MuxGridColors.EmeraldOk,
                         "Connected to ${res.serverName} ${res.serverVersion} (HTSP v${res.htspVersion}, DVR=${res.hasDvrAccess})",
                     )
                     is ConnectionTestResult.Failure -> Triple(
-                        MuxGridColors.CoralLive.copy(alpha = 0.14f),
+                        MuxGridColors.CoralLive.copy(alpha = MuxGridAlphas.SubtleFill),
                         MuxGridColors.CoralLive,
                         res.message,
                     )
@@ -386,162 +329,203 @@ fun OnboardingServerScreen(
 
             Spacer(Modifier.height(2.dp))
 
-            val btnPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+            OnboardingActionButtons(
+                isTv = isTv,
+                canCancel = canCancel,
+                testing = testing,
+                saving = saving,
+                onCancel = onCancel,
+                onTest = doTest,
+                onSave = doSave,
+            )
+        }
+    }
+}
 
-            if (isTv) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+@Composable
+private fun CredentialsFields(
+    isTv: Boolean,
+    username: String,
+    onUsernameChange: (String) -> Unit,
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    fieldColors: TextFieldColors,
+    fieldModifier: Modifier,
+    onDone: () -> Unit,
+) {
+    val renderUsername: @Composable (Modifier) -> Unit = { itemModifier ->
+        OutlinedTextField(
+            value = username,
+            onValueChange = onUsernameChange,
+            label = { Text("Username") },
+            placeholder = { Text("muxgrid") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            colors = fieldColors,
+            modifier = itemModifier.then(fieldModifier),
+        )
+    }
+    val renderPassword: @Composable (Modifier) -> Unit = { itemModifier ->
+        OutlinedTextField(
+            value = password,
+            onValueChange = onPasswordChange,
+            label = { Text("Password") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                imeAction = ImeAction.Done,
+            ),
+            keyboardActions = KeyboardActions(onDone = { onDone() }),
+            colors = fieldColors,
+            modifier = itemModifier.then(fieldModifier),
+        )
+    }
+
+    if (isTv) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            renderUsername(Modifier.weight(1f))
+            renderPassword(Modifier.weight(1f))
+        }
+    } else {
+        renderUsername(Modifier.fillMaxWidth())
+        renderPassword(Modifier.fillMaxWidth())
+    }
+}
+
+@Composable
+private fun OnboardingActionButtons(
+    isTv: Boolean,
+    canCancel: Boolean,
+    testing: Boolean,
+    saving: Boolean,
+    onCancel: () -> Unit,
+    onTest: () -> Unit,
+    onSave: () -> Unit,
+) {
+    val btnPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+    var testFocused by remember { mutableStateOf(false) }
+    var saveFocused by remember { mutableStateOf(false) }
+    var cancelFocused by remember { mutableStateOf(false) }
+
+    val renderSaveButton: @Composable (Modifier) -> Unit = { itemModifier ->
+        Button(
+            onClick = onSave,
+            enabled = !saving && !testing,
+            shape = MuxGridShapes.Sm,
+            contentPadding = btnPadding,
+            border = if (isTv && saveFocused) BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder) else null,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MuxGridColors.Accent,
+                contentColor = MuxGridColors.OnAccent,
+            ),
+            modifier = itemModifier.then(
+                if (isTv) Modifier.onFocusChanged { saveFocused = it.isFocused } else Modifier,
+            ),
+        ) {
+            Icon(
+                imageVector = MuxGridIcons.Check,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = if (saving) "Saving…" else "Save & Connect",
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    }
+
+    val renderTestButton: @Composable (Modifier) -> Unit = { itemModifier ->
+        val focused = isTv && testFocused
+        val fg = if (focused) MuxGridColors.OnFocusBorder else MuxGridColors.TextPrimary
+        OutlinedButton(
+            onClick = onTest,
+            enabled = !testing && !saving,
+            shape = MuxGridShapes.Sm,
+            contentPadding = btnPadding,
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = if (focused) MuxGridColors.FocusBorder else MuxGridColors.CardSurfaceElevated,
+                contentColor = fg,
+            ),
+            border = BorderStroke(
+                if (focused) MuxGridBorders.Focused else MuxGridBorders.Hairline,
+                if (focused) MuxGridColors.FocusBorder else MuxGridColors.HairlineBorder,
+            ),
+            modifier = itemModifier.then(
+                if (isTv) Modifier.onFocusChanged { testFocused = it.isFocused } else Modifier,
+            ),
+        ) {
+            Icon(
+                imageVector = MuxGridIcons.Refresh,
+                contentDescription = null,
+                tint = fg,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = if (testing) "Testing…" else "Test",
+                color = fg,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    }
+
+    if (isTv) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (canCancel) {
+                val fg = if (cancelFocused) MuxGridColors.OnFocusBorder else MuxGridColors.TextSecondary
+                OutlinedButton(
+                    onClick = onCancel,
+                    enabled = !saving,
+                    shape = MuxGridShapes.Sm,
+                    contentPadding = btnPadding,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (cancelFocused) MuxGridColors.FocusBorder else MuxGridColors.CardSurfaceElevated,
+                        contentColor = if (cancelFocused) MuxGridColors.OnFocusBorder else MuxGridColors.TextPrimary,
+                    ),
+                    border = BorderStroke(
+                        if (cancelFocused) MuxGridBorders.Focused else MuxGridBorders.Hairline,
+                        if (cancelFocused) MuxGridColors.FocusBorder else MuxGridColors.HairlineBorder,
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .onFocusChanged { cancelFocused = it.isFocused },
                 ) {
-                    if (canCancel) {
-                        OutlinedButton(
-                            onClick = onCancel,
-                            enabled = !saving,
-                            shape = MuxGridShapes.Sm,
-                            contentPadding = btnPadding,
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = if (cancelFocused) MuxGridColors.FocusBorder else MuxGridColors.CardSurfaceElevated,
-                                contentColor = if (cancelFocused) MuxGridColors.CanvasTv else MuxGridColors.TextPrimary,
-                            ),
-                            border = BorderStroke(
-                                if (cancelFocused) 2.dp else 1.dp,
-                                if (cancelFocused) MuxGridColors.FocusBorder else MuxGridColors.HairlineBorder,
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .onFocusChanged { cancelFocused = it.isFocused },
-                        ) {
-                            Icon(
-                                imageVector = MuxGridIcons.Close,
-                                contentDescription = null,
-                                tint = if (cancelFocused) MuxGridColors.CanvasTv else MuxGridColors.TextSecondary,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = "Cancel",
-                                color = if (cancelFocused) MuxGridColors.CanvasTv else MuxGridColors.TextSecondary,
-                                maxLines = 1,
-                                softWrap = false,
-                            )
-                        }
-                    }
-                    OutlinedButton(
-                        onClick = doTest,
-                        enabled = !testing && !saving,
-                        shape = MuxGridShapes.Sm,
-                        contentPadding = btnPadding,
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = if (testFocused) MuxGridColors.FocusBorder else MuxGridColors.CardSurfaceElevated,
-                            contentColor = if (testFocused) MuxGridColors.CanvasTv else MuxGridColors.TextPrimary,
-                        ),
-                        border = BorderStroke(
-                            if (testFocused) 2.dp else 1.dp,
-                            if (testFocused) MuxGridColors.FocusBorder else MuxGridColors.HairlineBorder,
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .onFocusChanged { testFocused = it.isFocused },
-                    ) {
-                        Icon(
-                            imageVector = MuxGridIcons.Refresh,
-                            contentDescription = null,
-                            tint = if (testFocused) MuxGridColors.CanvasTv else MuxGridColors.TextPrimary,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = if (testing) "Testing…" else "Test",
-                            color = if (testFocused) MuxGridColors.CanvasTv else MuxGridColors.TextPrimary,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
-                    Button(
-                        onClick = doSave,
-                        enabled = !saving && !testing,
-                        shape = MuxGridShapes.Sm,
-                        contentPadding = btnPadding,
-                        border = if (saveFocused) BorderStroke(2.dp, MuxGridColors.FocusBorder) else null,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MuxGridColors.Accent,
-                            contentColor = MuxGridColors.OnAccent,
-                        ),
-                        modifier = Modifier
-                            .weight(1.35f)
-                            .onFocusChanged { saveFocused = it.isFocused },
-                    ) {
-                        Icon(
-                            imageVector = MuxGridIcons.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = if (saving) "Saving…" else "Save & Connect",
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
-                }
-            } else {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Button(
-                        onClick = doSave,
-                        enabled = !saving && !testing,
-                        shape = MuxGridShapes.Sm,
-                        contentPadding = btnPadding,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MuxGridColors.Accent,
-                            contentColor = MuxGridColors.OnAccent,
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(
-                            imageVector = MuxGridIcons.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = if (saving) "Saving…" else "Save & Connect",
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = doTest,
-                        enabled = !testing && !saving,
-                        shape = MuxGridShapes.Sm,
-                        contentPadding = btnPadding,
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = MuxGridColors.CardSurfaceElevated,
-                            contentColor = MuxGridColors.TextPrimary,
-                        ),
-                        border = BorderStroke(1.dp, MuxGridColors.HairlineBorder),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(
-                            imageVector = MuxGridIcons.Refresh,
-                            contentDescription = null,
-                            tint = MuxGridColors.TextPrimary,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = if (testing) "Testing…" else "Test",
-                            color = MuxGridColors.TextPrimary,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
+                    Icon(
+                        imageVector = MuxGridIcons.Close,
+                        contentDescription = null,
+                        tint = fg,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "Cancel",
+                        color = fg,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
             }
+            renderTestButton(Modifier.weight(1f))
+            renderSaveButton(Modifier.weight(1.35f))
+        }
+    } else {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            renderSaveButton(Modifier.fillMaxWidth())
+            renderTestButton(Modifier.fillMaxWidth())
         }
     }
 }
