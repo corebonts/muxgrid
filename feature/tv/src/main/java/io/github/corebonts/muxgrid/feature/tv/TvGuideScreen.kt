@@ -882,11 +882,14 @@ internal fun TvGuideScreen(
                                                     if (focused) {
                                                         focusedEventState.value = ev
                                                         focusMemory.guideTarget = TvGuideFocusTarget(channel.id, ev.id)
-                                                        scope.launch {
-                                                            timelineScrollState.ensureIntervalVisible(
-                                                                startSec = ev.startEpochSec,
-                                                                stopSec = ev.stopEpochSec,
-                                                            )
+                                                        if (!timelineScrollState.scrollableState.isScrollInProgress) {
+                                                            scope.launch {
+                                                                timelineScrollState.ensureIntervalVisible(
+                                                                    startSec = ev.startEpochSec,
+                                                                    stopSec = ev.stopEpochSec,
+                                                                    requireFullVisibility = false,
+                                                                )
+                                                            }
                                                         }
                                                     }
                                                 }

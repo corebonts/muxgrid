@@ -1263,11 +1263,12 @@ private fun MobileTimelineGrid(
                                         .onFocusChanged { state ->
                                             val focused = state.isFocused
                                             if (evFocused != focused) evFocused = focused
-                                            if (focused) {
+                                            if (focused && !scrollState.scrollableState.isScrollInProgress) {
                                                 scope.launch {
                                                     scrollState.ensureIntervalVisible(
                                                         startSec = ev.startEpochSec,
                                                         stopSec = ev.stopEpochSec,
+                                                        requireFullVisibility = false,
                                                     )
                                                 }
                                             }

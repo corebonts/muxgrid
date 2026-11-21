@@ -131,13 +131,14 @@ class TimelineScrollState(
     }
 
     /**
-     * Smoothly scrolls just enough to bring `[startSec, stopSec]` cleanly inside the viewport.
+     * Smoothly scrolls just enough to bring `[startSec, stopSec]` into the viewport when it is
+     * outside (never moving if already visible, and avoiding ping-pong on shows wider than the
+     * viewport).
      */
     suspend fun ensureIntervalVisible(
         startSec: Long,
         stopSec: Long,
-        leadingMarginPx: Float = 24f,
-        trailingMarginPx: Float = 24f,
+        requireFullVisibility: Boolean = true,
     ) {
         if (!hasInitializedBounds || viewportWidthPx <= 0f) return
         val targetPx = computeEnsureVisibleScrollPx(
@@ -146,8 +147,7 @@ class TimelineScrollState(
             currentScrollPx = scrollOffsetPx,
             viewportWidthPx = viewportWidthPx,
             maxScrollPx = maxScrollPx,
-            leadingMarginPx = leadingMarginPx,
-            trailingMarginPx = trailingMarginPx,
+            requireFullVisibility = requireFullVisibility,
         )
         val delta = targetPx - scrollOffsetPx
         if (kotlin.math.abs(delta) > 1f) {
@@ -166,16 +166,44 @@ fun computeEnsureVisibleScrollPx(
     currentScrollPx: Float,
     viewportWidthPx: Float,
     maxScrollPx: Float,
-    leadingMarginPx: Float = 24f,
-    trailingMarginPx: Float = 24f,
+    requireFullVisibility: Boolean = true,
 ): Float {
+    val viewportEndPx = currentScrollPx + viewportWidthPx
     val itemWidth = (stopPx - startPx).coerceAtLeast(0f)
-    val usableWidth = (viewportWidthPx - leadingMarginPx - trailingMarginPx).coerceAtLeast(1f)
+
+    // Completely inside the viewport or already spanning the entire viewport -> do not move
+    if ((startPx >= currentScrollPx && stopPx <= viewportEndPx) ||
+        (startPx <= currentScrollPx && stopPx >= viewportEndPx)
+    ) {
+        return currentScrollPx.coerceIn(0f, maxScrollPx)
+    }
+
+    // Wider than the viewport -> avoid ping-pong; only scroll if less than half the viewport is covered
+    if (itemWidth >= viewportWidthPx) {
+        val visibleOverlap = (minOf(stopPx, viewportEndPx) - maxOf(startPx, currentScrollPx)).coerceAtLeast(0f)
+        if (visibleOverlap >= viewportWidthPx * 0.5f) {
+            return currentScrollPx.coerceIn(0f, maxScrollPx)
+        }
+        val rawTarget = if (startPx >= currentScrollPx) {
+            startPx
+        } else {
+            stopPx - viewportWidthPx
+        }
+        return rawTarget.coerceIn(0f, maxScrollPx)
+    }
+
+    // For vertical (Up/Down) focus changes, don't jerk horizontally if the show is already comfortably visible
+    if (!requireFullVisibility) {
+        val visibleOverlap = (minOf(stopPx, viewportEndPx) - maxOf(startPx, currentScrollPx)).coerceAtLeast(0f)
+        val comfortablePx = minOf(itemWidth * 0.4f, viewportWidthPx * 0.25f)
+        if (visibleOverlap >= comfortablePx) {
+            return currentScrollPx.coerceIn(0f, maxScrollPx)
+        }
+    }
+
     val rawTarget = when {
-        itemWidth >= usableWidth -> startPx - leadingMarginPx
-        startPx < currentScrollPx + leadingMarginPx -> startPx - leadingMarginPx
-        stopPx > currentScrollPx + viewportWidthPx - trailingMarginPx ->
-            stopPx - viewportWidthPx + trailingMarginPx
+        startPx < currentScrollPx -> startPx
+        stopPx > viewportEndPx -> stopPx - viewportWidthPx
         else -> currentScrollPx
     }
     return rawTarget.coerceIn(0f, maxScrollPx)
