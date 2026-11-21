@@ -118,6 +118,12 @@ class MpvPlaybackEngine(
     private var lastObservedMpvDurationMs: Long = 0L
 
     @Volatile
+    private var lastPositionEmitElapsedMs: Long = 0L
+
+    @Volatile
+    private var lastEmittedPosMs: Long = -1L
+
+    @Volatile
     private var lastGrowingServerSec: Long = 0L
 
     @Volatile
@@ -180,7 +186,10 @@ class MpvPlaybackEngine(
             setOptionString("gpu-context", "android")
             setOptionString("opengl-es", "yes")
             setOptionString("hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
-            setOptionString("demuxer-lavf-o", "analyzeduration=500000,probesize=524288")
+            // Give DVB MPEG-TS streams enough probe budget to catch an H.264/HEVC SPS/PPS
+            // keyframe so h264_mediacodec opens with valid dimensions instead of falling back
+            // to software decode (FFmpeg returns early as soon as stream info is complete).
+            setOptionString("demuxer-lavf-o", "analyzeduration=2500000,probesize=2097152")
             setOptionString("cache", "yes")
             setOptionString("demuxer-seekable-cache", "yes")
             setOptionString("demuxer-donate-buffer", "yes")
@@ -212,7 +221,6 @@ class MpvPlaybackEngine(
             observeProperty("deinterlace", MPV.mpvFormat.MPV_FORMAT_STRING)
             observeProperty("video-params/w", MPV.mpvFormat.MPV_FORMAT_INT64)
             observeProperty("video-params/h", MPV.mpvFormat.MPV_FORMAT_INT64)
-            observeProperty("estimated-vf-fps", MPV.mpvFormat.MPV_FORMAT_DOUBLE)
             observeProperty("aid", MPV.mpvFormat.MPV_FORMAT_STRING)
             observeProperty("sid", MPV.mpvFormat.MPV_FORMAT_STRING)
 
@@ -230,6 +238,8 @@ class MpvPlaybackEngine(
         hadFileLoaded = false
         retriedLiveReconnect = false
         lastObservedMpvDurationMs = 0L
+        lastPositionEmitElapsedMs = 0L
+        lastEmittedPosMs = -1L
         lastGrowingServerSec = 0L
         lastGrowingTickElapsedMs = 0L
         timeshiftSmoother.reset()
@@ -292,6 +302,8 @@ class MpvPlaybackEngine(
         hadFileLoaded = false
         retriedLiveReconnect = false
         lastObservedMpvDurationMs = 0L
+        lastPositionEmitElapsedMs = 0L
+        lastEmittedPosMs = -1L
         lastGrowingServerSec = 0L
         lastGrowingTickElapsedMs = 0L
         timeshiftSmoother.reset()
@@ -364,6 +376,8 @@ class MpvPlaybackEngine(
         pendingUrl = null
         activeChannel = null
         activeDvrEntry = null
+        lastPositionEmitElapsedMs = 0L
+        lastEmittedPosMs = -1L
         lastGrowingServerSec = 0L
         lastGrowingTickElapsedMs = 0L
         timeshiftSmoother.reset()
@@ -414,6 +428,7 @@ class MpvPlaybackEngine(
     override fun seekTo(positionMs: Long) {
         val current = _state.value
         val clampedMs = clampSeekTargetMs(current, positionMs)
+        lastPositionEmitElapsedMs = 0L
         mpvExecutor.execute {
             val instance = mpv ?: return@execute
             if (instance.isInitialized) {
@@ -939,8 +954,17 @@ class MpvPlaybackEngine(
         when (property) {
             "time-pos" -> {
                 val posMs = (value * 1000.0).toLong().coerceAtLeast(0L)
+                val nowElapsed = SystemClock.elapsedRealtime()
+                val prevPos = lastEmittedPosMs
+                val jumped = prevPos < 0L || kotlin.math.abs(posMs - prevPos) >= 1_500L
+                if (!jumped && (nowElapsed - lastPositionEmitElapsedMs) < POSITION_EMIT_INTERVAL_MS) {
+                    return
+                }
+                lastPositionEmitElapsedMs = nowElapsed
+                lastEmittedPosMs = posMs
+
                 val estEndMs = if (timeshiftSmoother.isInitialized) {
-                    timeshiftSmoother.currentEstimatedEndMs(SystemClock.elapsedRealtime())
+                    timeshiftSmoother.currentEstimatedEndMs(nowElapsed)
                 } else {
                     0L
                 }
@@ -961,11 +985,15 @@ class MpvPlaybackEngine(
                 }
             }
             "duration" -> {
+                // Live streams grow duration continuously with cache fill; only track duration for DVR recordings.
+                if (activeDvrEntry == null) return
                 val durMs = (value * 1000.0).toLong().coerceAtLeast(0L)
-                if (durMs > 0L) {
+                if (durMs > 0L && kotlin.math.abs(durMs - lastObservedMpvDurationMs) >= 500L) {
                     lastObservedMpvDurationMs = durMs
                     _state.update { current ->
-                        if (current.isGrowingRecording) {
+                        if (!current.isRecordingPlayback) {
+                            current
+                        } else if (current.isGrowingRecording) {
                             current.copy(durationMs = maxOf(current.durationMs, durMs))
                         } else {
                             current.copy(durationMs = durMs)
@@ -973,7 +1001,6 @@ class MpvPlaybackEngine(
                     }
                 }
             }
-            "estimated-vf-fps" -> _state.update { it.copy(fps = value) }
         }
     }
 
@@ -1181,7 +1208,8 @@ class MpvPlaybackEngine(
 
     companion object {
         private const val TAG = "MuxGridPlayer"
-        private const val CACHE_POLL_INTERVAL_MS = 200L
+        private const val POSITION_EMIT_INTERVAL_MS = 250L
+        private const val CACHE_POLL_INTERVAL_MS = 500L
         private const val DEFAULT_RAM_CACHE_BYTES = 64L * 1024L * 1024L
         private const val DISK_SAFETY_RESERVE_BYTES = 512L * 1024L * 1024L
         private const val GROWING_WRITE_HEAD_SAFETY_MS = 2_000L

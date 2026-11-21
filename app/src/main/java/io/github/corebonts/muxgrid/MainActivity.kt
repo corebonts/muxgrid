@@ -45,6 +45,8 @@ import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.player.MuxGridMediaSessionService
 import io.github.corebonts.muxgrid.feature.mobile.MobileRoot
 import io.github.corebonts.muxgrid.feature.tv.TvRoot
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -71,12 +73,17 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            val playbackState by container.playbackEngine.state.collectAsState()
             val pipEnabled by container.repository.pipEnabled.collectAsState()
             val rootView = LocalView.current
-            val keepScreenOn = !playbackState.isRadio &&
-                !playbackState.isAudioOnly &&
-                (playbackState.status == PlaybackStatus.PLAYING || playbackState.status == PlaybackStatus.BUFFERING)
+            val keepScreenOn by remember(container.playbackEngine) {
+                container.playbackEngine.state
+                    .map { pb ->
+                        !pb.isRadio &&
+                            !pb.isAudioOnly &&
+                            (pb.status == PlaybackStatus.PLAYING || pb.status == PlaybackStatus.BUFFERING)
+                    }
+                    .distinctUntilChanged()
+            }.collectAsState(initial = false)
 
             // Use View.keepScreenOn rather than Window.addFlags/clearFlags so ViewRootImpl
             // updates the flag during layout without invoking WindowManagerImpl.updateViewLayout
@@ -91,15 +98,20 @@ class MainActivity : ComponentActivity() {
             }
 
             if (pipSupported && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val shouldAutoPip = isMobilePlayerRouteActive &&
-                    pipEnabled &&
-                    !playbackState.isRadio &&
-                    !playbackState.isAudioOnly &&
-                    (playbackState.status == PlaybackStatus.PLAYING || playbackState.status == PlaybackStatus.BUFFERING)
-                LaunchedEffect(shouldAutoPip, playbackState.videoWidth, playbackState.videoHeight) {
+                val videoDims by remember(container.playbackEngine) {
+                    container.playbackEngine.state
+                        .map { pb -> pb.videoWidth to pb.videoHeight }
+                        .distinctUntilChanged()
+                }.collectAsState(initial = 0 to 0)
+                val shouldAutoPip = isMobilePlayerRouteActive && pipEnabled && keepScreenOn
+                LaunchedEffect(shouldAutoPip, videoDims) {
                     runCatching {
                         setPictureInPictureParams(
-                            buildPipParams(playbackState, autoEnter = shouldAutoPip),
+                            buildPipParams(
+                                videoWidth = videoDims.first,
+                                videoHeight = videoDims.second,
+                                autoEnter = shouldAutoPip,
+                            ),
                         )
                     }
                 }
@@ -134,7 +146,7 @@ class MainActivity : ComponentActivity() {
                         openPlayerSignal = openPlayerSignal,
                         canEnterPip = pipSupported && pipEnabled,
                         onPlayerScreenActiveChanged = { active -> isMobilePlayerRouteActive = active },
-                        onEnterPip = { enterPip(playbackState) },
+                        onEnterPip = { enterPip(container.playbackEngine.state.value) },
                     )
                 }
 
@@ -227,13 +239,19 @@ class MainActivity : ComponentActivity() {
         if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return
         if (playbackState.isRadio || playbackState.isAudioOnly) return
         runCatching {
-            enterPictureInPictureMode(buildPipParams(playbackState, autoEnter = false))
+            enterPictureInPictureMode(
+                buildPipParams(
+                    videoWidth = playbackState.videoWidth,
+                    videoHeight = playbackState.videoHeight,
+                    autoEnter = false,
+                ),
+            )
         }
     }
 
-    private fun buildPipParams(playbackState: PlaybackState, autoEnter: Boolean): PictureInPictureParams {
-        val ratio = if (playbackState.videoWidth > 0 && playbackState.videoHeight > 0) {
-            val raw = playbackState.videoWidth.toFloat() / playbackState.videoHeight.toFloat()
+    private fun buildPipParams(videoWidth: Int, videoHeight: Int, autoEnter: Boolean): PictureInPictureParams {
+        val ratio = if (videoWidth > 0 && videoHeight > 0) {
+            val raw = videoWidth.toFloat() / videoHeight.toFloat()
             val clamped = raw.coerceIn(0.45f, 2.35f)
             Rational((clamped * 1000).toInt(), 1000)
         } else {

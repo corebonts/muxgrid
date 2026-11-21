@@ -1,6 +1,7 @@
 package io.github.corebonts.muxgrid.core.player
 
 import android.os.Looper
+import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -46,16 +47,19 @@ internal class MuxGridSessionPlayer(
         val programTitle: String?,
         val isRadio: Boolean,
         val seekable: Boolean,
-        val durationMs: Long,
+        val durationSec: Long,
         val errorMsg: String?,
     )
 
     private var lastSnapshotKey: SnapshotKey? = null
     private var lastNotifiedPosMs: Long = 0L
+    private var lastNotifiedElapsedMs: Long = 0L
+    private var lastNotifiedPlaying: Boolean = false
 
     init {
         stateJob = scope.launch {
             playbackEngine.state.collect { st ->
+                val isPlaying = st.status == PlaybackStatus.PLAYING && !st.isPaused
                 val key = SnapshotKey(
                     status = st.status,
                     isPaused = st.isPaused,
@@ -65,13 +69,21 @@ internal class MuxGridSessionPlayer(
                     programTitle = st.programTitle,
                     isRadio = st.isRadio,
                     seekable = st.isRecordingPlayback || st.isTimeshiftSeekable,
-                    durationMs = st.durationMs,
+                    durationSec = if (st.isRecordingPlayback) st.durationMs / 1_000L else 0L,
                     errorMsg = st.error?.message,
                 )
-                val posJump = abs(st.positionMs - lastNotifiedPosMs) >= 3_000L
+                val nowElapsed = SystemClock.elapsedRealtime()
+                val expectedPosMs = if (lastNotifiedPlaying) {
+                    lastNotifiedPosMs + (nowElapsed - lastNotifiedElapsedMs).coerceAtLeast(0L)
+                } else {
+                    lastNotifiedPosMs
+                }
+                val posJump = abs(st.positionMs - expectedPosMs) >= 3_000L
                 if (key != lastSnapshotKey || posJump) {
                     lastSnapshotKey = key
                     lastNotifiedPosMs = st.positionMs
+                    lastNotifiedElapsedMs = nowElapsed
+                    lastNotifiedPlaying = isPlaying
                     invalidateState()
                 }
             }
@@ -196,7 +208,7 @@ internal class MuxGridSessionPlayer(
             .setMediaMetadata(metadata)
             .build()
 
-        val durationUs = if (st.durationMs > 0L) st.durationMs * 1000L else C.TIME_UNSET
+        val durationUs = if (st.isRecordingPlayback && st.durationMs > 0L) st.durationMs * 1000L else C.TIME_UNSET
         return MediaItemData.Builder(mediaId)
             .setMediaItem(mediaItem)
             .setMediaMetadata(metadata)

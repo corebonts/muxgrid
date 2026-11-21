@@ -5,11 +5,12 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -50,17 +52,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.tv.material3.Border
 import androidx.tv.material3.Button
-import androidx.tv.material3.ButtonDefaults
-import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Icon
-import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
@@ -808,218 +810,38 @@ internal fun TvPlayerScreen(
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.onPreviewKeyEvent { keyEvent ->
-                            if (keyEvent.type == KeyEventType.KeyDown &&
-                                keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP
-                            ) {
-                                if (canSeekTimeline) {
-                                    runCatching { progressFocusRequester.requestFocus() }
-                                }
-                                true
-                            } else {
-                                false
-                            }
-                        },
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (canSeekTimeline) {
-                            Button(
-                                onClick = { playbackEngine.seekBy(-30_000L) },
-                                shape = tvButtonShape(),
-                                colors = tvSecondaryButtonColors(),
-                            ) {
-                                Icon(
-                                    imageVector = MuxGridIcons.Replay30,
-                                    contentDescription = "Seek back 30 seconds",
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-                        }
-                        Button(
-                            onClick = { playbackEngine.togglePause() },
-                            modifier = Modifier.focusRequester(playPauseFocusRequester),
-                            shape = tvButtonShape(),
-                            colors = tvPrimaryButtonColors(),
-                        ) {
-                            Icon(
-                                imageVector = if (playbackState.isPaused) MuxGridIcons.Play else MuxGridIcons.Pause,
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(if (playbackState.isPaused) "Play" else "Pause", fontWeight = FontWeight.SemiBold)
-                        }
-                        if (canSeekTimeline) {
-                            Button(
-                                onClick = { playbackEngine.seekBy(30_000L) },
-                                shape = tvButtonShape(),
-                                colors = tvSecondaryButtonColors(),
-                            ) {
-                                Icon(
-                                    imageVector = MuxGridIcons.Forward30,
-                                    contentDescription = "Seek forward 30 seconds",
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-                        }
-                        if (playbackState.isBehindLive) {
-                            Button(
-                                onClick = { playbackEngine.seekToLiveEdge() },
-                                modifier = Modifier.onFocusChanged { backToLiveFocused = it.isFocused },
-                                shape = tvButtonShape(),
-                                colors = tvPrimaryButtonColors(),
-                            ) {
-                                Icon(
-                                    imageVector = MuxGridIcons.Sensors,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text("Back to Live", fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                        if (!playbackState.isRecordingPlayback && canZap) {
-                            Button(
-                                onClick = { onZapDelta(-1) },
-                                shape = tvButtonShape(),
-                                colors = tvSecondaryButtonColors(),
-                            ) {
-                                Icon(
-                                    imageVector = MuxGridIcons.SkipPrevious,
-                                    contentDescription = "Previous channel",
-                                    modifier = Modifier.size(18.dp),
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text("Ch -")
-                            }
-                            Button(
-                                onClick = { onZapDelta(1) },
-                                shape = tvButtonShape(),
-                                colors = tvSecondaryButtonColors(),
-                            ) {
-                                Text("Ch +")
-                                Spacer(Modifier.width(4.dp))
-                                Icon(
-                                    imageVector = MuxGridIcons.SkipNext,
-                                    contentDescription = "Next channel",
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        }
-                        Button(
-                            onClick = { trackPanelOpen = !trackPanelOpen },
-                            modifier = Modifier.focusRequester(trackButtonFocusRequester),
-                            shape = tvButtonShape(),
-                            colors = tvSecondaryButtonColors(),
-                        ) {
-                            Icon(
-                                imageVector = MuxGridIcons.Tracks,
-                                contentDescription = "Display Options",
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                        Button(
-                            onClick = onExit,
-                            shape = tvButtonShape(),
-                            colors = tvSecondaryButtonColors(),
-                        ) {
-                            Icon(
-                                imageVector = MuxGridIcons.Stop,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text("Stop")
-                        }
-                    }
+                    TvHudControlsRow(
+                        canSeekTimeline = canSeekTimeline,
+                        isPaused = playbackState.isPaused,
+                        isBehindLive = playbackState.isBehindLive,
+                        isRecordingPlayback = playbackState.isRecordingPlayback,
+                        canZap = canZap,
+                        playPauseFocusRequester = playPauseFocusRequester,
+                        trackButtonFocusRequester = trackButtonFocusRequester,
+                        onFocusProgressBar = { runCatching { progressFocusRequester.requestFocus() } },
+                        onSeekBy = { delta -> playbackEngine.seekBy(delta) },
+                        onTogglePause = { playbackEngine.togglePause() },
+                        onSeekToLiveEdge = { playbackEngine.seekToLiveEdge() },
+                        onBackToLiveFocusChanged = { backToLiveFocused = it },
+                        onZapDelta = onZapDelta,
+                        onToggleTrackPanel = { trackPanelOpen = !trackPanelOpen },
+                        onExit = onExit,
+                    )
 
                     // Horizontal Quick Channel Strip underneath transport controls
                     if (!playbackState.isRecordingPlayback && channels.size > 1) {
-                        val hasCurrentInStrip = channels.any { it.id == playbackState.channelId }
-                        LazyRow(
-                            state = quickStripState,
-                            modifier = Modifier
-                                .focusGroup()
-                                .focusRestorer(activeChannelChipFocusRequester),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            contentPadding = PaddingValues(vertical = 2.dp),
-                        ) {
-                            items(channels, key = { it.id }) { ch ->
-                                val isCurrent = ch.id == playbackState.channelId
-                                val isStripTarget = isCurrent || (!hasCurrentInStrip && ch.id == channels.firstOrNull()?.id)
-                                val chNow = nowNextMap[ch.id]
-                                Surface(
-                                    onClick = {
-                                        onSelectChannel(ch)
-                                        hudVisible = false
-                                    },
-                                    modifier = Modifier
-                                        .width(210.dp)
-                                        .then(
-                                            if (isStripTarget) {
-                                                Modifier.focusRequester(activeChannelChipFocusRequester)
-                                            } else {
-                                                Modifier
-                                            },
-                                        ),
-                                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
-                                    colors = ClickableSurfaceDefaults.colors(
-                                        containerColor = if (isCurrent) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface,
-                                        contentColor = MuxGridColors.TextPrimary,
-                                        focusedContainerColor = MuxGridColors.FocusBorder,
-                                        focusedContentColor = MuxGridColors.CanvasTv,
-                                    ),
-                                    border = ClickableSurfaceDefaults.border(
-                                        border = if (isCurrent) {
-                                            Border(
-                                                border = BorderStroke(MuxGridBorders.Hairline, MuxGridColors.Accent),
-                                                shape = MuxGridShapes.Sm,
-                                            )
-                                        } else {
-                                            Border.None
-                                        },
-                                        focusedBorder = Border(
-                                            border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                                            shape = MuxGridShapes.Sm,
-                                        ),
-                                    ),
-                                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(9.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        ChannelPiconBadge(
-                                            channelNumber = ch.formattedNumber,
-                                            channelName = ch.name,
-                                            piconModel = ch.icon?.let { PiconModel(ch.id, it) },
-                                            imageLoader = imageLoader,
-                                            size = 32.dp,
-                                        )
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = if (ch.number > 0) "${ch.formattedNumber} · ${ch.name}" else ch.name,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            chNow?.now?.title?.let { title ->
-                                                Text(
-                                                    text = title,
-                                                    fontSize = 10.sp,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        TvQuickChannelStrip(
+                            channels = channels,
+                            currentChannelId = playbackState.channelId,
+                            nowNextMap = nowNextMap,
+                            imageLoader = imageLoader,
+                            quickStripState = quickStripState,
+                            activeChannelChipFocusRequester = activeChannelChipFocusRequester,
+                            onSelectChannel = { ch ->
+                                onSelectChannel(ch)
+                                hudVisible = false
+                            },
+                        )
                     }
                 }
             }
@@ -1047,6 +869,264 @@ internal fun TvPlayerScreen(
                     onClose = { trackPanelOpen = false },
                     modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvHudControlsRow(
+    canSeekTimeline: Boolean,
+    isPaused: Boolean,
+    isBehindLive: Boolean,
+    isRecordingPlayback: Boolean,
+    canZap: Boolean,
+    playPauseFocusRequester: FocusRequester,
+    trackButtonFocusRequester: FocusRequester,
+    onFocusProgressBar: () -> Unit,
+    onSeekBy: (Long) -> Unit,
+    onTogglePause: () -> Unit,
+    onSeekToLiveEdge: () -> Unit,
+    onBackToLiveFocusChanged: (Boolean) -> Unit,
+    onZapDelta: (Int) -> Unit,
+    onToggleTrackPanel: () -> Unit,
+    onExit: () -> Unit,
+) {
+    val buttonShape = tvButtonShape()
+    val primaryColors = tvPrimaryButtonColors()
+    val secondaryColors = tvSecondaryButtonColors()
+
+    Row(
+        modifier = Modifier.onPreviewKeyEvent { keyEvent ->
+            if (keyEvent.type == KeyEventType.KeyDown &&
+                keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP
+            ) {
+                if (canSeekTimeline) {
+                    onFocusProgressBar()
+                }
+                true
+            } else {
+                false
+            }
+        },
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (canSeekTimeline) {
+            Button(
+                onClick = { onSeekBy(-30_000L) },
+                shape = buttonShape,
+                colors = secondaryColors,
+            ) {
+                Icon(
+                    imageVector = MuxGridIcons.Replay30,
+                    contentDescription = "Seek back 30 seconds",
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+        Button(
+            onClick = onTogglePause,
+            modifier = Modifier.focusRequester(playPauseFocusRequester),
+            shape = buttonShape,
+            colors = primaryColors,
+        ) {
+            Icon(
+                imageVector = if (isPaused) MuxGridIcons.Play else MuxGridIcons.Pause,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(if (isPaused) "Play" else "Pause", fontWeight = FontWeight.SemiBold)
+        }
+        if (canSeekTimeline) {
+            Button(
+                onClick = { onSeekBy(30_000L) },
+                shape = buttonShape,
+                colors = secondaryColors,
+            ) {
+                Icon(
+                    imageVector = MuxGridIcons.Forward30,
+                    contentDescription = "Seek forward 30 seconds",
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+        if (isBehindLive) {
+            Button(
+                onClick = onSeekToLiveEdge,
+                modifier = Modifier.onFocusChanged { onBackToLiveFocusChanged(it.isFocused) },
+                shape = buttonShape,
+                colors = primaryColors,
+            ) {
+                Icon(
+                    imageVector = MuxGridIcons.Sensors,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("Back to Live", fontWeight = FontWeight.SemiBold)
+            }
+        }
+        if (!isRecordingPlayback && canZap) {
+            Button(
+                onClick = { onZapDelta(-1) },
+                shape = buttonShape,
+                colors = secondaryColors,
+            ) {
+                Icon(
+                    imageVector = MuxGridIcons.SkipPrevious,
+                    contentDescription = "Previous channel",
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("Ch -")
+            }
+            Button(
+                onClick = { onZapDelta(1) },
+                shape = buttonShape,
+                colors = secondaryColors,
+            ) {
+                Text("Ch +")
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    imageVector = MuxGridIcons.SkipNext,
+                    contentDescription = "Next channel",
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+        Button(
+            onClick = onToggleTrackPanel,
+            modifier = Modifier.focusRequester(trackButtonFocusRequester),
+            shape = buttonShape,
+            colors = secondaryColors,
+        ) {
+            Icon(
+                imageVector = MuxGridIcons.Tracks,
+                contentDescription = "Display Options",
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Button(
+            onClick = onExit,
+            shape = buttonShape,
+            colors = secondaryColors,
+        ) {
+            Icon(
+                imageVector = MuxGridIcons.Stop,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text("Stop")
+        }
+    }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun TvQuickChannelStrip(
+    channels: List<Channel>,
+    currentChannelId: Long?,
+    nowNextMap: Map<Long, NowNextProgram>,
+    imageLoader: ImageLoader,
+    quickStripState: LazyListState,
+    activeChannelChipFocusRequester: FocusRequester,
+    onSelectChannel: (Channel) -> Unit,
+) {
+    val hasCurrentInStrip = remember(channels, currentChannelId) {
+        channels.any { it.id == currentChannelId }
+    }
+    LazyRow(
+        state = quickStripState,
+        modifier = Modifier
+            .focusGroup()
+            .focusRestorer(activeChannelChipFocusRequester),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(vertical = 2.dp),
+    ) {
+        items(
+            items = channels,
+            key = { it.id },
+            contentType = { "quick_strip_channel" },
+        ) { ch ->
+            val isCurrent = ch.id == currentChannelId
+            val isStripTarget = isCurrent || (!hasCurrentInStrip && ch.id == channels.firstOrNull()?.id)
+            val chNow = nowNextMap[ch.id]
+            val piconModel = remember(ch.id, ch.icon) {
+                ch.icon?.let { PiconModel(ch.id, it) }
+            }
+            var isFocused by remember(ch.id) { mutableStateOf(false) }
+            val containerColor = when {
+                isFocused -> MuxGridColors.FocusBorder
+                isCurrent -> MuxGridColors.CardSurfaceElevated
+                else -> MuxGridColors.CardSurface
+            }
+            val contentColor = if (isFocused) MuxGridColors.CanvasTv else MuxGridColors.TextPrimary
+
+            Row(
+                modifier = Modifier
+                    .width(210.dp)
+                    .then(
+                        if (isStripTarget) {
+                            Modifier.focusRequester(activeChannelChipFocusRequester)
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .clip(MuxGridShapes.Sm)
+                    .background(containerColor)
+                    .then(
+                        when {
+                            isFocused -> Modifier.border(MuxGridBorders.Focused, MuxGridColors.FocusBorder, MuxGridShapes.Sm)
+                            isCurrent -> Modifier.border(MuxGridBorders.Hairline, MuxGridColors.Accent, MuxGridShapes.Sm)
+                            else -> Modifier
+                        },
+                    )
+                    .onFocusChanged { state ->
+                        val focused = state.isFocused
+                        if (isFocused != focused) isFocused = focused
+                    }
+                    .clickable(
+                        interactionSource = remember(ch.id) { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { onSelectChannel(ch) },
+                    )
+                    .clearAndSetSemantics {
+                        role = Role.Button
+                        contentDescription = ch.name
+                    }
+                    .padding(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ChannelPiconBadge(
+                    channelNumber = ch.formattedNumber,
+                    channelName = ch.name,
+                    piconModel = piconModel,
+                    imageLoader = imageLoader,
+                    size = 32.dp,
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (ch.number > 0) "${ch.formattedNumber} · ${ch.name}" else ch.name,
+                        color = contentColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    chNow?.now?.title?.let { title ->
+                        Text(
+                            text = title,
+                            color = contentColor.copy(alpha = if (isFocused) 0.85f else 0.72f),
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
         }
     }
