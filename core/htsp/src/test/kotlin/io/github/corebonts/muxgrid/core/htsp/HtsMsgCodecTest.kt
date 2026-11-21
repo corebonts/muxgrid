@@ -74,7 +74,7 @@ class HtsMsgCodecTest {
                 listOf(
                     HtsValue.MapVal(
                         htsMap {
-                            put("name", "MindigTV/514MHz/M1 HD")
+                            put("name", "DVB-T/514MHz/Channel 1 HD")
                             put("type", "HDTV")
                         },
                     ),

@@ -56,7 +56,7 @@ class MpvPlaybackEngine(
     private val nowEpochSecProvider: () -> Long = { System.currentTimeMillis() / 1000L },
     initialTimeshiftWindow: TimeshiftWindow = TimeshiftWindow.GB_1,
     private val conflictFinder: (channelId: Long) -> Pair<DvrEntry, String?>?,
-) : PlaybackEngine, MPV.EventObserver {
+) : PlaybackEngine {
 
     private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mpvExecutor = Executors.newSingleThreadExecutor { r ->
@@ -208,7 +208,7 @@ class MpvPlaybackEngine(
             observeProperty("aid", MPV.mpvFormat.MPV_FORMAT_STRING)
             observeProperty("sid", MPV.mpvFormat.MPV_FORMAT_STRING)
 
-            addObserver(this@MpvPlaybackEngine)
+            addObserver(mpvEventObserver)
         }
         mpv = instance
     }
@@ -589,7 +589,7 @@ class MpvPlaybackEngine(
             val instance = mpv
             mpv = null
             if (instance != null) {
-                runCatching { instance.removeObserver(this) }
+                runCatching { instance.removeObserver(mpvEventObserver) }
                 runCatching { instance.close() }
             }
         }
@@ -858,7 +858,17 @@ class MpvPlaybackEngine(
         }
     }
 
-    override fun eventProperty(property: String) {
+    private val mpvEventObserver = object : MPV.EventObserver {
+        override fun eventProperty(property: String) = onMpvProperty(property)
+        override fun eventProperty(property: String, value: Long) = onMpvProperty(property, value)
+        override fun eventProperty(property: String, value: Boolean) = onMpvProperty(property, value)
+        override fun eventProperty(property: String, value: String) = onMpvProperty(property, value)
+        override fun eventProperty(property: String, value: Double) = onMpvProperty(property, value)
+        override fun eventProperty(property: String, value: `is`.xyz.mpv.MPVNode) = Unit
+        override fun event(eventId: Int, data: `is`.xyz.mpv.MPVNode) = onMpvEvent(eventId, data)
+    }
+
+    private fun onMpvProperty(property: String) {
         if (property == "aid" || property == "sid") {
             engineScope.launch {
                 mpvExecutor.execute {
@@ -868,14 +878,14 @@ class MpvPlaybackEngine(
         }
     }
 
-    override fun eventProperty(property: String, value: Long) {
+    private fun onMpvProperty(property: String, value: Long) {
         when (property) {
             "video-params/w" -> _state.update { it.copy(videoWidth = value.toInt()) }
             "video-params/h" -> _state.update { it.copy(videoHeight = value.toInt()) }
         }
     }
 
-    override fun eventProperty(property: String, value: Boolean) {
+    private fun onMpvProperty(property: String, value: Boolean) {
         when (property) {
             "pause" -> _state.update { current ->
                 val nextStatus = when {
@@ -898,7 +908,7 @@ class MpvPlaybackEngine(
         }
     }
 
-    override fun eventProperty(property: String, value: String) {
+    private fun onMpvProperty(property: String, value: String) {
         when (property) {
             "hwdec-current" -> _state.update { it.copy(hwdecCurrent = value) }
             "deinterlace" -> _state.update { it.copy(deinterlaceActive = value == "yes" || value == "auto") }
@@ -910,7 +920,7 @@ class MpvPlaybackEngine(
         }
     }
 
-    override fun eventProperty(property: String, value: Double) {
+    private fun onMpvProperty(property: String, value: Double) {
         when (property) {
             "time-pos" -> {
                 val posMs = (value * 1000.0).toLong().coerceAtLeast(0L)
@@ -952,9 +962,7 @@ class MpvPlaybackEngine(
         }
     }
 
-    override fun eventProperty(property: String, value: `is`.xyz.mpv.MPVNode) = Unit
-
-    override fun event(eventId: Int, data: `is`.xyz.mpv.MPVNode) {
+    private fun onMpvEvent(eventId: Int, data: `is`.xyz.mpv.MPVNode) {
         when (eventId) {
             MPV.mpvEvent.MPV_EVENT_SHUTDOWN -> {
                 Log.w(TAG, "MPV_EVENT_SHUTDOWN received; resetting instance")
@@ -962,7 +970,7 @@ class MpvPlaybackEngine(
                     val dead = mpv
                     mpv = null
                     if (dead != null) {
-                        runCatching { dead.removeObserver(this) }
+                        runCatching { dead.removeObserver(mpvEventObserver) }
                         runCatching { dead.close() }
                     }
                 }
