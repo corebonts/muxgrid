@@ -99,6 +99,6 @@ Designed strictly for **10-foot viewing** and a standard TV remote (`D-pad`, `OK
 ### TV Fullscreen Player (Zero-Friction Remote Controls)
 - **Channel Zapping (`Ch+`/`Ch-` or `D-pad Up` while HUD hidden):** Stops the previous stream cleanly, tunes the next/previous channel, and displays a minimal bottom-left OSD pill fading after 3 seconds.
 - **HUD Open (`OK`/`Select` or `D-pad Down` while HUD hidden):** Reveals the translucent dark scrim bottom HUD with focusable seek bar, `Play/Pause`, `Back to Live` pill, **Display Options**, and horizontal **Quick Channel Strip**.
-- **Progressive Seeking (`D-pad Left`/`Right` while HUD hidden):** Steps smoothly (`10s → 30s → 1m → 5m`) with instant preview timestamp and commit on short settle.
+- **Progressive Seeking (`D-pad Left`/`Right` while HUD hidden or on focused seek bar):** Quick taps follow an exact-target ladder (`10s → 30s → 1m → 5m → 10m`, then `+5m` per tap, stepping back down on opposite taps), while holding scrubs continuously at the active tap's step size (capped at `30s` per throttled tick) with instant preview timestamp and settle/release commit.
 - **Back key:** Dismisses open panels or the HUD first; otherwise stops playback cleanly and returns to the previous screen.
 - **Single-Tuner Notice:** Auto-dismissing top-right toast naming the blocking active recording rather than an infinite loading spinner.

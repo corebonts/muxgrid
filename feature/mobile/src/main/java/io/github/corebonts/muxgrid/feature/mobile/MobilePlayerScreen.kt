@@ -97,6 +97,7 @@ import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.PlaybackError
+import io.github.corebonts.muxgrid.core.model.PlaybackSeekDefaults
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.model.VideoAspectMode
@@ -267,8 +268,13 @@ internal fun MobilePlayerScreen(
                                 onDoubleTap = { offset ->
                                     if (!canSeekTimeline || trackPanelOpen || infoPanelOpen || quickZapOpen) return@detectTapGestures
                                     val isRight = offset.x >= size.width / 2f
-                                    val stepSec = if (isRight) 30 else -10
-                                    playbackEngine.seekBy(stepSec * 1_000L)
+                                    val deltaMs = if (isRight) {
+                                        PlaybackSeekDefaults.SEEK_FORWARD_STEP_MS
+                                    } else {
+                                        -PlaybackSeekDefaults.SEEK_BACK_STEP_MS
+                                    }
+                                    val stepSec = (deltaMs / 1_000L).toInt()
+                                    playbackEngine.seekBy(deltaMs)
                                     val nowMs = SystemClock.elapsedRealtime()
                                     val sameDirection = (stepSec > 0 && accumulatedSeekDelta > 0) ||
                                         (stepSec < 0 && accumulatedSeekDelta < 0)
@@ -627,7 +633,7 @@ internal fun MobilePlayerScreen(
                         iconSize = 24.dp,
                         onClick = {
                             hudInteractionNonce++
-                            playbackEngine.seekBy(-10_000L)
+                            playbackEngine.seekBy(-PlaybackSeekDefaults.SEEK_BACK_STEP_MS)
                         },
                     )
                     Box(
@@ -665,7 +671,7 @@ internal fun MobilePlayerScreen(
                         iconSize = 24.dp,
                         onClick = {
                             hudInteractionNonce++
-                            playbackEngine.seekBy(30_000L)
+                            playbackEngine.seekBy(PlaybackSeekDefaults.SEEK_FORWARD_STEP_MS)
                         },
                     )
                     CenterTransportButton(
@@ -879,7 +885,11 @@ internal fun MobilePlayerScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(
-                                        text = if (displayOffsetMs >= 2_000L) "-${formatDurationSec(shownOffsetSec)}" else "Live edge",
+                                        text = if (displayOffsetMs >= PlaybackSeekDefaults.LIVE_EDGE_DISPLAY_THRESHOLD_MS) {
+                                            "-${formatDurationSec(shownOffsetSec)}"
+                                        } else {
+                                            "Live edge"
+                                        },
                                         style = MuxGridType.TabularSmall,
                                         color = Color.White,
                                     )

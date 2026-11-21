@@ -63,6 +63,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.tv.material3.Button
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
@@ -86,15 +89,13 @@ import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.PlaybackError
+import io.github.corebonts.muxgrid.core.model.PlaybackSeekDefaults
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.model.VideoAspectMode
 import io.github.corebonts.muxgrid.core.player.MuxGridVideoView
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
 import kotlinx.coroutines.delay
-
-private val PROGRESSIVE_SEEK_STEPS_MS = listOf(10_000L, 30_000L, 60_000L, 300_000L)
-private val PROGRESSIVE_SEEK_LABELS = listOf("10s", "30s", "1m", "5m")
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -122,17 +123,15 @@ internal fun TvPlayerScreen(
     var progressFocused by remember { mutableStateOf(false) }
     var zapOsdTrigger by remember { mutableIntStateOf(0) }
     var zapOsdVisible by remember { mutableStateOf(true) }
-    var seekOsdTrigger by remember { mutableIntStateOf(0) }
-    var seekOsdVisible by remember { mutableStateOf(false) }
     var suppressNextCenterKeyUp by remember { mutableStateOf(false) }
     var suppressNextBackKeyUp by remember { mutableStateOf(false) }
 
-    // Progressive seek state (10s -> 30s -> 1m -> 5m with short settle commit)
-    var pendingSeekTargetMs by remember { mutableStateOf<Long?>(null) }
-    var seekStepIndex by remember { mutableIntStateOf(0) }
-    var lastSeekDirection by remember { mutableIntStateOf(0) }
-    var lastSeekStepLabel by remember { mutableStateOf("") }
-    var lastSeekPressElapsedMs by remember { mutableLongStateOf(0L) }
+    // Progressive seek state (exact-target tap ladder + gear-locked throttled hold)
+    val seekController = remember { TvSeekController() }
+    var seekUiState by remember { mutableStateOf(TvSeekUiState()) }
+    var seekCommitNonce by remember { mutableIntStateOf(0) }
+    var seekCommitDelayMs by remember { mutableStateOf<Long?>(null) }
+    var seekOsdLingerNonce by remember { mutableIntStateOf(0) }
 
     val playerFocusRequester = remember { FocusRequester() }
     val playPauseFocusRequester = remember { FocusRequester() }
@@ -145,6 +144,16 @@ internal fun TvPlayerScreen(
     var wasInfoPanelOpen by remember { mutableStateOf(false) }
     var backToLiveFocused by remember { mutableStateOf(false) }
     val canSeekTimeline = playbackState.isRecordingPlayback || playbackState.isTimeshiftSeekable
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    fun cancelPendingSeek() {
+        if (seekUiState.pendingTargetMs != null || seekUiState.osdVisible || seekCommitDelayMs != null) {
+            seekController.reset()
+            seekUiState = seekController.currentUiState()
+            seekCommitDelayMs = null
+            seekCommitNonce++
+        }
+    }
 
     LaunchedEffect(infoPanelOpen) {
         playbackEngine.setDiagnosticsEnabled(infoPanelOpen)
@@ -152,6 +161,17 @@ internal fun TvPlayerScreen(
     DisposableEffect(Unit) {
         onDispose {
             playbackEngine.setDiagnosticsEnabled(false)
+        }
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) {
+                cancelPendingSeek()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 
@@ -162,8 +182,7 @@ internal fun TvPlayerScreen(
     }
 
     LaunchedEffect(playbackState.channelId, playbackState.dvrEntryId) {
-        pendingSeekTargetMs = null
-        seekOsdVisible = false
+        cancelPendingSeek()
         progressFocused = false
         zapOsdVisible = true
         zapOsdTrigger++
@@ -176,21 +195,37 @@ internal fun TvPlayerScreen(
         }
     }
 
-    // Settle commit for progressive seeking + OSD timeout
-    LaunchedEffect(seekOsdTrigger) {
-        val target = pendingSeekTargetMs
-        if (target != null) {
-            delay(450L)
-            if (pendingSeekTargetMs == target) {
-                playbackEngine.seekTo(target)
-                pendingSeekTargetMs = null
-            }
+    fun commitPendingSeek(cancelPendingTimer: Boolean): Boolean {
+        val hadPending = seekUiState.pendingTargetMs != null
+        if (!hadPending) return false
+        val target = seekController.consumeCommitTarget()
+        seekUiState = seekController.currentUiState()
+        seekCommitDelayMs = null
+        if (cancelPendingTimer) {
+            seekCommitNonce++
         }
-        if (seekOsdVisible) {
-            delay(2_200L)
-            seekOsdVisible = false
-            lastSeekDirection = 0
-            seekStepIndex = 0
+        if (target != null) {
+            playbackEngine.seekTo(target)
+        }
+        if (seekUiState.osdVisible) {
+            seekOsdLingerNonce++
+        }
+        return true
+    }
+
+    // Settle commit for progressive seeking
+    LaunchedEffect(seekCommitNonce) {
+        val delayMs = seekCommitDelayMs ?: return@LaunchedEffect
+        delay(delayMs)
+        commitPendingSeek(cancelPendingTimer = false)
+    }
+
+    // OSD linger timeout after commit
+    LaunchedEffect(seekOsdLingerNonce) {
+        if (seekUiState.osdVisible && seekUiState.pendingTargetMs == null && !seekUiState.isHolding) {
+            delay(TvSeekController.OSD_LINGER_MS)
+            seekController.hideOsd()
+            seekUiState = seekController.currentUiState()
         }
     }
 
@@ -208,7 +243,10 @@ internal fun TvPlayerScreen(
         } else {
             progressFocused = false
             backToLiveFocused = false
-            seekOsdVisible = false
+            if (seekUiState.pendingTargetMs == null && !seekUiState.isHolding) {
+                seekController.hideOsd()
+                seekUiState = seekController.currentUiState()
+            }
             runCatching { playerFocusRequester.requestFocus() }
         }
         wasTrackPanelOpen = trackPanelOpen
@@ -234,10 +272,13 @@ internal fun TvPlayerScreen(
     }
 
     LaunchedEffect(canSeekTimeline) {
-        if (!canSeekTimeline && progressFocused) {
-            progressFocused = false
-            if (hudVisible && !trackPanelOpen && !infoPanelOpen) {
-                runCatching { playPauseFocusRequester.requestFocus() }
+        if (!canSeekTimeline) {
+            cancelPendingSeek()
+            if (progressFocused) {
+                progressFocused = false
+                if (hudVisible && !trackPanelOpen && !infoPanelOpen) {
+                    runCatching { playPauseFocusRequester.requestFocus() }
+                }
             }
         }
     }
@@ -250,43 +291,45 @@ internal fun TvPlayerScreen(
         }
     }
 
-    fun triggerProgressiveSeek(direction: Int) {
-        val nowMs = SystemClock.elapsedRealtime()
-        if (lastSeekDirection == direction && (nowMs - lastSeekPressElapsedMs) <= 950L) {
-            seekStepIndex = (seekStepIndex + 1).coerceAtMost(PROGRESSIVE_SEEK_STEPS_MS.lastIndex)
-        } else {
-            seekStepIndex = 0
+    fun handleSeekKeyDown(direction: Int, isRepeat: Boolean) {
+        val result = seekController.onKeyDown(
+            direction = direction,
+            isRepeat = isRepeat,
+            playbackState = playbackState,
+            nowElapsedMs = SystemClock.elapsedRealtime(),
+        )
+        seekUiState = result.uiState
+        if (result.commitDelayMs != null) {
+            seekCommitDelayMs = result.commitDelayMs
+            seekCommitNonce++
         }
-        lastSeekDirection = direction
-        lastSeekPressElapsedMs = nowMs
+    }
 
-        val stepMs = PROGRESSIVE_SEEK_STEPS_MS[seekStepIndex] * direction
-        lastSeekStepLabel = if (direction < 0) {
-            "-${PROGRESSIVE_SEEK_LABELS[seekStepIndex]}"
-        } else {
-            "+${PROGRESSIVE_SEEK_LABELS[seekStepIndex]}"
+    fun handleSeekKeyUp(direction: Int) {
+        val nextDelay = seekController.onKeyUp(direction)
+        seekUiState = seekController.currentUiState()
+        if (nextDelay != null) {
+            if (nextDelay <= 0L) {
+                commitPendingSeek(cancelPendingTimer = true)
+            } else {
+                seekCommitDelayMs = nextDelay
+                seekCommitNonce++
+            }
         }
-
-        val baseMs = pendingSeekTargetMs ?: playbackState.positionMs
-        val clamped = clampPreviewPositionMs(playbackState, baseMs + stepMs)
-        pendingSeekTargetMs = clamped
-        seekOsdVisible = true
-        seekOsdTrigger++
     }
 
     fun confirmFromProgressBar() {
-        val target = pendingSeekTargetMs
-        if (target != null) {
-            playbackEngine.seekTo(target)
-            pendingSeekTargetMs = null
-        } else {
+        if (!commitPendingSeek(cancelPendingTimer = true)) {
             playbackEngine.togglePause()
         }
     }
 
     BackHandler {
+        val hadActiveSeek = seekUiState.pendingTargetMs != null || seekUiState.isHolding
+        cancelPendingSeek()
         when {
             playbackState.error != null -> onExit()
+            hadActiveSeek -> Unit
             infoPanelOpen -> infoPanelOpen = false
             trackPanelOpen -> trackPanelOpen = false
             hudVisible -> hudVisible = false
@@ -300,6 +343,7 @@ internal fun TvPlayerScreen(
             .background(Color.Black)
             .onPreviewKeyEvent { keyEvent ->
                 val code = keyEvent.nativeKeyEvent.keyCode
+                val isRepeat = keyEvent.nativeKeyEvent.repeatCount > 0
                 val isBackKey = code == KeyEvent.KEYCODE_BACK ||
                     code == KeyEvent.KEYCODE_ESCAPE ||
                     code == KeyEvent.KEYCODE_BUTTON_B
@@ -317,14 +361,37 @@ internal fun TvPlayerScreen(
                         suppressNextBackKeyUp = false
                         return@onPreviewKeyEvent true
                     }
+                    if (canSeekTimeline && (
+                            code == KeyEvent.KEYCODE_MEDIA_REWIND ||
+                                code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
+                            )
+                    ) {
+                        handleSeekKeyUp(if (code == KeyEvent.KEYCODE_MEDIA_REWIND) -1 else 1)
+                        return@onPreviewKeyEvent true
+                    }
+                    if (!hudVisible && !trackPanelOpen && !infoPanelOpen && canSeekTimeline && (
+                            code == KeyEvent.KEYCODE_DPAD_LEFT ||
+                                code == KeyEvent.KEYCODE_DPAD_RIGHT
+                            )
+                    ) {
+                        handleSeekKeyUp(if (code == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1)
+                        return@onPreviewKeyEvent true
+                    }
                     return@onPreviewKeyEvent false
                 }
                 if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                if (hudVisible && !trackPanelOpen && !infoPanelOpen && !isBackKey) {
+                if (hudVisible && !trackPanelOpen && !infoPanelOpen && !isBackKey && !isRepeat) {
                     hudInteractionNonce++
                 }
                 when {
+                    isBackKey && suppressNextBackKeyUp -> true
+                    isBackKey && (seekUiState.pendingTargetMs != null || seekUiState.isHolding) -> {
+                        cancelPendingSeek()
+                        suppressNextBackKeyUp = true
+                        true
+                    }
                     isBackKey && (infoPanelOpen || trackPanelOpen || hudVisible) -> {
+                        cancelPendingSeek()
                         when {
                             infoPanelOpen -> infoPanelOpen = false
                             trackPanelOpen -> trackPanelOpen = false
@@ -334,6 +401,7 @@ internal fun TvPlayerScreen(
                         true
                     }
                     (code == KeyEvent.KEYCODE_ESCAPE || code == KeyEvent.KEYCODE_BUTTON_B) -> {
+                        cancelPendingSeek()
                         suppressNextBackKeyUp = true
                         onExit()
                         true
@@ -354,11 +422,11 @@ internal fun TvPlayerScreen(
                         true
                     }
                     canSeekTimeline && code == KeyEvent.KEYCODE_MEDIA_REWIND -> {
-                        triggerProgressiveSeek(-1)
+                        handleSeekKeyDown(-1, isRepeat = isRepeat)
                         true
                     }
                     canSeekTimeline && code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-                        triggerProgressiveSeek(1)
+                        handleSeekKeyDown(1, isRepeat = isRepeat)
                         true
                     }
                     !hudVisible && !trackPanelOpen && !infoPanelOpen && code == KeyEvent.KEYCODE_DPAD_DOWN -> {
@@ -369,11 +437,11 @@ internal fun TvPlayerScreen(
                         true
                     }
                     !hudVisible && !trackPanelOpen && !infoPanelOpen && canSeekTimeline && code == KeyEvent.KEYCODE_DPAD_LEFT -> {
-                        triggerProgressiveSeek(-1)
+                        handleSeekKeyDown(-1, isRepeat = isRepeat)
                         true
                     }
                     !hudVisible && !trackPanelOpen && !infoPanelOpen && canSeekTimeline && code == KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        triggerProgressiveSeek(1)
+                        handleSeekKeyDown(1, isRepeat = isRepeat)
                         true
                     }
                     !hudVisible && !trackPanelOpen && !infoPanelOpen && (
@@ -478,7 +546,7 @@ internal fun TvPlayerScreen(
 
         // Minimal 3s zap/start OSD when full HUD is hidden
         AnimatedVisibility(
-            visible = zapOsdVisible && !hudVisible && !trackPanelOpen && !infoPanelOpen && !seekOsdVisible,
+            visible = zapOsdVisible && !hudVisible && !trackPanelOpen && !infoPanelOpen && !seekUiState.osdVisible,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier
@@ -568,14 +636,14 @@ internal fun TvPlayerScreen(
 
         // Progressive seek OSD for D-pad Left/Right on DVR & Live Timeshift
         AnimatedVisibility(
-            visible = seekOsdVisible && canSeekTimeline && !hudVisible && !trackPanelOpen && !infoPanelOpen,
+            visible = seekUiState.osdVisible && canSeekTimeline && !hudVisible && !trackPanelOpen && !infoPanelOpen,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(32.dp),
         ) {
-            val shownPosMs = pendingSeekTargetMs ?: playbackState.positionMs
+            val shownPosMs = seekUiState.pendingTargetMs ?: playbackState.positionMs
             Column(
                 modifier = Modifier
                     .widthIn(min = 380.dp, max = 660.dp)
@@ -605,8 +673,8 @@ internal fun TvPlayerScreen(
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                             )
-                            if (lastSeekStepLabel.isNotEmpty()) {
-                                SeekStepBadge(direction = lastSeekDirection, label = lastSeekStepLabel)
+                            if (seekUiState.badgeLabel.isNotEmpty()) {
+                                SeekStepBadge(direction = seekUiState.direction, label = seekUiState.badgeLabel)
                             }
                         }
                         Row(
@@ -648,18 +716,22 @@ internal fun TvPlayerScreen(
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                             )
-                            if (lastSeekStepLabel.isNotEmpty()) {
-                                SeekStepBadge(direction = lastSeekDirection, label = lastSeekStepLabel)
+                            if (seekUiState.badgeLabel.isNotEmpty()) {
+                                SeekStepBadge(direction = seekUiState.direction, label = seekUiState.badgeLabel)
                             }
                         }
                         Text(
-                            text = if (offsetMs >= 2_000L) {
+                            text = if (offsetMs >= PlaybackSeekDefaults.LIVE_EDGE_DISPLAY_THRESHOLD_MS) {
                                 "-${formatDurationSec(stableOffsetSec)} · Buffer ${formatDurationSec(stableBufSec)}"
                             } else {
                                 "LIVE · Buffer ${formatDurationSec(stableBufSec)}"
                             },
                             style = MuxGridType.TabularNumber,
-                            color = if (offsetMs >= 2_000L) MuxGridColors.AccentSoft else MuxGridColors.CoralLive,
+                            color = if (offsetMs >= PlaybackSeekDefaults.LIVE_EDGE_DISPLAY_THRESHOLD_MS) {
+                                MuxGridColors.AccentSoft
+                            } else {
+                                MuxGridColors.CoralLive
+                            },
                         )
                     }
                     LiveProgressBar(
@@ -751,7 +823,7 @@ internal fun TvPlayerScreen(
 
                     if (playbackState.isRecordingPlayback) {
                         val dur = playbackState.durationMs.coerceAtLeast(1L)
-                        val shownPosMs = pendingSeekTargetMs ?: playbackState.positionMs
+                        val shownPosMs = seekUiState.pendingTargetMs ?: playbackState.positionMs
                         val stablePosSec = rememberStableDurationSec(shownPosMs, playbackState.dvrEntryId)
                         val stableDurSec = rememberStableDurationSec(playbackState.durationMs, playbackState.dvrEntryId)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -761,7 +833,8 @@ internal fun TvPlayerScreen(
                                 focused = progressFocused,
                                 focusRequester = progressFocusRequester,
                                 onFocusChanged = { progressFocused = it },
-                                onSeek = { triggerProgressiveSeek(it) },
+                                onSeekKeyDown = { dir, isRepeat -> handleSeekKeyDown(dir, isRepeat) },
+                                onSeekKeyUp = { dir -> handleSeekKeyUp(dir) },
                                 onConfirm = { confirmFromProgressBar() },
                                 onDown = { runCatching { playPauseFocusRequester.requestFocus() } },
                             )
@@ -775,8 +848,8 @@ internal fun TvPlayerScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Text(formatDurationSec(stablePosSec), style = MuxGridType.TabularSmall, color = Color.White)
-                                    if (seekOsdVisible && lastSeekStepLabel.isNotEmpty()) {
-                                        SeekStepBadge(direction = lastSeekDirection, label = lastSeekStepLabel)
+                                    if (seekUiState.osdVisible && seekUiState.badgeLabel.isNotEmpty()) {
+                                        SeekStepBadge(direction = seekUiState.direction, label = seekUiState.badgeLabel)
                                     }
                                 }
                                 Text(formatDurationSec(stableDurSec), style = MuxGridType.TabularSmall)
@@ -784,7 +857,7 @@ internal fun TvPlayerScreen(
                         }
                     } else if (playbackState.isTimeshiftSeekable) {
                         val bufWindow = playbackState.bufferWindowMs.coerceAtLeast(1L)
-                        val shownPosMs = pendingSeekTargetMs ?: playbackState.positionMs
+                        val shownPosMs = seekUiState.pendingTargetMs ?: playbackState.positionMs
                         val frac = ((shownPosMs - playbackState.bufferStartMs).toFloat() / bufWindow.toFloat()).coerceIn(0f, 1f)
                         val shownOffsetMs = (playbackState.bufferEndMs - shownPosMs).coerceAtLeast(0L)
                         val stableOffsetSec = rememberStableDurationSec(shownOffsetMs, playbackState.channelId)
@@ -796,7 +869,8 @@ internal fun TvPlayerScreen(
                                 focused = progressFocused,
                                 focusRequester = progressFocusRequester,
                                 onFocusChanged = { progressFocused = it },
-                                onSeek = { triggerProgressiveSeek(it) },
+                                onSeekKeyDown = { dir, isRepeat -> handleSeekKeyDown(dir, isRepeat) },
+                                onSeekKeyUp = { dir -> handleSeekKeyUp(dir) },
                                 onConfirm = { confirmFromProgressBar() },
                                 onDown = { runCatching { playPauseFocusRequester.requestFocus() } },
                             )
@@ -810,16 +884,20 @@ internal fun TvPlayerScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Text(
-                                        text = if (shownOffsetMs >= 2_000L) {
+                                        text = if (shownOffsetMs >= PlaybackSeekDefaults.LIVE_EDGE_DISPLAY_THRESHOLD_MS) {
                                             "-${formatDurationSec(stableOffsetSec)} behind live"
                                         } else {
                                             "LIVE"
                                         },
                                         style = MuxGridType.TabularSmall,
-                                        color = if (shownOffsetMs >= 2_000L) MuxGridColors.AccentSoft else MuxGridColors.CoralLive,
+                                        color = if (shownOffsetMs >= PlaybackSeekDefaults.LIVE_EDGE_DISPLAY_THRESHOLD_MS) {
+                                            MuxGridColors.AccentSoft
+                                        } else {
+                                            MuxGridColors.CoralLive
+                                        },
                                     )
-                                    if (seekOsdVisible && lastSeekStepLabel.isNotEmpty()) {
-                                        SeekStepBadge(direction = lastSeekDirection, label = lastSeekStepLabel)
+                                    if (seekUiState.osdVisible && seekUiState.badgeLabel.isNotEmpty()) {
+                                        SeekStepBadge(direction = seekUiState.direction, label = seekUiState.badgeLabel)
                                     }
                                 }
                                 Text(
@@ -957,7 +1035,7 @@ private fun TvHudControlsRow(
     ) {
         if (canSeekTimeline) {
             Button(
-                onClick = { onSeekBy(-30_000L) },
+                onClick = { onSeekBy(-PlaybackSeekDefaults.SEEK_FORWARD_STEP_MS) },
                 shape = buttonShape,
                 colors = secondaryColors,
             ) {
@@ -984,7 +1062,7 @@ private fun TvHudControlsRow(
         }
         if (canSeekTimeline) {
             Button(
-                onClick = { onSeekBy(30_000L) },
+                onClick = { onSeekBy(PlaybackSeekDefaults.SEEK_FORWARD_STEP_MS) },
                 shape = buttonShape,
                 colors = secondaryColors,
             ) {
@@ -1196,12 +1274,14 @@ private fun SeekStepBadge(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Icon(
-            imageVector = if (direction < 0) MuxGridIcons.FastRewind else MuxGridIcons.FastForward,
-            contentDescription = null,
-            tint = MuxGridColors.AccentSoft,
-            modifier = Modifier.size(16.dp),
-        )
+        if (direction != 0) {
+            Icon(
+                imageVector = if (direction < 0) MuxGridIcons.FastRewind else MuxGridIcons.FastForward,
+                contentDescription = null,
+                tint = MuxGridColors.AccentSoft,
+                modifier = Modifier.size(16.dp),
+            )
+        }
         Text(
             text = label,
             color = MuxGridColors.AccentSoft,
@@ -1218,7 +1298,8 @@ private fun TvSeekProgressBar(
     focused: Boolean,
     focusRequester: FocusRequester,
     onFocusChanged: (Boolean) -> Unit,
-    onSeek: (Int) -> Unit,
+    onSeekKeyDown: (direction: Int, isRepeat: Boolean) -> Unit,
+    onSeekKeyUp: (direction: Int) -> Unit,
     onConfirm: () -> Unit,
     onDown: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1236,16 +1317,27 @@ private fun TvSeekProgressBar(
                     code == KeyEvent.KEYCODE_ENTER ||
                     code == KeyEvent.KEYCODE_NUMPAD_ENTER
                 if (keyEvent.type == KeyEventType.KeyUp) {
-                    return@onPreviewKeyEvent isConfirmKey
+                    return@onPreviewKeyEvent when (code) {
+                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            onSeekKeyUp(-1)
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            onSeekKeyUp(1)
+                            true
+                        }
+                        else -> isConfirmKey
+                    }
                 }
                 if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val isRepeat = keyEvent.nativeKeyEvent.repeatCount > 0
                 when (code) {
                     KeyEvent.KEYCODE_DPAD_LEFT -> {
-                        onSeek(-1)
+                        onSeekKeyDown(-1, isRepeat)
                         true
                     }
                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        onSeek(1)
+                        onSeekKeyDown(1, isRepeat)
                         true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
@@ -1284,24 +1376,5 @@ private fun TvSeekProgressBar(
             height = if (focused) 6.dp else 4.dp,
             modifier = Modifier.fillMaxWidth(),
         )
-    }
-}
-
-private fun clampPreviewPositionMs(state: PlaybackState, requestedMs: Long): Long {
-    val nonNeg = requestedMs.coerceAtLeast(0L)
-    return when {
-        state.isGrowingRecording -> {
-            val maxSafe = (state.durationMs - 2_000L).coerceAtLeast(0L)
-            nonNeg.coerceAtMost(maxSafe)
-        }
-        state.isRecordingPlayback && state.durationMs > 0L -> {
-            nonNeg.coerceAtMost(state.durationMs)
-        }
-        !state.isRecordingPlayback && state.isTimeshiftSeekable -> {
-            val minStart = state.bufferStartMs.coerceAtLeast(0L)
-            val maxEnd = (state.bufferEndMs - 1_500L).coerceAtLeast(minStart)
-            nonNeg.coerceIn(minStart, maxEnd)
-        }
-        else -> nonNeg
     }
 }
