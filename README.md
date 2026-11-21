@@ -17,7 +17,7 @@ Built as a **single unified codebase** producing ABI-split APKs for Android phon
   - Buffered-range seekbar with `-MM:SS · Back to Live` quick jump.
 - **Program Guide (EPG):**
   - **Phone & Tablet:** Vertical per-channel agenda with day tabs, expandable icon-triggered search, and program detail bottom sheet (**Watch Live**, **Record**, **Cancel Recording**).
-  - **Android TV:** Horizontal timeline grid with sticky channel column, live "Now" hairline, and a fixed-height bottom details bar for focused programs.
+  - **Android TV:** Horizontal timeline grid with sticky channel column, live "Now" hairline, top-bar program search, and a fixed-height bottom details bar for focused programs.
 - **DVR & Recording Management:**
   - Dedicated sections/shelves for **Recording Now**, **Completed** (grouped by series/title), and **Scheduled** timers.
   - Schedule, stop, cancel, and delete recordings directly via HTSP.

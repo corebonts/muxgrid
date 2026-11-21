@@ -1,5 +1,6 @@
 package io.github.corebonts.muxgrid.feature.tv
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,6 +27,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,6 +46,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,6 +77,7 @@ import io.github.corebonts.muxgrid.core.designsystem.buildUpcomingDays
 import io.github.corebonts.muxgrid.core.designsystem.findMatchingDvrEntry
 import io.github.corebonts.muxgrid.core.designsystem.formatDayLabel
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
+import io.github.corebonts.muxgrid.core.designsystem.formatEpochDayHm
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
@@ -98,6 +106,8 @@ internal fun TvGuideScreen(
     dvrEntries: Map<Long, DvrEntry>,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
+    searchOpen: Boolean = false,
+    onCloseSearch: () -> Unit = {},
     onWatchChannel: (Channel) -> Unit,
     onPlayRecording: (DvrEntry, Channel?, Long) -> Unit,
     onScheduleRecording: suspend (Long) -> Result<Long>,
@@ -110,6 +120,23 @@ internal fun TvGuideScreen(
     var windowStartEpochSec by remember { mutableLongStateOf(initialWindowStart) }
     val windowEndEpochSec = windowStartEpochSec + TIMELINE_WINDOW_SEC
 
+    val searchState = rememberTextFieldState()
+    val searchFocusRequester = remember { FocusRequester() }
+    var searchFieldFocused by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = searchOpen) {
+        searchState.clearText()
+        onCloseSearch()
+    }
+
+    LaunchedEffect(searchOpen) {
+        if (searchOpen) {
+            runCatching { searchFocusRequester.requestFocus() }
+        } else {
+            searchState.clearText()
+        }
+    }
+
     var focusedEvent by remember { mutableStateOf<EpgEvent?>(null) }
     var actionEventKey by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     var pendingConfirm by remember { mutableStateOf<Pair<DvrConfirmKind, DvrEntry>?>(null) }
@@ -117,8 +144,43 @@ internal fun TvGuideScreen(
     var actionError by remember { mutableStateOf<String?>(null) }
 
     val channelById = remember(channels) { channels.associateBy { it.id } }
-    val previewEvent = focusedEvent ?: channels.firstNotNullOfOrNull { ch ->
-        epgByChannel[ch.id]?.firstOrNull { it.stopEpochSec > windowStartEpochSec && it.startEpochSec < windowEndEpochSec }
+    val searchQuery = searchState.text.toString()
+    val trimmedQuery = searchQuery.trim()
+    val searchResults: List<Pair<EpgEvent, Channel>> = remember(
+        searchOpen,
+        trimmedQuery,
+        epgByChannel,
+        channels,
+        nowEpochSec / 60L,
+    ) {
+        if (!searchOpen || trimmedQuery.isEmpty()) {
+            emptyList()
+        } else {
+            val results = ArrayList<Pair<EpgEvent, Channel>>()
+            for (ch in channels) {
+                val list = epgByChannel[ch.id].orEmpty()
+                for (ev in list) {
+                    if (ev.stopEpochSec >= nowEpochSec - 900L && (
+                            ev.title.contains(trimmedQuery, ignoreCase = true) ||
+                                (ev.subtitle?.contains(trimmedQuery, ignoreCase = true) == true) ||
+                                (ev.summary?.contains(trimmedQuery, ignoreCase = true) == true) ||
+                                (ev.description?.contains(trimmedQuery, ignoreCase = true) == true)
+                            )
+                    ) {
+                        results.add(ev to ch)
+                    }
+                }
+            }
+            results.sortedBy { it.first.startEpochSec }.take(120)
+        }
+    }
+
+    val previewEvent = focusedEvent ?: if (searchOpen && trimmedQuery.isNotEmpty()) {
+        searchResults.firstOrNull()?.first
+    } else {
+        channels.firstNotNullOfOrNull { ch ->
+            epgByChannel[ch.id]?.firstOrNull { it.stopEpochSec > windowStartEpochSec && it.startEpochSec < windowEndEpochSec }
+        }
     }
 
     val slotStarts = remember(windowStartEpochSec) {
@@ -138,84 +200,239 @@ internal fun TvGuideScreen(
             .padding(horizontal = 4.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // Time navigation + Day jump bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Button(
-                onClick = { windowStartEpochSec = (windowStartEpochSec - TIMELINE_STEP_SEC).coerceAtLeast(floorToHalfHour(nowEpochSec) - 3600L) },
-                shape = tvButtonShape(),
-                colors = tvSecondaryButtonColors(),
+        if (searchOpen) {
+            val searchTextStyle = TextStyle(
+                color = MuxGridColors.TextPrimary,
+                fontSize = 14.sp,
+                lineHeight = 18.sp,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(MuxGridIcons.ChevronLeft, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(2.dp))
-                Text("-2h", fontSize = 12.sp)
-            }
-            Button(
-                onClick = { windowStartEpochSec = floorToHalfHour(nowEpochSec) },
-                shape = tvButtonShape(),
-                colors = tvPrimaryButtonColors(),
-            ) {
-                Icon(MuxGridIcons.Schedule, contentDescription = null, modifier = Modifier.size(15.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Now", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Button(
-                onClick = { windowStartEpochSec += TIMELINE_STEP_SEC },
-                shape = tvButtonShape(),
-                colors = tvSecondaryButtonColors(),
-            ) {
-                Text("+2h", fontSize = 12.sp)
-                Spacer(Modifier.width(2.dp))
-                Icon(MuxGridIcons.ChevronRight, contentDescription = null, modifier = Modifier.size(16.dp))
-            }
-            Spacer(Modifier.width(6.dp))
-            val activeZone = ZoneId.systemDefault()
-            val windowDate = Instant.ofEpochSecond(windowStartEpochSec).atZone(activeZone).toLocalDate()
-            val todayDate = Instant.ofEpochSecond(nowEpochSec).atZone(activeZone).toLocalDate()
-            days.forEach { dayDate ->
-                val selected = dayDate == windowDate
-                FilterChip(
-                    selected = selected,
-                    onClick = {
-                        val todayStart = floorToHalfHour(nowEpochSec)
-                        val targetMidnight = dayDate.atStartOfDay(activeZone).toEpochSecond()
-                        windowStartEpochSec = if (dayDate == todayDate) {
-                            todayStart
-                        } else {
-                            targetMidnight + 18L * 3600L // Prime time 18:00 on future days
-                        }
-                    },
-                    shape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm),
-                    colors = FilterChipDefaults.colors(
-                        containerColor = MuxGridColors.CardSurface,
-                        contentColor = MuxGridColors.TextSecondary,
-                        selectedContainerColor = MuxGridColors.Accent,
-                        selectedContentColor = MuxGridColors.OnAccent,
-                        focusedContainerColor = MuxGridColors.FocusBorder,
-                        focusedContentColor = MuxGridColors.CanvasTv,
-                        focusedSelectedContainerColor = MuxGridColors.FocusBorder,
-                        focusedSelectedContentColor = MuxGridColors.CanvasTv,
-                    ),
-                    border = FilterChipDefaults.border(
-                        border = Border.None,
-                        selectedBorder = Border.None,
-                    ),
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(40.dp)
+                        .clip(MuxGridShapes.Sm)
+                        .background(MuxGridColors.CardSurface)
+                        .border(
+                            width = if (searchFieldFocused) MuxGridBorders.Focused else MuxGridBorders.Divider,
+                            color = if (searchFieldFocused) MuxGridColors.FocusBorder else MuxGridColors.HairlineBorder,
+                            shape = MuxGridShapes.Sm,
+                        )
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(
-                        text = formatDayLabel(dayDate, nowEpochSec),
-                        fontSize = 12.sp,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                    Icon(
+                        imageVector = MuxGridIcons.Search,
+                        contentDescription = null,
+                        tint = if (searchFieldFocused) MuxGridColors.AccentSoft else MuxGridColors.TextMuted,
+                        modifier = Modifier.size(16.dp),
                     )
+                    BasicTextField(
+                        state = searchState,
+                        lineLimits = TextFieldLineLimits.SingleLine,
+                        textStyle = searchTextStyle,
+                        cursorBrush = SolidColor(MuxGridColors.AccentSoft),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(searchFocusRequester)
+                            .onFocusChanged { searchFieldFocused = it.isFocused },
+                        decorator = { innerTextField ->
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        text = "Search upcoming programs…",
+                                        style = searchTextStyle.copy(color = MuxGridColors.TextMuted),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        },
+                    )
+                }
+                if (searchQuery.isNotEmpty()) {
+                    Button(
+                        onClick = { searchState.clearText() },
+                        shape = tvButtonShape(),
+                        colors = tvSecondaryButtonColors(),
+                    ) {
+                        Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Clear", fontSize = 12.sp)
+                    }
+                }
+            }
+        } else {
+            // Time navigation + Day jump bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(
+                    onClick = { windowStartEpochSec = (windowStartEpochSec - TIMELINE_STEP_SEC).coerceAtLeast(floorToHalfHour(nowEpochSec) - 3600L) },
+                    shape = tvButtonShape(),
+                    colors = tvSecondaryButtonColors(),
+                ) {
+                    Icon(MuxGridIcons.ChevronLeft, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(2.dp))
+                    Text("-2h", fontSize = 12.sp)
+                }
+                Button(
+                    onClick = { windowStartEpochSec = floorToHalfHour(nowEpochSec) },
+                    shape = tvButtonShape(),
+                    colors = tvPrimaryButtonColors(),
+                ) {
+                    Icon(MuxGridIcons.Schedule, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Now", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Button(
+                    onClick = { windowStartEpochSec += TIMELINE_STEP_SEC },
+                    shape = tvButtonShape(),
+                    colors = tvSecondaryButtonColors(),
+                ) {
+                    Text("+2h", fontSize = 12.sp)
+                    Spacer(Modifier.width(2.dp))
+                    Icon(MuxGridIcons.ChevronRight, contentDescription = null, modifier = Modifier.size(16.dp))
+                }
+                Spacer(Modifier.width(6.dp))
+                val activeZone = ZoneId.systemDefault()
+                val windowDate = Instant.ofEpochSecond(windowStartEpochSec).atZone(activeZone).toLocalDate()
+                val todayDate = Instant.ofEpochSecond(nowEpochSec).atZone(activeZone).toLocalDate()
+                days.forEach { dayDate ->
+                    val selected = dayDate == windowDate
+                    FilterChip(
+                        selected = selected,
+                        onClick = {
+                            val todayStart = floorToHalfHour(nowEpochSec)
+                            val targetMidnight = dayDate.atStartOfDay(activeZone).toEpochSecond()
+                            windowStartEpochSec = if (dayDate == todayDate) {
+                                todayStart
+                            } else {
+                                targetMidnight + 18L * 3600L // Prime time 18:00 on future days
+                            }
+                        },
+                        shape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm),
+                        colors = FilterChipDefaults.colors(
+                            containerColor = MuxGridColors.CardSurface,
+                            contentColor = MuxGridColors.TextSecondary,
+                            selectedContainerColor = MuxGridColors.Accent,
+                            selectedContentColor = MuxGridColors.OnAccent,
+                            focusedContainerColor = MuxGridColors.FocusBorder,
+                            focusedContentColor = MuxGridColors.CanvasTv,
+                            focusedSelectedContainerColor = MuxGridColors.FocusBorder,
+                            focusedSelectedContentColor = MuxGridColors.CanvasTv,
+                        ),
+                        border = FilterChipDefaults.border(
+                            border = Border.None,
+                            selectedBorder = Border.None,
+                        ),
+                    ) {
+                        Text(
+                            text = formatDayLabel(dayDate, nowEpochSec),
+                            fontSize = 12.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                        )
+                    }
                 }
             }
         }
 
-        if (channels.isEmpty()) {
+        if (searchOpen && trimmedQuery.isNotEmpty()) {
+            if (searchResults.isEmpty()) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text("No programs match \"$trimmedQuery\"", style = MuxGridType.CardSubtitle, fontSize = 16.sp)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(bottom = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    items(searchResults, key = { it.first.id }) { (ev, ch) ->
+                        val isLiveNow = nowEpochSec in ev.startEpochSec until ev.stopEpochSec
+                        val linkedDvr = findMatchingDvrEntry(ev, dvrEntries)
+                        Surface(
+                            onClick = {
+                                actionError = null
+                                actionEventKey = ev.channelId to ev.id
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { if (it.isFocused) focusedEvent = ev },
+                            shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
+                            colors = ClickableSurfaceDefaults.colors(
+                                containerColor = if (isLiveNow) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface,
+                                contentColor = MuxGridColors.TextPrimary,
+                                focusedContainerColor = MuxGridColors.Accent.copy(alpha = 0.22f),
+                                focusedContentColor = MuxGridColors.TextPrimary,
+                            ),
+                            border = ClickableSurfaceDefaults.border(
+                                border = Border.None,
+                                focusedBorder = Border(
+                                    border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
+                                    shape = MuxGridShapes.Sm,
+                                ),
+                            ),
+                            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.01f),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                ChannelPiconBadge(
+                                    channelNumber = ch.formattedNumber,
+                                    channelName = ch.name,
+                                    piconModel = ch.icon?.let { PiconModel(ch.id, it) },
+                                    imageLoader = imageLoader,
+                                    size = 34.dp,
+                                )
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = ev.title,
+                                        style = MuxGridType.CardTitle,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = "${ch.name} · ${formatEpochDayHm(ev.startEpochSec, nowEpochSec)}–${formatEpochHm(ev.stopEpochSec)} (${formatDurationMinutes(ev.startEpochSec, ev.stopEpochSec)})",
+                                        style = MuxGridType.TabularSmall,
+                                        color = MuxGridColors.AccentSoft,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                if (linkedDvr != null) {
+                                    DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
+                                } else if (isLiveNow) {
+                                    Text(
+                                        text = "ON NOW",
+                                        color = MuxGridColors.CoralLive,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (channels.isEmpty()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text("No channels synced yet", style = MuxGridType.CardSubtitle, fontSize = 16.sp)
             }

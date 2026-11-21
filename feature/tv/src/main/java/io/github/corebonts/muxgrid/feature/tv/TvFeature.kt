@@ -309,7 +309,13 @@ private fun TvContent(
             )
         }
         TvRoute.MAIN -> {
-            BackHandler(enabled = activeTab != MainTab.LIVE) {
+            var isGuideSearchOpen by remember { mutableStateOf(false) }
+            LaunchedEffect(activeTab) {
+                if (activeTab != MainTab.GUIDE) {
+                    isGuideSearchOpen = false
+                }
+            }
+            BackHandler(enabled = activeTab != MainTab.LIVE && !isGuideSearchOpen) {
                 activeTab = MainTab.LIVE
             }
             var railHasFocus by remember { mutableStateOf(false) }
@@ -356,51 +362,87 @@ private fun TvContent(
                             },
                             style = MuxGridType.ScreenTitle,
                         )
-                        Surface(
-                            onClick = {
-                                if (!isRefreshing) {
-                                    scope.launch {
-                                        isRefreshing = true
-                                        try {
-                                            repository.refresh()
-                                        } finally {
-                                            isRefreshing = false
-                                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            if (activeTab == MainTab.GUIDE) {
+                                Surface(
+                                    onClick = { isGuideSearchOpen = !isGuideSearchOpen },
+                                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
+                                    colors = ClickableSurfaceDefaults.colors(
+                                        containerColor = if (isGuideSearchOpen) MuxGridColors.CardSurfaceElevated else Color.Transparent,
+                                        contentColor = if (isGuideSearchOpen) MuxGridColors.AccentSoft else MuxGridColors.TextSecondary,
+                                        focusedContainerColor = MuxGridColors.FocusBorder,
+                                        focusedContentColor = MuxGridColors.CanvasTv,
+                                    ),
+                                    border = ClickableSurfaceDefaults.border(
+                                        border = Border.None,
+                                        focusedBorder = Border(
+                                            border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
+                                            shape = MuxGridShapes.Sm,
+                                        ),
+                                    ),
+                                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+                                ) {
+                                    Box(
+                                        modifier = Modifier.size(38.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isGuideSearchOpen) MuxGridIcons.Close else MuxGridIcons.Search,
+                                            contentDescription = if (isGuideSearchOpen) "Close search" else "Search programs",
+                                            modifier = Modifier.size(18.dp),
+                                        )
                                     }
                                 }
-                            },
-                            shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
-                            colors = ClickableSurfaceDefaults.colors(
-                                containerColor = Color.Transparent,
-                                contentColor = MuxGridColors.TextSecondary,
-                                focusedContainerColor = MuxGridColors.FocusBorder,
-                                focusedContentColor = MuxGridColors.CanvasTv,
-                            ),
-                            border = ClickableSurfaceDefaults.border(
-                                border = Border.None,
-                                focusedBorder = Border(
-                                    border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                                    shape = MuxGridShapes.Sm,
+                            }
+                            Surface(
+                                onClick = {
+                                    if (!isRefreshing) {
+                                        scope.launch {
+                                            isRefreshing = true
+                                            try {
+                                                repository.refresh()
+                                            } finally {
+                                                isRefreshing = false
+                                            }
+                                        }
+                                    }
+                                },
+                                shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
+                                colors = ClickableSurfaceDefaults.colors(
+                                    containerColor = Color.Transparent,
+                                    contentColor = MuxGridColors.TextSecondary,
+                                    focusedContainerColor = MuxGridColors.FocusBorder,
+                                    focusedContentColor = MuxGridColors.CanvasTv,
                                 ),
-                            ),
-                            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
-                        ) {
-                            Box(
-                                modifier = Modifier.size(38.dp),
-                                contentAlignment = Alignment.Center,
+                                border = ClickableSurfaceDefaults.border(
+                                    border = Border.None,
+                                    focusedBorder = Border(
+                                        border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
+                                        shape = MuxGridShapes.Sm,
+                                    ),
+                                ),
+                                scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
                             ) {
-                                if (isRefreshing) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MuxGridColors.AccentSoft,
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = MuxGridIcons.Refresh,
-                                        contentDescription = "Refresh",
-                                        modifier = Modifier.size(18.dp),
-                                    )
+                                Box(
+                                    modifier = Modifier.size(38.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (isRefreshing) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MuxGridColors.AccentSoft,
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = MuxGridIcons.Refresh,
+                                            contentDescription = "Refresh",
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -438,6 +480,8 @@ private fun TvContent(
                                     dvrEntries = dvrEntries,
                                     nowEpochSec = nowEpochSec,
                                     imageLoader = repository.imageLoader,
+                                    searchOpen = isGuideSearchOpen,
+                                    onCloseSearch = { isGuideSearchOpen = false },
                                     onWatchChannel = { channel ->
                                         playbackEngine.playChannel(channel, hwDecPreset)
                                         route = TvRoute.PLAYER

@@ -83,11 +83,11 @@ Designed strictly for **10-foot viewing** and a standard TV remote (`D-pad`, `OK
 
 ### Navigation Chrome
 - Collapsible left **Navigation Rail** (`Live`, `Guide`, `Recordings`, `Settings`) with focus restoration, a server status indicator dot on **Settings** when not connected, and clean left/right traversal into screen content without focus traps.
-- Compact top header retains the tab title and D-pad-focusable **Refresh** action.
+- Compact top header retains the tab title, a D-pad-focusable **Search** button on the Guide tab, and the **Refresh** action.
 
 ### Screen Layouts
 - **Live Screen:** Multi-column grid of large legible channel cards + focusable filter chips above the grid.
-- **Guide (EPG) Screen:** Horizontal timeline grid (sticky channel column, time slots horizontally, red vertical "Now" hairline) paired with a fixed-height bottom details bar showing title, air time, and synopsis of the currently focused program.
+- **Guide (EPG) Screen:** Horizontal timeline grid (sticky channel column, time slots horizontally, red vertical "Now" hairline) with top-bar search across upcoming programs, paired with a fixed-height bottom details bar showing title, air time, and synopsis of the currently focused program.
 - **Recordings Screen:** Horizontal shelves (`Recording Now`, `Continue Watching`, `All Recordings`, `Scheduled`).
 
 ### TV Fullscreen Player (Zero-Friction Remote Controls)
