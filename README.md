@@ -2,6 +2,12 @@
   <img src="./docs/assets/muxgrid-banner.jpg" alt="MuxGrid — Modern Tvheadend client for Android & Android TV (Live TV, EPG Guide, Recordings)" width="100%" />
 </p>
 
+<p align="center">
+  <a href="https://github.com/corebonts/muxgrid/releases"><img src="https://img.shields.io/github/v/release/corebonts/muxgrid?label=Release&color=F59E0B" alt="Latest Release" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue" alt="License: Apache-2.0" /></a>
+  <a href="#download--install"><img src="https://img.shields.io/badge/minSdk-28%20(Android%209%2B)-3DDC84?logo=android&logoColor=white" alt="minSdk 28 (Android 9+)" /></a>
+</p>
+
 A lightweight, native Android and Android TV client for **Tvheadend** (`4.3+`), built for sub-second channel zapping, local live pause/rewind (timeshift), smooth playback of completed and actively recording DVR shows, background audio playback on mobile, and a low-glare **Broadcast Monitor** dark interface (Carbon & Signal Amber).
 
 Built as a **single unified codebase** producing ABI-split APKs for Android phones, tablets, and Android TV / Google TV devices (`minSdk 28`).
