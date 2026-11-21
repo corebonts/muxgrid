@@ -115,6 +115,8 @@ class MpvPlaybackEngine(
     @Volatile
     private var currentCacheOnDisk: Boolean = false
 
+    private var videoOutputDisabled: Boolean = false
+
     private var prevProxyBytes: Long = 0L
     private var prevProxySampleElapsedMs: Long = 0L
     private var smoothedNetworkRateBps: Long? = null
@@ -369,6 +371,7 @@ class MpvPlaybackEngine(
             instance.setPropertyString("start", "none")
             instance.setPropertyDouble("volume", 100.0)
             instance.setPropertyString("vid", if (explicitAudioOnly) "no" else "auto")
+            videoOutputDisabled = explicitAudioOnly
             instance.setPropertyBoolean("pause", false)
             if (hasSurface || channel.isRadio) {
                 pendingUrl = null
@@ -459,6 +462,7 @@ class MpvPlaybackEngine(
             instance.setPropertyString("start", if (resumeSec > 0L) "+$resumeSec" else "none")
             instance.setPropertyDouble("volume", 100.0)
             instance.setPropertyString("vid", if (explicitAudioOnly) "no" else "auto")
+            videoOutputDisabled = explicitAudioOnly
             instance.setPropertyBoolean("pause", false)
             if (hasSurface || (channel?.isRadio == true)) {
                 pendingUrl = null
@@ -506,6 +510,7 @@ class MpvPlaybackEngine(
                 instance.setPropertyString("start", "none")
                 instance.setPropertyString("force-seekable", "no")
                 instance.setPropertyString("vid", "auto")
+                videoOutputDisabled = false
             }
             liveStrategy.stopActive()
         }
@@ -670,6 +675,7 @@ class MpvPlaybackEngine(
             val instance = mpv ?: return@submitMpvTask
             if (!instance.isInitialized) return@submitMpvTask
             if (effective) {
+                videoOutputDisabled = true
                 instance.setPropertyString("vid", "no")
                 instance.setPropertyString("vo", "null")
                 instance.setPropertyString("force-window", "no")
@@ -725,6 +731,7 @@ class MpvPlaybackEngine(
             hasSurface = true
             val audioOnly = explicitAudioOnly || (activeChannel?.isRadio == true)
             if (audioOnly) {
+                videoOutputDisabled = true
                 instance.setPropertyString("vid", "no")
                 instance.setPropertyString("vo", "null")
                 instance.setPropertyString("force-window", "no")
@@ -745,16 +752,47 @@ class MpvPlaybackEngine(
     }
 
     private fun attachVideoOutputLocked(instance: MPV, surface: Surface, width: Int, height: Int) {
+        val wasVideoDisabled = videoOutputDisabled ||
+            runCatching { instance.getPropertyString("vid") }.getOrNull() == "no" ||
+            runCatching { instance.getPropertyString("vo") }.getOrNull() == "null"
         if (!surfaceAttachedToMpv) {
             instance.attachSurface(surface)
             surfaceAttachedToMpv = true
         }
-        instance.setPropertyString("vid", "auto")
+        // Configure surface dimensions, window, and vo=gpu BEFORE re-enabling vid=auto;
+        // otherwise mpv initializes the video chain against vo=null and leaves the Surface blank.
+        if (width > 0 && height > 0) {
+            instance.setPropertyString("android-surface-size", "${width}x${height}")
+        }
         instance.setPropertyString("force-window", "yes")
         instance.setPropertyString("vo", "gpu")
         applyAspectModeLocked(instance, currentAspectMode)
-        if (width > 0 && height > 0) {
-            instance.setPropertyString("android-surface-size", "${width}x${height}")
+        instance.setPropertyString("vid", "auto")
+        videoOutputDisabled = false
+
+        if (wasVideoDisabled && hadFileLoaded && pendingUrl == null && activeChannel?.isRadio != true) {
+            resyncVideoAfterRestoreLocked(instance)
+        }
+    }
+
+    private fun resyncVideoAfterRestoreLocked(instance: MPV) {
+        val paused = runCatching { instance.getPropertyBoolean("pause") }.getOrNull() == true
+        val isDvr = activeDvrEntry != null
+        val isBehindLive = _state.value.isBehindLive
+        val (_, rangeEndSec) = readSeekableCacheRangeSecLocked(instance)
+        if (isDvr || isBehindLive) {
+            instance.command("seek", "0", "relative+exact")
+            return
+        }
+        val posSec = runCatching { instance.getPropertyDouble("time-pos") }.getOrNull()
+        val cacheEndSec = rangeEndSec ?: runCatching { instance.getPropertyDouble("demuxer-cache-time") }.getOrNull()
+        val liveJumpSec = computeLiveVideoRestoreSeekSec(posSec, cacheEndSec)
+        if (!paused && liveJumpSec != null) {
+            // While vid=no, mpv discards incoming video packets but buffers audio ahead;
+            // skip the audio-only cache gap to the live head so video frames start immediately.
+            instance.command("seek", String.format(Locale.US, "%.3f", liveJumpSec), "absolute")
+        } else if (rangeEndSec != null) {
+            instance.command("seek", "0", "relative+exact")
         }
     }
 
@@ -791,6 +829,7 @@ class MpvPlaybackEngine(
                 val instance = mpv ?: return@submit
                 if (!instance.isInitialized) return@submit
                 // Disable video decode while backgrounded / audio-only so CPU & battery stay low
+                videoOutputDisabled = true
                 instance.setPropertyString("vid", "no")
                 instance.setPropertyString("vo", "null")
                 instance.setPropertyString("force-window", "no")
@@ -1747,4 +1786,14 @@ class MpvPlaybackEngine(
         private const val LIVE_EDGE_SAFETY_MS = 1_500L
         private const val SURFACE_DETACH_TIMEOUT_MS = 1_500L
     }
+}
+
+internal fun computeLiveVideoRestoreSeekSec(
+    posSec: Double?,
+    cacheEndSec: Double?,
+): Double? {
+    if (posSec == null || cacheEndSec == null || !posSec.isFinite() || !cacheEndSec.isFinite()) return null
+    val gapSec = cacheEndSec - posSec
+    if (gapSec <= 0.5) return null
+    return (cacheEndSec - 0.15).coerceAtLeast(posSec)
 }
