@@ -353,4 +353,135 @@ class TvheadendStoreTest {
         assertEquals(1, merged[2L]!!.playCount)
         assertEquals(0L, merged[2L]!!.playPositionSec)
     }
+
+    @Test
+    fun `publishNowNext ignores stale channel nextEventId pointing to past event`() {
+        var nowSec = 10_000L
+        val store = TvheadendStore(epochSecondsProvider = { nowSec })
+        store.applyEvent(HtspPushEvent.SyncStarting)
+        store.applyEvent(
+            HtspPushEvent.ChannelAdd(
+                Channel(
+                    id = 4L,
+                    number = 4,
+                    name = "M4 Sport HD",
+                    eventId = 100L,
+                    nextEventId = 101L,
+                ),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 100L, channelId = 4L, startEpochSec = 9_000L, stopEpochSec = 11_000L, title = "Earlier 1", nextEventId = 101L),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 101L, channelId = 4L, startEpochSec = 11_000L, stopEpochSec = 12_000L, title = "Past Next", nextEventId = 102L),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 102L, channelId = 4L, startEpochSec = 12_000L, stopEpochSec = 14_000L, title = "Current Show", nextEventId = 103L),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 103L, channelId = 4L, startEpochSec = 14_000L, stopEpochSec = 16_000L, title = "Upcoming Show"),
+            ),
+        )
+        store.applyEvent(HtspPushEvent.InitialSyncCompleted)
+
+        assertEquals(100L, store.nowNextByChannel.value[4L]?.now?.id)
+        assertEquals(101L, store.nowNextByChannel.value[4L]?.next?.id)
+
+        // Advance time without a channelUpdate (and before Tvheadend deletes 100/101):
+        // ch.eventId (100) and ch.nextEventId (101) are now both stale in the past.
+        nowSec = 13_000L
+        store.refreshNowNext()
+
+        val nowNext = store.nowNextByChannel.value[4L]
+        assertEquals("Current Show", nowNext?.now?.title)
+        assertEquals("Upcoming Show", nowNext?.next?.title)
+    }
+
+    @Test
+    fun `publishNowNext ignores stale channel nextEventId even when channel eventId is fresh or in EPG gap`() {
+        var nowSec = 13_000L
+        val store = TvheadendStore(epochSecondsProvider = { nowSec })
+        store.applyEvent(HtspPushEvent.SyncStarting)
+        store.applyEvent(
+            HtspPushEvent.ChannelAdd(
+                Channel(
+                    id = 8L,
+                    number = 8,
+                    name = "Spektrum Home +",
+                    eventId = 202L,
+                    nextEventId = 201L, // Stale past event (e.g. omitted in channelUpdate)
+                ),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 201L, channelId = 8L, startEpochSec = 9_000L, stopEpochSec = 10_000L, title = "Old 18:30 Show"),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 202L, channelId = 8L, startEpochSec = 12_000L, stopEpochSec = 14_000L, title = "Live Show"),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 203L, channelId = 8L, startEpochSec = 14_000L, stopEpochSec = 15_000L, title = "Real Next Show"),
+            ),
+        )
+        store.applyEvent(HtspPushEvent.InitialSyncCompleted)
+
+        assertEquals("Live Show", store.nowNextByChannel.value[8L]?.now?.title)
+        assertEquals("Real Next Show", store.nowNextByChannel.value[8L]?.next?.title)
+
+        // In an EPG gap after 15_000L with no later event, stale nextEventId must not be surfaced.
+        nowSec = 15_500L
+        store.refreshNowNext()
+        assertNull(store.nowNextByChannel.value[8L])
+    }
+
+    @Test
+    fun `publishNowNext ignores future-dated channel eventId until its start time`() {
+        val nowSec = 10_000L
+        val store = TvheadendStore(epochSecondsProvider = { nowSec })
+        store.applyEvent(HtspPushEvent.SyncStarting)
+        store.applyEvent(
+            HtspPushEvent.ChannelAdd(
+                Channel(
+                    id = 10L,
+                    number = 10,
+                    name = "Szeged TV",
+                    eventId = 302L,
+                    nextEventId = 303L,
+                ),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 301L, channelId = 10L, startEpochSec = 9_000L, stopEpochSec = 11_000L, title = "Actual Live"),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 302L, channelId = 10L, startEpochSec = 11_000L, stopEpochSec = 12_000L, title = "Actual Next"),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 303L, channelId = 10L, startEpochSec = 12_000L, stopEpochSec = 13_000L, title = "After Next"),
+            ),
+        )
+        store.applyEvent(HtspPushEvent.InitialSyncCompleted)
+
+        val nowNext = store.nowNextByChannel.value[10L]
+        assertEquals("Actual Live", nowNext?.now?.title)
+        assertEquals("Actual Next", nowNext?.next?.title)
+    }
 }

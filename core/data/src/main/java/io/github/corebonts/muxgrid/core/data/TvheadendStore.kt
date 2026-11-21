@@ -332,15 +332,24 @@ class TvheadendStore(
         for (ch in liveChannels.values) {
             val channelEvents = eventsByChannel[ch.id].orEmpty()
             val linkedNow = ch.eventId?.let { liveEvents[it] }
-                ?.takeIf { nowSec < it.stopEpochSec }
+                ?.takeIf { it.channelId == ch.id && nowSec in it.startEpochSec until it.stopEpochSec }
             val nowEvent = linkedNow ?: channelEvents.firstOrNull { nowSec in it.startEpochSec until it.stopEpochSec }
 
-            val linkedNext = (ch.nextEventId ?: nowEvent?.nextEventId)?.let { liveEvents[it] }
-                ?.takeIf { nowEvent == null || it.id != nowEvent.id }
-            val nextEvent = linkedNext ?: channelEvents.firstOrNull { ev ->
-                val threshold = nowEvent?.stopEpochSec ?: nowSec
-                ev.startEpochSec >= threshold && ev.id != nowEvent?.id
+            val threshold = nowEvent?.stopEpochSec ?: nowSec
+            val firstNextId = when {
+                linkedNow != null -> ch.nextEventId
+                nowEvent != null -> nowEvent.nextEventId
+                ch.eventId == null -> ch.nextEventId
+                else -> null
             }
+            val secondNextId = if (linkedNow != null) nowEvent?.nextEventId else null
+            val nextEvent = findValidLinkedNext(
+                channelId = ch.id,
+                nowEventId = nowEvent?.id,
+                threshold = threshold,
+                firstCandidateId = firstNextId,
+                secondCandidateId = secondNextId,
+            ) ?: channelEvents.firstOrNull { isValidNextEvent(it, ch.id, nowEvent?.id, threshold) }
 
             if (nowEvent != null || nextEvent != null) {
                 result[ch.id] = NowNextProgram(now = nowEvent, next = nextEvent)
@@ -348,6 +357,32 @@ class TvheadendStore(
         }
         _nowNextByChannel.value = result
     }
+
+    private fun findValidLinkedNext(
+        channelId: Long,
+        nowEventId: Long?,
+        threshold: Long,
+        firstCandidateId: Long?,
+        secondCandidateId: Long?,
+    ): EpgEvent? {
+        firstCandidateId?.let { id ->
+            liveEvents[id]?.takeIf { isValidNextEvent(it, channelId, nowEventId, threshold) }?.let { return it }
+        }
+        if (secondCandidateId != null && secondCandidateId != firstCandidateId) {
+            liveEvents[secondCandidateId]?.takeIf { isValidNextEvent(it, channelId, nowEventId, threshold) }?.let { return it }
+        }
+        return null
+    }
+
+    private fun isValidNextEvent(
+        ev: EpgEvent,
+        channelId: Long,
+        nowEventId: Long?,
+        threshold: Long,
+    ): Boolean =
+        ev.channelId == channelId &&
+            ev.id != nowEventId &&
+            ev.startEpochSec >= threshold
 
     private fun publishDvrLocked() {
         _dvrEntries.value = HashMap(liveDvrEntries)
