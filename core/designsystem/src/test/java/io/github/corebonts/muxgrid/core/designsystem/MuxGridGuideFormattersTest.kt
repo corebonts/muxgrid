@@ -198,4 +198,77 @@ class MuxGridGuideFormattersTest {
         assertEquals("Disconnected · HTTP 9981", connectionStatusText(profile, ConnectionState.Disconnected))
         assertEquals("Timeout", connectionStatusText(profile, ConnectionState.Error("Timeout")))
     }
+
+    @Test
+    fun `buildRowTimelineCells clamps events and inserts placeholders for gaps of at least 5 minutes`() {
+        val windowStart = today.atStartOfDay(zone).toEpochSecond() + 18L * 3600L
+        val windowEnd = windowStart + 3L * 3600L
+
+        val emptyCells = buildRowTimelineCells(1L, emptyList(), windowStart, windowEnd)
+        assertEquals(1, emptyCells.size)
+        assertNull(emptyCells[0].event)
+
+        val e1 = EpgEvent(id = 1L, channelId = 1L, startEpochSec = windowStart - 1800L, stopEpochSec = windowStart + 3600L, title = "Early")
+        val e2 = EpgEvent(id = 2L, channelId = 1L, startEpochSec = windowStart + 5400L, stopEpochSec = windowStart + 7200L, title = "Middle")
+        val cells = buildRowTimelineCells(1L, listOf(e1, e2), windowStart, windowEnd)
+
+        assertEquals(4, cells.size)
+        assertEquals(1L, cells[0].event?.id)
+        assertEquals(3600f, cells[0].weight)
+        assertNull(cells[1].event) // 30m gap
+        assertEquals(1800f, cells[1].weight)
+        assertEquals(2L, cells[2].event?.id)
+        assertEquals(1800f, cells[2].weight)
+        assertNull(cells[3].event) // 1h tail gap
+        assertEquals(3600f, cells[3].weight)
+    }
+
+    @Test
+    fun `computeDayJumpWindowStart picks today half hour, prime time, or available day bounds`() {
+        val todayHalfHour = floorToHalfHour(nowSec)
+        val tomorrow = today.plusDays(1)
+        val tomorrowStart = tomorrow.atStartOfDay(zone).toEpochSecond()
+        val windowSec = 3L * 3600L
+
+        assertEquals(
+            todayHalfHour,
+            computeDayJumpWindowStart(today, today, todayHalfHour, emptyMap(), windowSec, zone),
+        )
+
+        val primeEvent = EpgEvent(
+            id = 10L,
+            channelId = 1L,
+            startEpochSec = tomorrowStart + 19L * 3600L,
+            stopEpochSec = tomorrowStart + 20L * 3600L,
+            title = "Prime",
+        )
+        assertEquals(
+            tomorrowStart + 18L * 3600L,
+            computeDayJumpWindowStart(tomorrow, today, todayHalfHour, mapOf(1L to listOf(primeEvent)), windowSec, zone),
+        )
+
+        val morningEvent = EpgEvent(
+            id = 11L,
+            channelId = 1L,
+            startEpochSec = tomorrowStart + 8L * 3600L,
+            stopEpochSec = tomorrowStart + 12L * 3600L,
+            title = "Morning",
+        )
+        assertEquals(
+            tomorrowStart + 9L * 3600L,
+            computeDayJumpWindowStart(tomorrow, today, todayHalfHour, mapOf(1L to listOf(morningEvent)), windowSec, zone),
+        )
+
+        val lateEvent = EpgEvent(
+            id = 12L,
+            channelId = 1L,
+            startEpochSec = tomorrowStart + 22L * 3600L,
+            stopEpochSec = tomorrowStart + 23L * 3600L,
+            title = "Late",
+        )
+        assertEquals(
+            tomorrowStart + 22L * 3600L,
+            computeDayJumpWindowStart(tomorrow, today, todayHalfHour, mapOf(1L to listOf(lateEvent)), windowSec, zone),
+        )
+    }
 }

@@ -322,6 +322,140 @@ const val HALF_HOUR_SEC = 1800L
 
 fun floorToHalfHour(epochSec: Long): Long = (epochSec / HALF_HOUR_SEC) * HALF_HOUR_SEC
 
+data class TimelineCell(
+    val key: String,
+    val weight: Float,
+    val event: EpgEvent?,
+    val startEpochSec: Long,
+    val stopEpochSec: Long,
+)
+
+/**
+ * Slices a channel's chronologically sorted [events] into weighted horizontal cells covering
+ * `[windowStart, windowEnd)`, inserting placeholder cells for gaps of at least 5 minutes.
+ */
+fun buildRowTimelineCells(
+    channelId: Long,
+    events: List<EpgEvent>,
+    windowStart: Long,
+    windowEnd: Long,
+): List<TimelineCell> {
+    if (events.isEmpty()) {
+        return listOf(
+            TimelineCell(
+                key = "empty_${channelId}_$windowStart",
+                weight = 1f,
+                event = null,
+                startEpochSec = windowStart,
+                stopEpochSec = windowEnd,
+            ),
+        )
+    }
+
+    // Events in TvheadendStore are already sorted by startEpochSec; scan directly without re-sorting
+    val cells = ArrayList<TimelineCell>()
+    var cursor = windowStart
+    for (ev in events) {
+        if (ev.startEpochSec >= windowEnd) break
+        if (ev.stopEpochSec <= windowStart) continue
+        val clampedStart = maxOf(ev.startEpochSec, cursor)
+        val clampedEnd = minOf(ev.stopEpochSec, windowEnd)
+        if (clampedEnd <= clampedStart) continue
+        if (clampedStart > cursor) {
+            val gapSec = clampedStart - cursor
+            if (gapSec >= 300L) {
+                cells.add(
+                    TimelineCell(
+                        key = "gap_${channelId}_$cursor",
+                        weight = gapSec.toFloat().coerceAtLeast(300f),
+                        event = null,
+                        startEpochSec = cursor,
+                        stopEpochSec = clampedStart,
+                    ),
+                )
+            }
+        }
+        val spanSec = (clampedEnd - clampedStart).coerceAtLeast(300L)
+        cells.add(
+            TimelineCell(
+                key = "ev_${ev.id}",
+                weight = spanSec.toFloat(),
+                event = ev,
+                startEpochSec = clampedStart,
+                stopEpochSec = clampedEnd,
+            ),
+        )
+        cursor = clampedEnd
+    }
+    if (cells.isEmpty()) {
+        return listOf(
+            TimelineCell(
+                key = "empty_${channelId}_$windowStart",
+                weight = 1f,
+                event = null,
+                startEpochSec = windowStart,
+                stopEpochSec = windowEnd,
+            ),
+        )
+    }
+    if (cursor < windowEnd && (windowEnd - cursor) >= 300L) {
+        cells.add(
+            TimelineCell(
+                key = "tail_${channelId}_$cursor",
+                weight = (windowEnd - cursor).toFloat(),
+                event = null,
+                startEpochSec = cursor,
+                stopEpochSec = windowEnd,
+            ),
+        )
+    }
+    return cells
+}
+
+/**
+ * Computes the best timeline window start when jumping to [dayDate]:
+ * - Today jumps to [todayStartHalfHour].
+ * - Other days prefer prime time (18:00) if any event overlaps `[18:00, 18:00 + windowDurationSec)`,
+ *   otherwise fall back to the end or start of that day's available events.
+ */
+fun computeDayJumpWindowStart(
+    dayDate: LocalDate,
+    todayDate: LocalDate,
+    todayStartHalfHour: Long,
+    epgByChannel: Map<Long, List<EpgEvent>>,
+    windowDurationSec: Long,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): Long {
+    if (dayDate == todayDate) return todayStartHalfHour
+
+    val dayStartSec = dayDate.atStartOfDay(zoneId).toEpochSecond()
+    val dayEndSec = dayDate.plusDays(1).atStartOfDay(zoneId).toEpochSecond()
+    val primeTime = dayStartSec + 18L * 3600L
+    var hasPrimeTimeEvent = false
+    var dayEarliestStart = Long.MAX_VALUE
+    var dayLatestStop = Long.MIN_VALUE
+    for (list in epgByChannel.values) {
+        for (ev in list) {
+            if (ev.stopEpochSec <= dayStartSec || ev.startEpochSec >= dayEndSec) continue
+            val cs = maxOf(ev.startEpochSec, dayStartSec)
+            val ce = minOf(ev.stopEpochSec, dayEndSec)
+            if (cs < dayEarliestStart) dayEarliestStart = cs
+            if (ce > dayLatestStop) dayLatestStop = ce
+            if (ev.stopEpochSec > primeTime && ev.startEpochSec < primeTime + windowDurationSec) {
+                hasPrimeTimeEvent = true
+            }
+        }
+    }
+    return when {
+        hasPrimeTimeEvent -> primeTime
+        dayEarliestStart <= dayLatestStop && dayLatestStop <= primeTime ->
+            floorToHalfHour(dayLatestStop - windowDurationSec).coerceAtLeast(dayStartSec)
+        dayEarliestStart <= dayLatestStop ->
+            floorToHalfHour(dayEarliestStart)
+        else -> primeTime
+    }
+}
+
 fun PlaybackState.displayTitle(
     fallbackChannelName: String? = null,
     recordingFallback: String = "Recording",

@@ -290,6 +290,7 @@ fun MobileRoot(
                                 nowEpochSec = nowEpochSec,
                                 imageLoader = repository.imageLoader,
                                 initialSelectedChannelId = guideChannelId,
+                                useTimelineGrid = useRail,
                                 bottomContentPadding = bottomPad,
                                 onWatchChannel = { channel ->
                                     playbackEngine.playChannel(channel, repository.hwDecPreset.value)

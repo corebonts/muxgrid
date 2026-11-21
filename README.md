@@ -34,7 +34,7 @@ Built as a **single unified codebase** producing ABI-split APKs for Android phon
   - Disk-backed local `libmpv` ring buffer with configurable size limits in Settings (`Off`, `512 MB`, `1 GB`, `2 GB`, `4 GB`), free-space checks, and automatic recovery when pause reaches the forward buffer cap.
   - Buffered-range seekbar with `-MM:SS · Back to Live` quick jump.
 - **Program Guide (EPG):**
-  - **Phone & Tablet:** Vertical per-channel agenda with day tabs, expandable icon-triggered search, and program detail bottom sheet (**Watch Live**, **Record**, **Cancel Recording**).
+  - **Phone & Tablet:** Vertical per-channel agenda in portrait and a horizontal multi-channel timeline grid in landscape/tablet mode, with day tabs, expandable icon-triggered search, and a program detail bottom sheet (**Watch Live**, **Record**, **Cancel Recording**).
   - **Android TV:** Horizontal timeline grid with sticky channel column, live "Now" hairline, top-bar program search, and a fixed-height bottom details bar for focused programs.
 - **DVR & Recording Management:**
   - Dedicated sections/shelves for **Recording Now**, **Completed** (grouped by series/title), and **Scheduled** timers.
