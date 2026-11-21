@@ -37,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -58,6 +59,7 @@ import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.designsystem.BroadcastUnderlineTab
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrConfirmKind
+import io.github.corebonts.muxgrid.core.designsystem.DvrLookupIndex
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MobileTopBarHeight
@@ -72,17 +74,19 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.buildAvailableGuideDays
 import io.github.corebonts.muxgrid.core.designsystem.dvrConfirmSpec
 import io.github.corebonts.muxgrid.core.designsystem.filterEpgEventsForDay
-import io.github.corebonts.muxgrid.core.designsystem.findMatchingDvrEntry
 import io.github.corebonts.muxgrid.core.designsystem.formatDayLabel
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochDayHm
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
 import io.github.corebonts.muxgrid.core.designsystem.scrollItemIntoViewport
+import io.github.corebonts.muxgrid.core.designsystem.searchEpgEvents
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.EpgEvent
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -134,6 +138,7 @@ internal fun MobileGuideScreen(
     }
 
     val channelById = remember(channels) { channels.associateBy { it.id } }
+    val dvrIndex = remember(dvrEntries) { DvrLookupIndex(dvrEntries) }
 
     // Ensure selectedChannelId stays valid if channel list loads after initial render
     val effectiveChannelId = when {
@@ -169,37 +174,46 @@ internal fun MobileGuideScreen(
     }
 
     val trimmedQuery = searchQuery.trim()
-    val agendaItems: List<Pair<EpgEvent, Channel?>> = remember(
+    val searchResults by produceState<List<Pair<EpgEvent, Channel>>>(
+        initialValue = emptyList(),
         trimmedQuery,
-        effectiveChannelId,
-        activeDay,
         epgByChannel,
         channels,
         nowEpochSec / 60L,
     ) {
-        if (trimmedQuery.isNotEmpty()) {
-            val results = ArrayList<Pair<EpgEvent, Channel?>>()
-            for (ch in channels) {
-                val list = epgByChannel[ch.id].orEmpty()
-                for (ev in list) {
-                    if (ev.title.contains(trimmedQuery, ignoreCase = true) ||
-                        (ev.subtitle?.contains(trimmedQuery, ignoreCase = true) == true) ||
-                        (ev.summary?.contains(trimmedQuery, ignoreCase = true) == true) ||
-                        (ev.description?.contains(trimmedQuery, ignoreCase = true) == true)
-                    ) {
-                        results.add(ev to ch)
-                    }
-                }
+        value = if (trimmedQuery.isEmpty()) {
+            emptyList()
+        } else {
+            withContext(Dispatchers.Default) {
+                searchEpgEvents(
+                    query = trimmedQuery,
+                    channels = channels,
+                    epgByChannel = epgByChannel,
+                    nowEpochSec = nowEpochSec,
+                )
             }
-            results.sortedWith(
-                compareBy<Pair<EpgEvent, Channel?>> { it.first.stopEpochSec < nowEpochSec }
-                    .thenBy { if (it.first.stopEpochSec < nowEpochSec) -it.first.startEpochSec else it.first.startEpochSec },
-            ).take(120)
+        }
+    }
+    val dayAgendaItems = remember(
+        trimmedQuery.isEmpty(),
+        effectiveChannelId,
+        activeDay,
+        epgByChannel,
+        channelById,
+        activeZone,
+    ) {
+        if (trimmedQuery.isNotEmpty()) {
+            emptyList()
         } else {
             val ch = effectiveChannelId?.let { channelById[it] }
             val events = effectiveChannelId?.let { epgByChannel[it] }.orEmpty()
             filterEpgEventsForDay(events, activeDay, activeZone).map { it to ch }
         }
+    }
+    val agendaItems: List<Pair<EpgEvent, Channel?>> = if (trimmedQuery.isNotEmpty()) {
+        searchResults
+    } else {
+        dayAgendaItems
     }
 
     var lastAgendaAnchorKey by remember { mutableStateOf<Triple<LocalDate, Long?, Boolean>?>(null) }
@@ -416,7 +430,7 @@ internal fun MobileGuideScreen(
                 contentPadding = PaddingValues(top = 2.dp, bottom = bottomContentPadding),
             ) {
                 items(agendaItems, key = { it.first.id }) { (event, channel) ->
-                    val linkedDvr = findMatchingDvrEntry(event, dvrEntries)
+                    val linkedDvr = dvrIndex.findMatch(event)
                     val isLiveNow = nowEpochSec in event.startEpochSec until event.stopEpochSec
                     val isPast = event.stopEpochSec <= nowEpochSec
                     val isRecording = linkedDvr?.state == DvrState.RECORDING
@@ -542,7 +556,7 @@ internal fun MobileGuideScreen(
     }
     if (detailEvent != null) {
         val detailChannel = channelById[detailEvent.channelId]
-        val linkedDvr = findMatchingDvrEntry(detailEvent, dvrEntries)
+        val linkedDvr = dvrIndex.findMatch(detailEvent)
         val isLiveNow = nowEpochSec in detailEvent.startEpochSec until detailEvent.stopEpochSec
         val isPast = detailEvent.stopEpochSec <= nowEpochSec
 

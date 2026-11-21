@@ -119,6 +119,8 @@ import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -142,20 +144,10 @@ fun MobileRoot(
 ) {
     val scope = rememberCoroutineScope()
     val profile by repository.serverProfile.collectAsState()
+    val startScreen by repository.startScreen.collectAsState()
     val connectionState by repository.connectionState.collectAsState()
     val channels by repository.channels.collectAsState()
-    val tags by repository.tags.collectAsState()
-    val nowNextMap by repository.nowNextByChannel.collectAsState()
-    val epgByChannel by repository.epgByChannel.collectAsState()
-    val dvrEntries by repository.dvrEntries.collectAsState()
     val favorites by repository.favoriteChannelIds.collectAsState()
-    val hwDecPreset by repository.hwDecPreset.collectAsState()
-    val timeshiftWindow by repository.timeshiftWindow.collectAsState()
-    val backgroundPlayEnabled by repository.backgroundPlayEnabled.collectAsState()
-    val pipEnabled by repository.pipEnabled.collectAsState()
-    val startScreen by repository.startScreen.collectAsState()
-    val themeMode by repository.themeMode.collectAsState()
-    val playbackState by playbackEngine.state.collectAsState()
 
     val currentProfile = profile
     val currentStartScreen = startScreen
@@ -186,8 +178,9 @@ fun MobileRoot(
     }
 
     LaunchedEffect(openPlayerSignal) {
-        if (openPlayerSignal > 0 && playbackState.status != PlaybackStatus.IDLE) {
-            if (!playbackState.isRadio && playbackState.isAudioOnly) {
+        val currentPlayback = playbackEngine.state.value
+        if (openPlayerSignal > 0 && currentPlayback.status != PlaybackStatus.IDLE) {
+            if (!currentPlayback.isRadio && currentPlayback.isAudioOnly) {
                 playbackEngine.setAudioOnly(false)
             }
             route = MobileRoute.PLAYER
@@ -199,10 +192,6 @@ fun MobileRoot(
     }
 
     val offsetMs = (connectionState as? ConnectionState.Connected)?.serverClockOffsetMs ?: 0L
-    val nowEpochSec = rememberNowEpochSec(offsetMs)
-
-    val hasMiniPlayer = playbackState.status != PlaybackStatus.IDLE &&
-        (playbackState.channelId != null || playbackState.dvrEntryId != null)
 
     when (route) {
         MobileRoute.ONBOARDING -> {
@@ -237,14 +226,14 @@ fun MobileRoot(
                     activeTab = activeTab,
                     useNavigationRail = useRail,
                     connectionState = connectionState,
-                    playbackState = playbackState,
+                    playbackEngine = playbackEngine,
+                    repository = repository,
                     channels = channels,
-                    nowNextMap = nowNextMap,
-                    nowEpochSec = nowEpochSec,
-                    imageLoader = repository.imageLoader,
+                    offsetMs = offsetMs,
                     onSelectTab = { activeTab = it },
                     onExpandMiniPlayer = {
-                        if (!playbackState.isRadio && playbackState.isAudioOnly) {
+                        val currentPlayback = playbackEngine.state.value
+                        if (!currentPlayback.isRadio && currentPlayback.isAudioOnly) {
                             playbackEngine.setAudioOnly(false)
                         }
                         route = MobileRoute.PLAYER
@@ -254,6 +243,9 @@ fun MobileRoot(
                 ) { bottomPad ->
                     when (activeTab) {
                         MainTab.LIVE -> {
+                            val tags by repository.tags.collectAsState()
+                            val nowNextMap by repository.nowNextByChannel.collectAsState()
+                            val nowEpochSec = rememberNowEpochSec(offsetMs)
                             MobileLiveChannelsTab(
                                 connectionState = connectionState,
                                 channels = filteredChannels,
@@ -267,7 +259,7 @@ fun MobileRoot(
                                 bottomContentPadding = bottomPad,
                                 onSelectFilter = { activeFilter = it },
                                 onChannelClick = { channel ->
-                                    playbackEngine.playChannel(channel, hwDecPreset)
+                                    playbackEngine.playChannel(channel, repository.hwDecPreset.value)
                                     route = MobileRoute.PLAYER
                                 },
                                 onToggleFavorite = { channel ->
@@ -282,6 +274,9 @@ fun MobileRoot(
                             )
                         }
                         MainTab.GUIDE -> {
+                            val epgByChannel by repository.epgByChannel.collectAsState()
+                            val dvrEntries by repository.dvrEntries.collectAsState()
+                            val nowEpochSec = rememberNowEpochSec(offsetMs)
                             MobileGuideScreen(
                                 channels = channels,
                                 epgByChannel = epgByChannel,
@@ -291,11 +286,11 @@ fun MobileRoot(
                                 initialSelectedChannelId = guideChannelId,
                                 bottomContentPadding = bottomPad,
                                 onWatchChannel = { channel ->
-                                    playbackEngine.playChannel(channel, hwDecPreset)
+                                    playbackEngine.playChannel(channel, repository.hwDecPreset.value)
                                     route = MobileRoute.PLAYER
                                 },
                                 onPlayRecording = { entry, channel, startPosSec ->
-                                    playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startPosSec)
+                                    playbackEngine.playDvrEntry(entry, channel, repository.hwDecPreset.value, startPosSec)
                                     route = MobileRoute.PLAYER
                                 },
                                 onScheduleRecording = { eventId -> repository.scheduleRecording(eventId) },
@@ -304,6 +299,8 @@ fun MobileRoot(
                             )
                         }
                         MainTab.RECORDINGS -> {
+                            val dvrEntries by repository.dvrEntries.collectAsState()
+                            val nowEpochSec = rememberNowEpochSec(offsetMs)
                             MobileRecordingsScreen(
                                 dvrEntries = dvrEntries,
                                 channels = channels,
@@ -311,11 +308,11 @@ fun MobileRoot(
                                 imageLoader = repository.imageLoader,
                                 bottomContentPadding = bottomPad,
                                 onWatchLiveChannel = { channel ->
-                                    playbackEngine.playChannel(channel, hwDecPreset)
+                                    playbackEngine.playChannel(channel, repository.hwDecPreset.value)
                                     route = MobileRoute.PLAYER
                                 },
                                 onPlayRecording = { entry, channel, startPosSec ->
-                                    playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startPosSec)
+                                    playbackEngine.playDvrEntry(entry, channel, repository.hwDecPreset.value, startPosSec)
                                     route = MobileRoute.PLAYER
                                 },
                                 onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
@@ -326,6 +323,11 @@ fun MobileRoot(
                             )
                         }
                         MainTab.SETTINGS -> {
+                            val themeMode by repository.themeMode.collectAsState()
+                            val hwDecPreset by repository.hwDecPreset.collectAsState()
+                            val timeshiftWindow by repository.timeshiftWindow.collectAsState()
+                            val backgroundPlayEnabled by repository.backgroundPlayEnabled.collectAsState()
+                            val pipEnabled by repository.pipEnabled.collectAsState()
                             MobileSettingsTab(
                                 profile = currentProfile,
                                 connectionState = connectionState,
@@ -369,6 +371,11 @@ fun MobileRoot(
             }
         }
         MobileRoute.PLAYER -> {
+            val playbackState by playbackEngine.state.collectAsState()
+            val nowNextMap by repository.nowNextByChannel.collectAsState()
+            val hwDecPreset by repository.hwDecPreset.collectAsState()
+            val backgroundPlayEnabled by repository.backgroundPlayEnabled.collectAsState()
+            val nowEpochSec = rememberNowEpochSec(offsetMs)
             val activeChannel = channels.firstOrNull { it.id == playbackState.channelId }
             val activeNowNext = activeChannel?.let { nowNextMap[it.id] }
             val minimizeOnBack = playbackState.isRadio || playbackState.isAudioOnly || backgroundPlayEnabled
@@ -468,11 +475,10 @@ private fun MobileMainScaffold(
     activeTab: MainTab,
     useNavigationRail: Boolean,
     connectionState: ConnectionState,
-    playbackState: PlaybackState,
+    playbackEngine: PlaybackEngine,
+    repository: TvheadendRepository,
     channels: List<Channel>,
-    nowNextMap: Map<Long, NowNextProgram>,
-    nowEpochSec: Long,
-    imageLoader: ImageLoader,
+    offsetMs: Long,
     onSelectTab: (MainTab) -> Unit,
     onExpandMiniPlayer: () -> Unit,
     onToggleMiniPlayerPause: () -> Unit,
@@ -486,8 +492,17 @@ private fun MobileMainScaffold(
     val navBarBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     var bottomChromeHeightPx by remember { mutableIntStateOf(0) }
 
-    val hasMiniPlayer = playbackState.status != PlaybackStatus.IDLE &&
-        (playbackState.channelId != null || playbackState.dvrEntryId != null)
+    // Observe only the boolean visibility here so high-frequency playbackState ticks never
+    // recompose the scaffold or active tab (including Settings); MobileMiniPlayerSlot collects the rest.
+    val hasMiniPlayer by remember(playbackEngine) {
+        playbackEngine.state
+            .map { it.status != PlaybackStatus.IDLE && (it.channelId != null || it.dvrEntryId != null) }
+            .distinctUntilChanged()
+    }.collectAsState(
+        initial = playbackEngine.state.value.let {
+            it.status != PlaybackStatus.IDLE && (it.channelId != null || it.dvrEntryId != null)
+        },
+    )
     val hasBottomChrome = hasMiniPlayer || !useNavigationRail
     val bottomContentPadding = if (hasBottomChrome) {
         val chromeHeight = if (bottomChromeHeightPx > 0) {
@@ -503,10 +518,6 @@ private fun MobileMainScaffold(
     } else {
         navBarBottomPadding + 24.dp
     }
-    val miniChannel = remember(playbackState.channelId, channels) {
-        channels.firstOrNull { it.id == playbackState.channelId }
-    }
-    val miniNowNext = miniChannel?.let { nowNextMap[it.id] }
 
     Row(
         modifier = Modifier
@@ -543,29 +554,17 @@ private fun MobileMainScaffold(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 if (hasMiniPlayer) {
-                    val miniModifier = if (useNavigationRail) {
-                        Modifier
-                            .navigationBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
-                            .widthIn(max = 560.dp)
-                            .fillMaxWidth()
-                            .clip(MuxGridShapes.Card)
-                            .border(MuxGridBorders.Divider, MuxGridColors.Divider, MuxGridShapes.Card)
-                    } else {
-                        Modifier.fillMaxWidth()
-                    }
-                    MobileMiniPlayerBar(
-                        playbackState = playbackState,
-                        channel = miniChannel,
-                        nowNext = miniNowNext,
-                        nowEpochSec = nowEpochSec,
-                        imageLoader = imageLoader,
+                    MobileMiniPlayerSlot(
+                        useNavigationRail = useNavigationRail,
+                        playbackEngine = playbackEngine,
+                        repository = repository,
+                        channels = channels,
+                        offsetMs = offsetMs,
                         hazeState = hazeState,
                         glassStyle = glassStyle,
                         onExpand = onExpandMiniPlayer,
                         onTogglePause = onToggleMiniPlayerPause,
                         onStop = onStopMiniPlayer,
-                        modifier = miniModifier,
                     )
                 }
 
@@ -743,6 +742,52 @@ private fun MobileRailItem(
             )
         }
     }
+}
+
+@Composable
+private fun MobileMiniPlayerSlot(
+    useNavigationRail: Boolean,
+    playbackEngine: PlaybackEngine,
+    repository: TvheadendRepository,
+    channels: List<Channel>,
+    offsetMs: Long,
+    hazeState: HazeState,
+    glassStyle: HazeBlurStyle,
+    onExpand: () -> Unit,
+    onTogglePause: () -> Unit,
+    onStop: () -> Unit,
+) {
+    val playbackState by playbackEngine.state.collectAsState()
+    val nowNextMap by repository.nowNextByChannel.collectAsState()
+    val nowEpochSec = rememberNowEpochSec(offsetMs)
+    val miniChannel = remember(playbackState.channelId, channels) {
+        channels.firstOrNull { it.id == playbackState.channelId }
+    }
+    val miniNowNext = miniChannel?.let { nowNextMap[it.id] }
+    val miniModifier = if (useNavigationRail) {
+        Modifier
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .widthIn(max = 560.dp)
+            .fillMaxWidth()
+            .clip(MuxGridShapes.Card)
+            .border(MuxGridBorders.Divider, MuxGridColors.Divider, MuxGridShapes.Card)
+    } else {
+        Modifier.fillMaxWidth()
+    }
+    MobileMiniPlayerBar(
+        playbackState = playbackState,
+        channel = miniChannel,
+        nowNext = miniNowNext,
+        nowEpochSec = nowEpochSec,
+        imageLoader = repository.imageLoader,
+        hazeState = hazeState,
+        glassStyle = glassStyle,
+        onExpand = onExpand,
+        onTogglePause = onTogglePause,
+        onStop = onStop,
+        modifier = miniModifier,
+    )
 }
 
 @Composable
