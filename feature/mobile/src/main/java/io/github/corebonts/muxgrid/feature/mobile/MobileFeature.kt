@@ -80,6 +80,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridModalSheet
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridSwitch
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
@@ -98,6 +99,7 @@ import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import io.github.corebonts.muxgrid.core.model.StartScreen
+import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
 import kotlinx.coroutines.launch
@@ -133,6 +135,7 @@ fun MobileRoot(
     val backgroundPlayEnabled by repository.backgroundPlayEnabled.collectAsState()
     val pipEnabled by repository.pipEnabled.collectAsState()
     val startScreen by repository.startScreen.collectAsState()
+    val themeMode by repository.themeMode.collectAsState()
     val playbackState by playbackEngine.state.collectAsState()
 
     val currentProfile = profile
@@ -314,6 +317,7 @@ fun MobileRoot(
                                 profile = currentProfile,
                                 connectionState = connectionState,
                                 startScreen = currentStartScreen,
+                                themeMode = themeMode,
                                 hwDecPreset = hwDecPreset,
                                 timeshiftWindow = timeshiftWindow,
                                 backgroundPlayEnabled = backgroundPlayEnabled,
@@ -321,6 +325,9 @@ fun MobileRoot(
                                 bottomContentPadding = bottomPad,
                                 onSelectStartScreen = { screen ->
                                     scope.launch { repository.setStartScreen(screen) }
+                                },
+                                onSelectThemeMode = { mode ->
+                                    scope.launch { repository.setThemeMode(mode) }
                                 },
                                 onSelectPreset = { preset ->
                                     scope.launch { repository.setHwDecPreset(preset) }
@@ -361,77 +368,84 @@ fun MobileRoot(
                 }
             }
             val zapPool = filteredChannels.ifEmpty { channels }
-            MobilePlayerScreen(
-                playbackEngine = playbackEngine,
-                playbackState = playbackState,
-                activeChannel = activeChannel,
-                nowNext = activeNowNext,
-                channels = zapPool,
-                nowNextMap = nowNextMap,
-                nowEpochSec = nowEpochSec,
-                hwDecPreset = hwDecPreset,
-                imageLoader = repository.imageLoader,
-                isInPip = isInPictureInPictureMode,
-                canEnterPip = canEnterPip,
-                canZap = zapPool.size > 1,
-                minimizeOnBack = minimizeOnBack,
-                onEnterPip = onEnterPip,
-                onMinimizeToAudio = {
-                    playbackEngine.setAudioOnly(true)
-                    route = MobileRoute.MAIN
-                },
-                onSelectChannel = { channel ->
-                    playbackEngine.playChannel(channel, hwDecPreset)
-                },
-                onZapPrevious = {
-                    if (zapPool.isNotEmpty()) {
-                        val idx = zapPool.indexOfFirst { it.id == playbackState.channelId }
-                        val prev = if (idx <= 0) zapPool.last() else zapPool[idx - 1]
-                        playbackEngine.playChannel(prev, hwDecPreset)
-                    }
-                },
-                onZapNext = {
-                    if (zapPool.isNotEmpty()) {
-                        val idx = zapPool.indexOfFirst { it.id == playbackState.channelId }
-                        val next = if (idx < 0 || idx >= zapPool.lastIndex) zapPool.first() else zapPool[idx + 1]
-                        playbackEngine.playChannel(next, hwDecPreset)
-                    }
-                },
-                onSelectPreset = { preset ->
-                    scope.launch { repository.setHwDecPreset(preset) }
-                    playbackEngine.applyPreset(preset)
-                },
-                onSelectAspectMode = { mode ->
-                    playbackEngine.setVideoAspectMode(mode)
-                },
-                onPlaybackCompleted = {
-                    playbackEngine.stop()
-                    route = MobileRoute.MAIN
-                },
-                onStop = {
-                    playbackEngine.stop()
-                    route = MobileRoute.MAIN
-                },
-                onExit = {
-                    if (minimizeOnBack) {
+            MuxGridTheme(isTv = false, darkTheme = true) {
+                MobilePlayerScreen(
+                    playbackEngine = playbackEngine,
+                    playbackState = playbackState,
+                    activeChannel = activeChannel,
+                    nowNext = activeNowNext,
+                    channels = zapPool,
+                    nowNextMap = nowNextMap,
+                    nowEpochSec = nowEpochSec,
+                    hwDecPreset = hwDecPreset,
+                    imageLoader = repository.imageLoader,
+                    isInPip = isInPictureInPictureMode,
+                    canEnterPip = canEnterPip,
+                    canZap = zapPool.size > 1,
+                    minimizeOnBack = minimizeOnBack,
+                    onEnterPip = onEnterPip,
+                    onMinimizeToAudio = {
                         playbackEngine.setAudioOnly(true)
-                    } else {
+                        route = MobileRoute.MAIN
+                    },
+                    onSelectChannel = { channel ->
+                        playbackEngine.playChannel(channel, hwDecPreset)
+                    },
+                    onZapPrevious = {
+                        if (zapPool.isNotEmpty()) {
+                            val idx = zapPool.indexOfFirst { it.id == playbackState.channelId }
+                            val prev = if (idx <= 0) zapPool.last() else zapPool[idx - 1]
+                            playbackEngine.playChannel(prev, hwDecPreset)
+                        }
+                    },
+                    onZapNext = {
+                        if (zapPool.isNotEmpty()) {
+                            val idx = zapPool.indexOfFirst { it.id == playbackState.channelId }
+                            val next = if (idx < 0 || idx >= zapPool.lastIndex) zapPool.first() else zapPool[idx + 1]
+                            playbackEngine.playChannel(next, hwDecPreset)
+                        }
+                    },
+                    onSelectPreset = { preset ->
+                        scope.launch { repository.setHwDecPreset(preset) }
+                        playbackEngine.applyPreset(preset)
+                    },
+                    onSelectAspectMode = { mode ->
+                        playbackEngine.setVideoAspectMode(mode)
+                    },
+                    onPlaybackCompleted = {
                         playbackEngine.stop()
-                    }
-                    route = MobileRoute.MAIN
-                },
-            )
+                        route = MobileRoute.MAIN
+                    },
+                    onStop = {
+                        playbackEngine.stop()
+                        route = MobileRoute.MAIN
+                    },
+                    onExit = {
+                        if (minimizeOnBack) {
+                            playbackEngine.setAudioOnly(true)
+                        } else {
+                            playbackEngine.stop()
+                        }
+                        route = MobileRoute.MAIN
+                    },
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun rememberFrostedGlassStyle(): HazeBlurStyle = remember {
-    HazeBlurStyle {
-        blurRadius(22.dp)
-        backgroundColor(MuxGridColors.CanvasPhone)
-        colorEffects(listOf(HazeColorEffect.tint(MuxGridColors.GlassSurface)))
-        fallbackColorEffect(HazeColorEffect.tint(MuxGridColors.ScrimSurface))
+private fun rememberFrostedGlassStyle(): HazeBlurStyle {
+    val canvasPhone = MuxGridColors.CanvasPhone
+    val glassSurface = MuxGridColors.GlassSurface
+    val scrimSurface = MuxGridColors.ScrimSurface
+    return remember(canvasPhone, glassSurface, scrimSurface) {
+        HazeBlurStyle {
+            blurRadius(22.dp)
+            backgroundColor(canvasPhone)
+            colorEffects(listOf(HazeColorEffect.tint(glassSurface)))
+            fallbackColorEffect(HazeColorEffect.tint(scrimSurface))
+        }
     }
 }
 
@@ -1190,12 +1204,14 @@ private fun MobileSettingsTab(
     profile: ServerProfile,
     connectionState: ConnectionState,
     startScreen: StartScreen,
+    themeMode: ThemeMode,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
     backgroundPlayEnabled: Boolean,
     pipEnabled: Boolean,
     bottomContentPadding: Dp,
     onSelectStartScreen: (StartScreen) -> Unit,
+    onSelectThemeMode: (ThemeMode) -> Unit,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
     onToggleBackgroundPlay: (Boolean) -> Unit,
@@ -1320,35 +1336,75 @@ private fun MobileSettingsTab(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(MuxGridShapes.Card)
-                    .background(MuxGridColors.CardSurface)
-                    .padding(horizontal = 12.dp, vertical = 11.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .background(MuxGridColors.Divider),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
-                Text(
-                    text = "Start Screen",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MuxGridColors.TextPrimary,
-                )
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                        .background(MuxGridColors.CardSurface)
+                        .padding(horizontal = 12.dp, vertical = 11.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    StartScreen.entries.forEach { option ->
-                        BroadcastUnderlineTab(
-                            label = option.label,
-                            selected = option == startScreen,
-                            onClick = { onSelectStartScreen(option) },
-                        )
+                    Text(
+                        text = "Start Screen",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MuxGridColors.TextPrimary,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    ) {
+                        StartScreen.entries.forEach { option ->
+                            BroadcastUnderlineTab(
+                                label = option.label,
+                                selected = option == startScreen,
+                                onClick = { onSelectStartScreen(option) },
+                            )
+                        }
                     }
+                    Text(
+                        text = startScreen.description,
+                        style = MuxGridType.TabularSmall,
+                        color = MuxGridColors.TextSecondary,
+                    )
                 }
-                Text(
-                    text = startScreen.description,
-                    style = MuxGridType.TabularSmall,
-                    color = MuxGridColors.TextSecondary,
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MuxGridColors.CardSurface)
+                        .padding(horizontal = 12.dp, vertical = 11.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "Theme",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MuxGridColors.TextPrimary,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    ) {
+                        ThemeMode.entries.forEach { option ->
+                            BroadcastUnderlineTab(
+                                label = option.label,
+                                selected = option == themeMode,
+                                onClick = { onSelectThemeMode(option) },
+                            )
+                        }
+                    }
+                    Text(
+                        text = themeMode.description,
+                        style = MuxGridType.TabularSmall,
+                        color = MuxGridColors.TextSecondary,
+                    )
+                }
             }
         }
 

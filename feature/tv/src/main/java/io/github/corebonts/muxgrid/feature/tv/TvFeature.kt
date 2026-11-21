@@ -94,6 +94,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
@@ -103,6 +104,7 @@ import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
 import io.github.corebonts.muxgrid.core.designsystem.label
 import io.github.corebonts.muxgrid.core.designsystem.rememberNowEpochSec
 import io.github.corebonts.muxgrid.core.model.Channel
+import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LiveFilter
@@ -174,7 +176,7 @@ internal fun tvDialogDestructiveButtonColors() = ButtonDefaults.colors(
     containerColor = MuxGridColors.CoralLive.copy(alpha = 0.16f),
     contentColor = MuxGridColors.CoralLive,
     focusedContainerColor = MuxGridColors.CoralLive,
-    focusedContentColor = MuxGridColors.TextPrimary,
+    focusedContentColor = MuxGridColors.OnCoralLive,
 )
 
 @Composable
@@ -627,18 +629,23 @@ private fun TvContent(
                                 )
                             }
                             MainTab.SETTINGS -> {
+                                val themeMode by repository.themeMode.collectAsState()
                                 val hwDecPreset by repository.hwDecPreset.collectAsState()
                                 val timeshiftWindow by repository.timeshiftWindow.collectAsState()
                                 TvSettingsTab(
                                     profile = currentProfile,
                                     connectionState = connectionState,
                                     startScreen = currentStartScreen,
+                                    themeMode = themeMode,
                                     hwDecPreset = hwDecPreset,
                                     timeshiftWindow = timeshiftWindow,
                                     focusMemory = focusMemory,
                                     focusRequestNonce = contentFocusRequestNonce,
                                     onSelectStartScreen = { screen ->
                                         scope.launch { repository.setStartScreen(screen) }
+                                    },
+                                    onSelectThemeMode = { mode ->
+                                        scope.launch { repository.setThemeMode(mode) }
                                     },
                                     onSelectPreset = { preset ->
                                         scope.launch { repository.setHwDecPreset(preset) }
@@ -688,54 +695,69 @@ private fun TvContent(
             val activeChannel = channels.firstOrNull { it.id == playbackState.channelId }
             val activeNowNext = activeChannel?.let { nowNextMap[it.id] }
 
-            TvPlayerScreen(
-                playbackEngine = playbackEngine,
-                playbackState = playbackState,
-                activeChannel = activeChannel,
-                nowNext = activeNowNext,
-                channels = zapList,
-                nowNextMap = nowNextMap,
-                nowEpochSec = nowEpochSec,
-                hwDecPreset = hwDecPreset,
-                imageLoader = repository.imageLoader,
-                canZap = zapList.size > 1,
-                onSelectChannel = { channel ->
-                    playbackEngine.playChannel(channel, hwDecPreset)
-                },
-                onZapDelta = { delta ->
-                    if (zapList.isNotEmpty()) {
-                        val idx = zapList.indexOfFirst { it.id == playbackState.channelId }
-                        val nextIdx = if (idx < 0) 0 else (idx + delta + zapList.size) % zapList.size
-                        playbackEngine.playChannel(zapList[nextIdx], hwDecPreset)
-                    }
-                },
-                onSelectPreset = { preset ->
-                    scope.launch { repository.setHwDecPreset(preset) }
-                    playbackEngine.applyPreset(preset)
-                },
-                onSelectAspectMode = { mode ->
-                    playbackEngine.setVideoAspectMode(mode)
-                },
-                onExit = {
-                    val finalChannelId = playbackState.channelId
-                    val finalDvrId = playbackState.dvrEntryId
-                    when (activeTab) {
-                        MainTab.LIVE -> if (finalChannelId != null) {
-                            focusMemory.liveChannelId = finalChannelId
-                        }
-                        MainTab.GUIDE -> if (finalChannelId != null && finalChannelId != focusMemory.guideTarget?.channelId) {
-                            focusMemory.guideTarget = TvGuideFocusTarget(channelId = finalChannelId)
-                        }
-                        MainTab.RECORDINGS -> if (finalDvrId != null && finalDvrId != focusMemory.recordingTarget?.entryId) {
-                            focusMemory.recordingTarget = TvRecordingFocusTarget(shelfKey = "", entryId = finalDvrId)
-                        }
-                        MainTab.SETTINGS -> Unit
-                    }
-                    playbackEngine.stop()
-                    route = TvRoute.MAIN
-                    contentFocusRequestNonce++
-                },
-            )
+            MuxGridTheme(isTv = true, darkTheme = true) {
+                TvMaterialTheme(
+                    colorScheme = tvDarkColorScheme(
+                        primary = MuxGridColors.Accent,
+                        onPrimary = MuxGridColors.OnAccent,
+                        background = MuxGridColors.CanvasTv,
+                        onBackground = MuxGridColors.TextPrimary,
+                        surface = MuxGridColors.CardSurface,
+                        onSurface = MuxGridColors.TextPrimary,
+                        surfaceVariant = MuxGridColors.CardSurfaceElevated,
+                        onSurfaceVariant = MuxGridColors.TextSecondary,
+                    ),
+                ) {
+                    TvPlayerScreen(
+                        playbackEngine = playbackEngine,
+                        playbackState = playbackState,
+                        activeChannel = activeChannel,
+                        nowNext = activeNowNext,
+                        channels = zapList,
+                        nowNextMap = nowNextMap,
+                        nowEpochSec = nowEpochSec,
+                        hwDecPreset = hwDecPreset,
+                        imageLoader = repository.imageLoader,
+                        canZap = zapList.size > 1,
+                        onSelectChannel = { channel ->
+                            playbackEngine.playChannel(channel, hwDecPreset)
+                        },
+                        onZapDelta = { delta ->
+                            if (zapList.isNotEmpty()) {
+                                val idx = zapList.indexOfFirst { it.id == playbackState.channelId }
+                                val nextIdx = if (idx < 0) 0 else (idx + delta + zapList.size) % zapList.size
+                                playbackEngine.playChannel(zapList[nextIdx], hwDecPreset)
+                            }
+                        },
+                        onSelectPreset = { preset ->
+                            scope.launch { repository.setHwDecPreset(preset) }
+                            playbackEngine.applyPreset(preset)
+                        },
+                        onSelectAspectMode = { mode ->
+                            playbackEngine.setVideoAspectMode(mode)
+                        },
+                        onExit = {
+                            val finalChannelId = playbackState.channelId
+                            val finalDvrId = playbackState.dvrEntryId
+                            when (activeTab) {
+                                MainTab.LIVE -> if (finalChannelId != null) {
+                                    focusMemory.liveChannelId = finalChannelId
+                                }
+                                MainTab.GUIDE -> if (finalChannelId != null && finalChannelId != focusMemory.guideTarget?.channelId) {
+                                    focusMemory.guideTarget = TvGuideFocusTarget(channelId = finalChannelId)
+                                }
+                                MainTab.RECORDINGS -> if (finalDvrId != null && finalDvrId != focusMemory.recordingTarget?.entryId) {
+                                    focusMemory.recordingTarget = TvRecordingFocusTarget(shelfKey = "", entryId = finalDvrId)
+                                }
+                                MainTab.SETTINGS -> Unit
+                            }
+                            playbackEngine.stop()
+                            route = TvRoute.MAIN
+                            contentFocusRequestNonce++
+                        },
+                    )
+                }
+            }
         }
     }
 }
@@ -1220,11 +1242,13 @@ private fun TvSettingsTab(
     profile: ServerProfile,
     connectionState: ConnectionState,
     startScreen: StartScreen,
+    themeMode: ThemeMode,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
     focusMemory: TvFocusMemory,
     focusRequestNonce: Int,
     onSelectStartScreen: (StartScreen) -> Unit,
+    onSelectThemeMode: (ThemeMode) -> Unit,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
     onRetryConnect: () -> Unit,
@@ -1421,6 +1445,35 @@ private fun TvSettingsTab(
                 }
                 Text(
                     text = startScreen.description,
+                    style = MuxGridType.TabularSmall,
+                    color = MuxGridColors.TextMuted,
+                )
+            }
+
+            MuxGridDivider()
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Theme",
+                    style = MuxGridType.CardSubtitle,
+                    fontSize = 13.sp,
+                )
+                Row(
+                    modifier = Modifier
+                        .focusGroup()
+                        .focusRestorer(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    ThemeMode.entries.forEach { option ->
+                        TvUnderlineOption(
+                            label = option.label,
+                            selected = themeMode == option,
+                            onClick = { onSelectThemeMode(option) },
+                        )
+                    }
+                }
+                Text(
+                    text = themeMode.description,
                     style = MuxGridType.TabularSmall,
                     color = MuxGridColors.TextMuted,
                 )

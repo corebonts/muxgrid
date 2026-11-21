@@ -40,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -164,7 +165,8 @@ fun ChannelPiconBadge(
         modifier = modifier
             .size(size)
             .clip(shape)
-            .background(MuxGridColors.PiconSurface),
+            .background(MuxGridColors.PiconSurface)
+            .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, shape),
         contentAlignment = Alignment.Center,
     ) {
         if (piconModel != null) {
@@ -260,13 +262,14 @@ fun LiveProgressBar(
     } else {
         clamped
     }
+    val trackBackground = MuxGridColors.TrackBackground
     Spacer(
         modifier = modifier
             .height(height)
             .drawBehind {
                 val radius = CornerRadius(size.height / 2f, size.height / 2f)
                 drawRoundRect(
-                    color = MuxGridColors.TrackBackground,
+                    color = trackBackground,
                     cornerRadius = radius,
                 )
                 if (displayProgress > 0f) {
@@ -457,6 +460,8 @@ fun MuxGridSeekBar(
     }
 }
 
+@Composable
+@ReadOnlyComposable
 fun connectionStatusDotColor(state: ConnectionState): Color? = when (state) {
     is ConnectionState.Connected -> null
     ConnectionState.Connecting, is ConnectionState.Syncing -> MuxGridColors.AmberWarn
