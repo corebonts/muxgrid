@@ -97,13 +97,17 @@ data class DvrEntry(
         get() = error?.contains("missing", ignoreCase = true) == true
 
     val hasResumePosition: Boolean
-        get() = playCount == 0 && playPositionSec > 10L
+        get() = playCount == 0 && playPositionSec > MIN_RESUME_POSITION_SEC
 
     fun resumeProgressFraction(): Float {
         if (playCount > 0) return 1f
         val dur = durationSec
         if (dur <= 0L || playPositionSec <= 0L) return 0f
         return (playPositionSec.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+    }
+
+    companion object {
+        const val MIN_RESUME_POSITION_SEC = 10L
     }
 }
 

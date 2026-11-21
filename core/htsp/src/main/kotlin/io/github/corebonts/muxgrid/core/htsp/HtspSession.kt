@@ -3,7 +3,7 @@ package io.github.corebonts.muxgrid.core.htsp
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.IOException
@@ -16,6 +16,8 @@ internal data class HelloAuthResult(
     val negotiatedVersion: Int,
     val serverName: String,
     val serverVersion: String,
+    val hasStreamingAccess: Boolean = true,
+    val hasDvrAccess: Boolean = false,
 )
 
 /**
@@ -41,19 +43,9 @@ internal class HtspSession(
         pending[seq] = deferred
 
         val request = htsMap {
+            putAll(params)
             put("method", method)
             put("seq", seq)
-            for ((k, v) in params) {
-                when (v) {
-                    is HtsValue.S64 -> put(k, v.value)
-                    is HtsValue.Str -> put(k, v.value)
-                    is HtsValue.Bin -> put(k, v.value)
-                    is HtsValue.Bool -> put(k, v.value)
-                    is HtsValue.MapVal -> put(k, v.value)
-                    is HtsValue.ListVal -> put(k, v.items)
-                    is HtsValue.Uuid -> putUuid(k, v.bytes)
-                }
-            }
         }
         val frame = HtsMsgCodec.encodeFrame(request)
         if (writeQueue.trySend(frame).isFailure) {
@@ -62,7 +54,8 @@ internal class HtspSession(
         }
 
         return try {
-            val reply = withTimeout(timeoutMs) { deferred.await() }
+            val reply = withTimeoutOrNull(timeoutMs) { deferred.await() }
+                ?: throw HtspException("HTSP RPC '$method' timed out after ${timeoutMs}ms")
             if ((reply.getLong("noaccess") ?: 0L) != 0L) {
                 throw HtspNoAccessException("Access denied for HTSP method '$method'")
             }
@@ -131,6 +124,9 @@ internal class HtspSession(
     }
 
     companion object {
+        internal const val CONNECT_TIMEOUT_MS = 6_000
+        internal const val RPC_TIMEOUT_MS = 10_000L
+
         suspend fun handshakeAndAuthenticate(
             session: HtspSession,
             profile: ServerProfile,
@@ -151,6 +147,8 @@ internal class HtspSession(
             val serverVersion = helloReply.getString("serverversion") ?: ""
             val challenge = helloReply.getBytes("challenge")
 
+            var hasStreamingAccess = true
+            var hasDvrAccess = false
             if (profile.username.isNotBlank() || profile.password.isNotBlank()) {
                 val authParams = htsMap {
                     put("username", profile.username)
@@ -166,12 +164,16 @@ internal class HtspSession(
                 if ((authReply.getLong("noaccess") ?: 0L) != 0L) {
                     throw HtspAuthException("Invalid username or password")
                 }
+                hasStreamingAccess = (authReply.getLong("streaming") ?: 1L) != 0L
+                hasDvrAccess = (authReply.getLong("dvr") ?: 0L) != 0L
             }
 
             return HelloAuthResult(
                 negotiatedVersion = negotiatedVersion,
                 serverName = serverName,
                 serverVersion = serverVersion,
+                hasStreamingAccess = hasStreamingAccess,
+                hasDvrAccess = hasDvrAccess,
             )
         }
     }

@@ -2,13 +2,16 @@ package io.github.corebonts.muxgrid.core.htsp
 
 import io.github.corebonts.muxgrid.core.model.GrowingDvrFile
 import io.github.corebonts.muxgrid.core.model.ServerProfile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
@@ -29,11 +32,15 @@ import java.util.concurrent.atomic.AtomicLong
 class HtspVfsClient(
     private val profileProvider: () -> ServerProfile,
     private val idleDisconnectDelayMs: Long = DEFAULT_IDLE_DISCONNECT_MS,
+    private val connectTimeoutMs: Int = HtspSession.CONNECT_TIMEOUT_MS,
+    private val rpcTimeoutMs: Long = HtspSession.RPC_TIMEOUT_MS,
 ) : Closeable {
     private val vfsScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val connectMutex = Mutex()
+    private val sessionLock = Any()
     private val seqGenerator = AtomicLong(1L)
     private val openHandleCount = AtomicInteger(0)
+    private val disconnectGeneration = AtomicLong(0L)
 
     @Volatile
     private var activeSession: HtspSession? = null
@@ -41,6 +48,7 @@ class HtspVfsClient(
     @Volatile
     private var connectedProfile: ServerProfile? = null
 
+    private var connectingSocket: Socket? = null
     private var readerJob: Job? = null
     private var writerJob: Job? = null
     private var idleCloseJob: Job? = null
@@ -59,7 +67,7 @@ class HtspVfsClient(
             val reply = session.rpc(
                 "fileStat",
                 htsMap { put("id", handleId) },
-                RPC_TIMEOUT_MS,
+                rpcTimeoutMs,
             )
             return HtspFileInfo(
                 handleId = handleId,
@@ -76,7 +84,7 @@ class HtspVfsClient(
                     put("size", size.toLong())
                     put("offset", offset.coerceAtLeast(0L))
                 },
-                RPC_TIMEOUT_MS,
+                rpcTimeoutMs,
             )
             return reply.getBytes("data") ?: ByteArray(0)
         }
@@ -94,9 +102,18 @@ class HtspVfsClient(
                     }
                 }
             } finally {
-                if (openHandleCount.decrementAndGet() <= 0) {
-                    openHandleCount.set(0)
-                    scheduleIdleDisconnect()
+                if (openHandleCount.updateAndGet { (it - 1).coerceAtLeast(0) } == 0) {
+                    if (idleDisconnectDelayMs <= 0L) {
+                        withContext(NonCancellable) {
+                            connectMutex.withLock {
+                                if (openHandleCount.get() == 0) {
+                                    closeActiveSessionLocked()
+                                }
+                            }
+                        }
+                    } else {
+                        scheduleIdleDisconnect()
+                    }
                 }
             }
         }
@@ -111,37 +128,64 @@ class HtspVfsClient(
         if (!profile.isConfigured) {
             throw HtspException("Server profile is not configured")
         }
-        val session = ensureSession(profile)
-        val reply = try {
-            session.rpc("fileOpen", htsMap { put("file", path) }, RPC_TIMEOUT_MS)
-        } catch (e: HtspNoAccessException) {
-            throw e
-        } catch (e: HtspException) {
-            // Reconnect once if the cached VFS session went stale between seeks
-            if (session.isClosed) {
-                val freshSession = ensureSession(profile, forceReconnect = true)
-                freshSession.rpc("fileOpen", htsMap { put("file", path) }, RPC_TIMEOUT_MS)
-            } else {
+        var session = acquireSessionForOpen(profile)
+        var handleReserved = true
+        try {
+            val reply = try {
+                session.rpc("fileOpen", htsMap { put("file", path) }, rpcTimeoutMs)
+            } catch (e: HtspNoAccessException) {
                 throw e
+            } catch (e: HtspException) {
+                // Reconnect once if the cached VFS session went stale between seeks
+                if (session.isClosed) {
+                    releaseOpenHandleReservation()
+                    handleReserved = false
+                    session = acquireSessionForOpen(profile, forceReconnect = true)
+                    handleReserved = true
+                    session.rpc("fileOpen", htsMap { put("file", path) }, rpcTimeoutMs)
+                } else {
+                    throw e
+                }
+            }
+            val handleId = reply.getLong("id") ?: throw HtspException("Missing handle id in fileOpen reply")
+            val handle = VfsFileHandle(
+                session = session,
+                handleId = handleId,
+                initialSize = reply.getLong("size") ?: 0L,
+                mtime = reply.getLong("mtime") ?: 0L,
+            )
+            handleReserved = false
+            return handle
+        } finally {
+            if (handleReserved) {
+                releaseOpenHandleReservation()
             }
         }
-        val handleId = reply.getLong("id") ?: throw HtspException("Missing handle id in fileOpen reply")
-        val boundSession = activeSession ?: session
-        idleCloseJob?.cancel()
-        idleCloseJob = null
-        openHandleCount.incrementAndGet()
-        return VfsFileHandle(
-            session = boundSession,
-            handleId = handleId,
-            initialSize = reply.getLong("size") ?: 0L,
-            mtime = reply.getLong("mtime") ?: 0L,
-        )
     }
 
     fun disconnect() {
-        idleCloseJob?.cancel()
-        idleCloseJob = null
-        closeActiveSession()
+        val oldW: Job?
+        val oldR: Job?
+        val oldSession: HtspSession?
+        val oldConnecting: Socket?
+        synchronized(sessionLock) {
+            disconnectGeneration.incrementAndGet()
+            idleCloseJob?.cancel()
+            idleCloseJob = null
+            oldW = writerJob
+            oldR = readerJob
+            oldSession = activeSession
+            oldConnecting = connectingSocket
+            writerJob = null
+            readerJob = null
+            activeSession = null
+            connectedProfile = null
+            connectingSocket = null
+        }
+        oldW?.cancel()
+        oldR?.cancel()
+        oldSession?.close()
+        oldConnecting?.let { runCatching { it.close() } }
     }
 
     override fun close() {
@@ -149,33 +193,67 @@ class HtspVfsClient(
         vfsScope.cancel()
     }
 
-    private suspend fun ensureSession(
+    private suspend fun acquireSessionForOpen(
         profile: ServerProfile,
         forceReconnect: Boolean = false,
     ): HtspSession = connectMutex.withLock {
-        idleCloseJob?.cancel()
-        idleCloseJob = null
-        val existing = activeSession
-        if (!forceReconnect && existing != null && !existing.isClosed && connectedProfile == profile) {
-            return@withLock existing
-        }
-        closeActiveSession()
+        val session = ensureSessionLocked(profile, forceReconnect)
+        openHandleCount.incrementAndGet()
+        session
+    }
 
-        val socket = withContext(Dispatchers.IO) {
-            Socket().apply {
-                tcpNoDelay = true
-                keepAlive = true
-                connect(InetSocketAddress(profile.host, profile.htspPort), CONNECT_TIMEOUT_MS)
+    private fun releaseOpenHandleReservation() {
+        if (openHandleCount.updateAndGet { (it - 1).coerceAtLeast(0) } == 0) {
+            scheduleIdleDisconnect()
+        }
+    }
+
+    private suspend fun ensureSessionLocked(
+        profile: ServerProfile,
+        forceReconnect: Boolean = false,
+    ): HtspSession {
+        synchronized(sessionLock) {
+            idleCloseJob?.cancel()
+            idleCloseJob = null
+            val existing = activeSession
+            if (!forceReconnect && existing != null && !existing.isClosed && connectedProfile == profile) {
+                return existing
             }
         }
-        val session = HtspSession(socket, seqGenerator)
+        closeActiveSessionLocked()
+
+        val gen = disconnectGeneration.get()
+        val socket = Socket()
+        synchronized(sessionLock) {
+            if (disconnectGeneration.get() != gen) {
+                throw HtspException("VFS session disconnected")
+            }
+            connectingSocket = socket
+        }
+        val session = try {
+            withContext(Dispatchers.IO) {
+                socket.tcpNoDelay = true
+                socket.keepAlive = true
+                socket.connect(InetSocketAddress(profile.normalizedHost, profile.htspPort), connectTimeoutMs)
+            }
+            HtspSession(socket, seqGenerator)
+        } catch (t: Throwable) {
+            runCatching { socket.close() }
+            throw t
+        } finally {
+            synchronized(sessionLock) {
+                if (connectingSocket === socket) {
+                    connectingSocket = null
+                }
+            }
+        }
         val wJob = vfsScope.launch { session.writeLoop() }
         val rJob = vfsScope.launch {
             runCatching { session.readLoop() }
             session.close()
         }
         try {
-            HtspSession.handshakeAndAuthenticate(session, profile, RPC_TIMEOUT_MS)
+            HtspSession.handshakeAndAuthenticate(session, profile, rpcTimeoutMs)
         } catch (t: Throwable) {
             wJob.cancel()
             rJob.cancel()
@@ -183,42 +261,69 @@ class HtspVfsClient(
             throw t
         }
 
-        activeSession = session
-        connectedProfile = profile
-        writerJob = wJob
-        readerJob = rJob
-        session
+        val active = currentCoroutineContext().isActive
+        val published = synchronized(sessionLock) {
+            if (!active || disconnectGeneration.get() != gen) {
+                false
+            } else {
+                activeSession = session
+                connectedProfile = profile
+                writerJob = wJob
+                readerJob = rJob
+                true
+            }
+        }
+        if (!published) {
+            wJob.cancel()
+            rJob.cancel()
+            session.close()
+            if (!active) {
+                throw CancellationException("VFS openFile cancelled")
+            }
+            throw HtspException("VFS session disconnected")
+        }
+        return session
     }
 
     private fun scheduleIdleDisconnect() {
-        if (idleDisconnectDelayMs <= 0L) {
-            closeActiveSession()
-            return
-        }
-        idleCloseJob?.cancel()
-        idleCloseJob = vfsScope.launch {
-            delay(idleDisconnectDelayMs)
-            connectMutex.withLock {
-                if (openHandleCount.get() <= 0) {
-                    closeActiveSession()
+        synchronized(sessionLock) {
+            idleCloseJob?.cancel()
+            if (!vfsScope.isActive) {
+                idleCloseJob = null
+                return
+            }
+            idleCloseJob = vfsScope.launch {
+                if (idleDisconnectDelayMs > 0L) {
+                    delay(idleDisconnectDelayMs)
+                }
+                connectMutex.withLock {
+                    if (openHandleCount.get() == 0) {
+                        closeActiveSessionLocked()
+                    }
                 }
             }
         }
     }
 
-    private fun closeActiveSession() {
-        writerJob?.cancel()
-        readerJob?.cancel()
-        writerJob = null
-        readerJob = null
-        activeSession?.close()
-        activeSession = null
-        connectedProfile = null
+    private fun closeActiveSessionLocked() {
+        val oldW: Job?
+        val oldR: Job?
+        val oldSession: HtspSession?
+        synchronized(sessionLock) {
+            oldW = writerJob
+            oldR = readerJob
+            oldSession = activeSession
+            writerJob = null
+            readerJob = null
+            activeSession = null
+            connectedProfile = null
+        }
+        oldW?.cancel()
+        oldR?.cancel()
+        oldSession?.close()
     }
 
     companion object {
-        private const val CONNECT_TIMEOUT_MS = 6_000
-        private const val RPC_TIMEOUT_MS = 10_000L
         private const val CLOSE_RPC_TIMEOUT_MS = 2_000L
         private const val DEFAULT_IDLE_DISCONNECT_MS = 5_000L
     }

@@ -8,7 +8,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -21,17 +20,12 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
-import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.math.min
 
 /**
  * Persistent TCP client for Tvheadend's HTSP binary protocol (`9982/tcp`).
@@ -44,6 +38,9 @@ class HtspClient(
     private val scope: CoroutineScope,
     private val epgWindowSeconds: Long = DEFAULT_EPG_WINDOW_SEC,
     private val heartbeatIntervalMs: Long = DEFAULT_HEARTBEAT_INTERVAL_MS,
+    private val connectTimeoutMs: Int = HtspSession.CONNECT_TIMEOUT_MS,
+    private val rpcTimeoutMs: Long = HtspSession.RPC_TIMEOUT_MS,
+    private val initialSyncTimeoutMs: Long = INITIAL_SYNC_TIMEOUT_MS,
 ) {
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -52,6 +49,8 @@ class HtspClient(
     val events: Flow<HtspPushEvent> = eventChannel.receiveAsFlow()
 
     private val seqGenerator = AtomicLong(1L)
+    private val sessionLock = Any()
+    private val connectionGeneration = AtomicLong(0L)
     private var connectionJob: Job? = null
 
     @Volatile
@@ -64,77 +63,103 @@ class HtspClient(
     var suppressTransientErrors: Boolean = false
 
     fun connect(profile: ServerProfile) {
-        lastProfile = profile
-        connectionJob?.cancel()
-        activeSession?.close()
-        activeSession = null
-
-        if (!profile.isConfigured) {
-            _connectionState.value = ConnectionState.Disconnected
-            return
+        val generation: Long
+        val oldJob: Job?
+        val oldSession: HtspSession?
+        synchronized(sessionLock) {
+            lastProfile = profile
+            generation = connectionGeneration.incrementAndGet()
+            oldJob = connectionJob
+            oldSession = activeSession
+            activeSession = null
+            if (!profile.isConfigured) {
+                connectionJob = null
+                _connectionState.value = ConnectionState.Disconnected
+                oldJob?.cancel()
+                oldSession?.close()
+                return
+            }
+            // Publish Connecting synchronously so callers waiting on a resync never
+            // observe the previous (stale) Connected state.
+            _connectionState.value = ConnectionState.Connecting
+            connectionJob = scope.launch(Dispatchers.IO) {
+                runConnectionLoop(profile, generation)
+            }
         }
+        oldJob?.cancel()
+        oldSession?.close()
+    }
 
-        // Publish Connecting synchronously so callers waiting on a resync never
-        // observe the previous (stale) Connected state.
-        _connectionState.value = ConnectionState.Connecting
-
-        connectionJob = scope.launch(Dispatchers.IO) {
-            var backoffMs = INITIAL_BACKOFF_MS
-            var hadSuccessfulSync = false
-            var consecutiveFailures = 0
-            while (isActive) {
-                var stopRetrying = false
-                var fastRetry = false
-                try {
-                    _connectionState.value = ConnectionState.Connecting
-                    runSession(profile) {
-                        // Reset backoff once initial sync completes
-                        backoffMs = INITIAL_BACKOFF_MS
-                        hadSuccessfulSync = true
-                        consecutiveFailures = 0
-                    }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: HtspAuthException) {
-                    _connectionState.value = ConnectionState.Error(
+    private suspend fun CoroutineScope.runConnectionLoop(
+        profile: ServerProfile,
+        generation: Long,
+    ) {
+        var backoffMs = INITIAL_BACKOFF_MS
+        var hadSuccessfulSync = false
+        var consecutiveFailures = 0
+        while (isActive && connectionGeneration.get() == generation) {
+            var stopRetrying = false
+            var fastRetry = false
+            try {
+                publishStateIfCurrent(generation, ConnectionState.Connecting)
+                runSession(profile, generation) {
+                    // Reset backoff once initial sync completes
+                    backoffMs = INITIAL_BACKOFF_MS
+                    hadSuccessfulSync = true
+                    consecutiveFailures = 0
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: HtspAuthException) {
+                publishStateIfCurrent(
+                    generation,
+                    ConnectionState.Error(
                         message = e.message ?: "Authentication failed",
                         isAuthError = true,
-                    )
-                    stopRetrying = true
-                } catch (e: Exception) {
-                    consecutiveFailures++
-                    val isFirstDropAfterSync = hadSuccessfulSync && consecutiveFailures == 1
-                    if (suppressTransientErrors || isFirstDropAfterSync) {
-                        _connectionState.value = ConnectionState.Connecting
-                        fastRetry = isFirstDropAfterSync && !suppressTransientErrors
-                    } else {
-                        _connectionState.value = ConnectionState.Error(
+                    ),
+                )
+                stopRetrying = true
+            } catch (e: Exception) {
+                if (!isActive || connectionGeneration.get() != generation) break
+                consecutiveFailures++
+                val isFirstDropAfterSync = hadSuccessfulSync && consecutiveFailures == 1
+                if (suppressTransientErrors || isFirstDropAfterSync) {
+                    publishStateIfCurrent(generation, ConnectionState.Connecting)
+                    fastRetry = isFirstDropAfterSync && !suppressTransientErrors
+                } else {
+                    publishStateIfCurrent(
+                        generation,
+                        ConnectionState.Error(
                             message = e.message ?: "Connection lost",
                             isAuthError = false,
-                        )
-                    }
-                } finally {
-                    activeSession?.close()
-                    activeSession = null
+                        ),
+                    )
                 }
+            }
 
-                if (stopRetrying || !isActive) break
-                if (fastRetry) {
-                    delay(400L)
-                } else {
-                    delay(backoffMs)
-                    backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
-                }
+            if (stopRetrying || !isActive || connectionGeneration.get() != generation) break
+            if (fastRetry) {
+                delay(400L)
+            } else {
+                delay(backoffMs)
+                backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
             }
         }
     }
 
     fun disconnect() {
-        connectionJob?.cancel()
-        connectionJob = null
-        activeSession?.close()
-        activeSession = null
-        _connectionState.value = ConnectionState.Disconnected
+        val oldJob: Job?
+        val oldSession: HtspSession?
+        synchronized(sessionLock) {
+            connectionGeneration.incrementAndGet()
+            oldJob = connectionJob
+            oldSession = activeSession
+            connectionJob = null
+            activeSession = null
+            _connectionState.value = ConnectionState.Disconnected
+        }
+        oldJob?.cancel()
+        oldSession?.close()
     }
 
     /**
@@ -149,17 +174,28 @@ class HtspClient(
         val profile = lastProfile ?: return false
         if (!profile.isConfigured) return false
 
-        val oldJob = connectionJob
-        connectionJob = null
-        // Closing the socket first unblocks the reader loop so cancelAndJoin cannot hang.
-        activeSession?.close()
-        activeSession = null
-        oldJob?.cancelAndJoin()
+        val resyncGen: Long
+        val oldJob: Job?
+        val oldSession: HtspSession?
+        synchronized(sessionLock) {
+            resyncGen = connectionGeneration.incrementAndGet()
+            oldJob = connectionJob
+            oldSession = activeSession
+            connectionJob = null
+            activeSession = null
+        }
+        oldJob?.cancel()
+        // Closing the socket first unblocks the reader loop so join cannot hang.
+        oldSession?.close()
+        oldJob?.join()
 
+        if (connectionGeneration.get() != resyncGen) {
+            return false
+        }
         connect(profile)
         val result = withTimeoutOrNull(timeoutMs) {
             connectionState.first {
-                it is ConnectionState.Connected || it is ConnectionState.Error
+                it is ConnectionState.Connected || it is ConnectionState.Error || it is ConnectionState.Disconnected
             }
         }
         return result is ConnectionState.Connected
@@ -339,22 +375,56 @@ class HtspClient(
         }
     }
 
-    private suspend fun rpc(method: String, params: HtsMap, timeoutMs: Long = RPC_TIMEOUT_MS): HtsMap {
+    private fun publishStateIfCurrent(generation: Long, state: ConnectionState) {
+        synchronized(sessionLock) {
+            if (connectionGeneration.get() == generation) {
+                _connectionState.value = state
+            }
+        }
+    }
+
+    private fun clearSession(session: HtspSession) {
+        synchronized(sessionLock) {
+            if (activeSession === session) {
+                activeSession = null
+            }
+        }
+        session.close()
+    }
+
+    private suspend fun rpc(method: String, params: HtsMap, timeoutMs: Long = rpcTimeoutMs): HtsMap {
         val session = activeSession ?: throw HtspException("HTSP is not connected")
         return session.rpc(method, params, timeoutMs)
     }
 
     private suspend fun runSession(
         profile: ServerProfile,
+        generation: Long,
         onSyncCompleted: () -> Unit,
     ) = coroutineScope {
         val socket = Socket()
-        socket.tcpNoDelay = true
-        socket.keepAlive = true
-        socket.connect(InetSocketAddress(profile.host, profile.htspPort), CONNECT_TIMEOUT_MS)
+        val session = try {
+            socket.tcpNoDelay = true
+            socket.keepAlive = true
+            socket.connect(InetSocketAddress(profile.normalizedHost, profile.htspPort), connectTimeoutMs)
+            HtspSession(socket, seqGenerator)
+        } catch (t: Throwable) {
+            runCatching { socket.close() }
+            throw t
+        }
 
-        val session = HtspSession(socket, seqGenerator)
-        activeSession = session
+        val registered = synchronized(sessionLock) {
+            if (!isActive || connectionGeneration.get() != generation) {
+                false
+            } else {
+                activeSession = session
+                true
+            }
+        }
+        if (!registered) {
+            session.close()
+            throw CancellationException("Connection superseded or cancelled")
+        }
 
         val initialSyncDeferred = CompletableDeferred<Unit>()
         var negotiatedVersion = CLIENT_HTSP_VERSION
@@ -368,6 +438,7 @@ class HtspClient(
         val readerJob = launch(Dispatchers.IO) {
             try {
                 session.readLoop { method, msg ->
+                    if (connectionGeneration.get() != generation) return@readLoop
                     val event = HtspMessageParser.parsePushEvent(method, msg)
                     if (event != null) {
                         eventChannel.trySend(event)
@@ -385,17 +456,23 @@ class HtspClient(
         }
 
         try {
-            val authResult = HtspSession.handshakeAndAuthenticate(session, profile, RPC_TIMEOUT_MS)
+            val authResult = HtspSession.handshakeAndAuthenticate(session, profile, rpcTimeoutMs)
             negotiatedVersion = authResult.negotiatedVersion
             serverName = authResult.serverName
             serverVersion = authResult.serverVersion
 
-            _connectionState.value = ConnectionState.Syncing(
-                serverName = serverName,
-                serverVersion = serverVersion,
-                htspVersion = negotiatedVersion,
+            publishStateIfCurrent(
+                generation,
+                ConnectionState.Syncing(
+                    serverName = serverName,
+                    serverVersion = serverVersion,
+                    htspVersion = negotiatedVersion,
+                ),
             )
 
+            if (connectionGeneration.get() != generation) {
+                throw CancellationException("Connection superseded")
+            }
             eventChannel.trySend(HtspPushEvent.SyncStarting)
 
             val epgMaxTime = (System.currentTimeMillis() / 1000L) + epgWindowSeconds
@@ -405,37 +482,50 @@ class HtspClient(
                     put("epg", 1)
                     put("epgMaxTime", epgMaxTime)
                 },
-                RPC_TIMEOUT_MS,
+                rpcTimeoutMs,
             )
 
-            withTimeout(INITIAL_SYNC_TIMEOUT_MS) {
+            withTimeoutOrNull(initialSyncTimeoutMs) {
                 initialSyncDeferred.await()
-            }
+            } ?: throw HtspException("HTSP initial sync timed out after ${initialSyncTimeoutMs}ms")
             onSyncCompleted()
 
             var clockOffsetMs = fetchClockOffsetOrZero(session)
-            _connectionState.value = ConnectionState.Connected(
-                serverName = serverName,
-                serverVersion = serverVersion,
-                htspVersion = negotiatedVersion,
-                serverClockOffsetMs = clockOffsetMs,
+            publishStateIfCurrent(
+                generation,
+                ConnectionState.Connected(
+                    serverName = serverName,
+                    serverVersion = serverVersion,
+                    htspVersion = negotiatedVersion,
+                    serverClockOffsetMs = clockOffsetMs,
+                ),
             )
 
             // Heartbeat loop
             val heartbeatJob = launch(Dispatchers.IO) {
-                while (isActive) {
-                    delay(heartbeatIntervalMs)
-                    val sysTime = session.rpc("getSysTime", htsMap {}, RPC_TIMEOUT_MS)
-                    val serverSec = sysTime.getLong("time")
-                    if (serverSec != null) {
-                        clockOffsetMs = (serverSec * 1000L) - System.currentTimeMillis()
-                        _connectionState.value = ConnectionState.Connected(
-                            serverName = serverName,
-                            serverVersion = serverVersion,
-                            htspVersion = negotiatedVersion,
-                            serverClockOffsetMs = clockOffsetMs,
-                        )
+                try {
+                    while (isActive && connectionGeneration.get() == generation) {
+                        delay(heartbeatIntervalMs)
+                        val sysTime = session.rpc("getSysTime", htsMap {}, rpcTimeoutMs)
+                        val serverSec = sysTime.getLong("time")
+                        if (serverSec != null) {
+                            clockOffsetMs = (serverSec * 1000L) - System.currentTimeMillis()
+                            publishStateIfCurrent(
+                                generation,
+                                ConnectionState.Connected(
+                                    serverName = serverName,
+                                    serverVersion = serverVersion,
+                                    htspVersion = negotiatedVersion,
+                                    serverClockOffsetMs = clockOffsetMs,
+                                ),
+                            )
+                        }
                     }
+                } catch (t: Throwable) {
+                    if (t !is CancellationException) {
+                        clearSession(session)
+                    }
+                    throw t
                 }
             }
 
@@ -449,14 +539,16 @@ class HtspClient(
         } finally {
             writerJob.cancel()
             readerJob.cancel()
-            session.close()
+            clearSession(session)
         }
     }
 
     private suspend fun fetchClockOffsetOrZero(session: HtspSession): Long = try {
-        val sysTime = session.rpc("getSysTime", htsMap {}, RPC_TIMEOUT_MS)
+        val sysTime = session.rpc("getSysTime", htsMap {}, rpcTimeoutMs)
         val serverSec = sysTime.getLong("time") ?: return 0L
         (serverSec * 1000L) - System.currentTimeMillis()
+    } catch (e: CancellationException) {
+        throw e
     } catch (_: Exception) {
         0L
     }
@@ -466,8 +558,6 @@ class HtspClient(
         const val CLIENT_NAME = "MuxGrid"
         const val CLIENT_VERSION = "0.6.0"
 
-        private const val CONNECT_TIMEOUT_MS = 6_000
-        private const val RPC_TIMEOUT_MS = 10_000L
         private const val INITIAL_SYNC_TIMEOUT_MS = 30_000L
         private const val RESYNC_TIMEOUT_MS = 30_000L
         private const val DEFAULT_EPG_WINDOW_SEC = 2L * 7L * 86_400L // +2 weeks
@@ -488,71 +578,65 @@ class HtspClient(
                     return@withContext ConnectionTestResult.Failure("Host and valid ports are required")
                 }
                 val socket = Socket()
-                try {
+                val session = try {
                     socket.tcpNoDelay = true
-                    socket.soTimeout = CONNECT_TIMEOUT_MS
-                    socket.connect(InetSocketAddress(profile.host, profile.htspPort), CONNECT_TIMEOUT_MS)
-                    val input = BufferedInputStream(socket.getInputStream())
-                    val output = BufferedOutputStream(socket.getOutputStream())
+                    socket.connect(
+                        InetSocketAddress(profile.normalizedHost, profile.htspPort),
+                        HtspSession.CONNECT_TIMEOUT_MS,
+                    )
+                    HtspSession(socket, AtomicLong(1L))
+                } catch (e: CancellationException) {
+                    runCatching { socket.close() }
+                    throw e
+                } catch (e: Exception) {
+                    runCatching { socket.close() }
+                    return@withContext ConnectionTestResult.Failure(
+                        message = e.message ?: "Unable to connect to ${profile.formattedHttpHost}:${profile.htspPort}",
+                        isAuthError = false,
+                    )
+                }
 
-                    val helloReq = htsMap {
-                        put("method", "hello")
-                        put("seq", 1)
-                        put("htspversion", CLIENT_HTSP_VERSION)
-                        put("clientname", CLIENT_NAME)
-                        put("clientversion", CLIENT_VERSION)
-                    }
-                    output.write(HtsMsgCodec.encodeFrame(helloReq))
-                    output.flush()
-
-                    val helloReply = HtsMsgCodec.readFrame(input)
-                    val serverVersionNum = helloReply.getInt("htspversion") ?: CLIENT_HTSP_VERSION
-                    val negotiated = min(CLIENT_HTSP_VERSION, serverVersionNum)
-                    val serverName = helloReply.getString("servername") ?: "Tvheadend"
-                    val serverVer = helloReply.getString("serverversion") ?: ""
-                    val challenge = helloReply.getBytes("challenge")
-
-                    var hasStreaming = true
-                    var hasDvr = false
-                    if (profile.username.isNotBlank() || profile.password.isNotBlank()) {
-                        val authReq = htsMap {
-                            put("method", "authenticate")
-                            put("seq", 2)
-                            put("username", profile.username)
-                            if (challenge != null) {
-                                put("digest", computeSha1Digest(profile.password, challenge))
+                try {
+                    val auth = coroutineScope {
+                        val writeJob = launch(Dispatchers.IO) { session.writeLoop() }
+                        val readJob = launch(Dispatchers.IO) {
+                            try {
+                                session.readLoop()
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (_: Throwable) {
+                                session.close()
                             }
                         }
-                        output.write(HtsMsgCodec.encodeFrame(authReq))
-                        output.flush()
-                        val authReply = HtsMsgCodec.readFrame(input)
-                        if ((authReply.getLong("noaccess") ?: 0L) != 0L) {
-                            return@withContext ConnectionTestResult.Failure(
-                                message = "Authentication failed: check username or password",
-                                isAuthError = true,
-                            )
+                        try {
+                            HtspSession.handshakeAndAuthenticate(session, profile, HtspSession.RPC_TIMEOUT_MS)
+                        } finally {
+                            writeJob.cancel()
+                            readJob.cancel()
+                            session.close()
                         }
-                        hasStreaming = (authReply.getLong("streaming") ?: 1L) != 0L
-                        hasDvr = (authReply.getLong("dvr") ?: 0L) != 0L
                     }
-
                     ConnectionTestResult.Success(
-                        serverName = serverName,
-                        serverVersion = serverVer,
-                        htspVersion = negotiated,
-                        hasDvrAccess = hasDvr,
-                        hasStreamingAccess = hasStreaming,
+                        serverName = auth.serverName,
+                        serverVersion = auth.serverVersion,
+                        htspVersion = auth.negotiatedVersion,
+                        hasDvrAccess = auth.hasDvrAccess,
+                        hasStreamingAccess = auth.hasStreamingAccess,
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: HtspAuthException) {
+                    ConnectionTestResult.Failure(
+                        message = "Authentication failed: check username or password",
+                        isAuthError = true,
                     )
                 } catch (e: Exception) {
                     ConnectionTestResult.Failure(
-                        message = e.message ?: "Unable to connect to ${profile.host}:${profile.htspPort}",
+                        message = e.message ?: "Unable to connect to ${profile.formattedHttpHost}:${profile.htspPort}",
                         isAuthError = false,
                     )
                 } finally {
-                    try {
-                        socket.close()
-                    } catch (_: IOException) {
-                    }
+                    session.close()
                 }
             }
     }

@@ -16,6 +16,7 @@ import io.github.corebonts.muxgrid.core.model.EpgEvent
 import io.github.corebonts.muxgrid.core.model.FormFactor
 import io.github.corebonts.muxgrid.core.model.GrowingDvrFile
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
+import io.github.corebonts.muxgrid.core.model.LocalDvrProgress
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import io.github.corebonts.muxgrid.core.model.StartScreen
@@ -37,6 +38,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -68,23 +70,8 @@ class TvheadendRepository(
     val dvrEntries: StateFlow<Map<Long, DvrEntry>> = combine(
         store.dvrEntries,
         settings.localDvrProgress,
-    ) { serverMap, localFallback ->
-        if (localFallback.isEmpty()) {
-            serverMap
-        } else {
-            serverMap.mapValues { (id, entry) ->
-                val local = localFallback[id]
-                if (local != null && entry.playPositionSec == 0L && entry.playCount == 0) {
-                    entry.copy(
-                        playPositionSec = local.playPositionSec,
-                        playCount = local.playCount,
-                    )
-                } else {
-                    entry
-                }
-            }
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
+        ::mergeDvrEntriesWithLocalProgress,
+    ).stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
     val serverProfile: StateFlow<ServerProfile?> = settings.serverProfile
         .stateIn(scope, SharingStarted.Eagerly, null)
@@ -120,20 +107,14 @@ class TvheadendRepository(
     )
 
     init {
+        scope.coroutineContext[Job]?.invokeOnCompletion {
+            vfsClient.close()
+        }
         scope.launch(Dispatchers.Default) {
             val pendingEpgBatch = ArrayList<HtspPushEvent>()
             var flushJob: Job? = null
+            var syncGeneration = 0L
             val batchLock = Any()
-
-            fun flushEpgBatch() {
-                val batch = synchronized(batchLock) {
-                    if (pendingEpgBatch.isEmpty()) return
-                    val copy = ArrayList(pendingEpgBatch)
-                    pendingEpgBatch.clear()
-                    copy
-                }
-                store.applyEvents(batch)
-            }
 
             var inShadowSync = false
             htspClient.events.collect { event ->
@@ -142,30 +123,46 @@ class TvheadendRepository(
                         inShadowSync = true
                         flushJob?.cancel()
                         flushJob = null
-                        synchronized(batchLock) { pendingEpgBatch.clear() }
-                        store.applyEvent(event)
+                        synchronized(batchLock) {
+                            syncGeneration++
+                            pendingEpgBatch.clear()
+                            store.applyEvent(event)
+                        }
                     }
                     HtspPushEvent.InitialSyncCompleted -> {
                         inShadowSync = false
                         flushJob?.cancel()
                         flushJob = null
-                        synchronized(batchLock) { pendingEpgBatch.clear() }
-                        store.applyEvent(event)
+                        synchronized(batchLock) {
+                            syncGeneration++
+                            pendingEpgBatch.clear()
+                            store.applyEvent(event)
+                        }
                     }
                     is HtspPushEvent.EventAdd,
                     is HtspPushEvent.EventUpdate,
                     is HtspPushEvent.EventDelete,
                     -> {
                         if (inShadowSync) {
-                            store.applyEvent(event)
-                        } else {
                             synchronized(batchLock) {
+                                store.applyEvent(event)
+                            }
+                        } else {
+                            val scheduledGen = synchronized(batchLock) {
                                 pendingEpgBatch.add(event)
+                                syncGeneration
                             }
                             if (flushJob?.isActive != true) {
                                 flushJob = launch(Dispatchers.Default) {
                                     delay(150L)
-                                    flushEpgBatch()
+                                    synchronized(batchLock) {
+                                        if (!isActive || scheduledGen != syncGeneration || pendingEpgBatch.isEmpty()) {
+                                            return@synchronized
+                                        }
+                                        val copy = ArrayList(pendingEpgBatch)
+                                        pendingEpgBatch.clear()
+                                        store.applyEvents(copy)
+                                    }
                                 }
                             }
                         }
@@ -174,9 +171,19 @@ class TvheadendRepository(
                         if (!inShadowSync) {
                             flushJob?.cancel()
                             flushJob = null
-                            flushEpgBatch()
+                            synchronized(batchLock) {
+                                if (pendingEpgBatch.isNotEmpty()) {
+                                    val copy = ArrayList(pendingEpgBatch)
+                                    pendingEpgBatch.clear()
+                                    store.applyEvents(copy)
+                                }
+                                store.applyEvent(event)
+                            }
+                        } else {
+                            synchronized(batchLock) {
+                                store.applyEvent(event)
+                            }
                         }
-                        store.applyEvent(event)
                     }
                 }
             }
@@ -185,21 +192,24 @@ class TvheadendRepository(
             var previousServerKey: String? = null
             settings.serverProfile
                 .distinctUntilChanged()
-                .collect { profile ->
+                .collectLatest { profile ->
                     vfsClient.disconnect()
-                    val serverKey = if (profile.isConfigured) "${profile.host}:${profile.htspPort}" else ""
+                    val serverKey = profile.serverKey
                     if (serverKey != previousServerKey) {
                         val switchedServer = previousServerKey != null
-                        previousServerKey = serverKey
-                        scope.launch(Dispatchers.IO) {
-                            val minStopSec = currentServerEpochSec() - TvheadendStore.EPG_PAST_RETENTION_SEC
-                            val cached = if (serverKey.isNotEmpty()) {
-                                epgDiskCache.load(serverKey, minStopSec)
-                            } else {
-                                emptyList()
-                            }
-                            store.seedCachedEvents(cached, clearExisting = switchedServer)
+                        if (switchedServer) {
+                            htspClient.disconnect()
+                            store.seedCachedEvents(emptyList(), clearExisting = true)
+                            previousServerKey = ""
                         }
+                        if (serverKey.isNotEmpty()) {
+                            val minStopSec = currentServerEpochSec() - TvheadendStore.EPG_PAST_RETENTION_SEC
+                            val cached = withContext(Dispatchers.IO) {
+                                epgDiskCache.load(serverKey, minStopSec)
+                            }
+                            store.seedCachedEvents(cached, clearExisting = false)
+                        }
+                        previousServerKey = serverKey
                     }
                     if (profile.isConfigured) {
                         htspClient.connect(profile)
@@ -213,9 +223,8 @@ class TvheadendRepository(
             store.epgByChannel.collectLatest { epgMap ->
                 if (epgMap.isEmpty()) return@collectLatest
                 delay(3_000L)
-                val profile = serverProfile.value ?: return@collectLatest
-                if (!profile.isConfigured) return@collectLatest
-                val serverKey = "${profile.host}:${profile.htspPort}"
+                val serverKey = serverProfile.value?.serverKey.orEmpty()
+                if (serverKey.isEmpty()) return@collectLatest
                 val minStopSec = currentServerEpochSec() - TvheadendStore.EPG_PAST_RETENTION_SEC
                 val allEvents = epgMap.values.flatten()
                 epgDiskCache.save(serverKey, allEvents, minStopSec)
@@ -371,7 +380,7 @@ class TvheadendRepository(
     }
 
     suspend fun markRecordingWatched(dvrId: Long, watched: Boolean): Result<Unit> = runCatchingSuspend {
-        val existing = store.getDvrEntry(dvrId)
+        val existing = dvrEntries.value[dvrId] ?: store.getDvrEntry(dvrId)
         val newCount = if (watched) maxOf(1, (existing?.playCount ?: 0) + 1) else 0
         try {
             htspClient.updateDvrEntry(id = dvrId, playPositionSec = 0L, playCount = newCount)
@@ -399,7 +408,7 @@ class TvheadendRepository(
         val existingCount = entry?.playCount ?: 0
         val targetCount = if (watchedNow) maxOf(1, existingCount) else null
 
-        if (!watchedNow && targetPos < 5L) return
+        if (!watchedNow && targetPos <= DvrEntry.MIN_RESUME_POSITION_SEC) return
 
         try {
             htspClient.updateDvrEntry(
@@ -432,15 +441,29 @@ class TvheadendRepository(
         private const val WATCHED_THRESHOLD_FRACTION = 0.92f
     }
 
-    fun currentServerHttpBaseUrl(): String? {
-        val profile = serverProfile.value ?: return null
-        if (!profile.isConfigured) return null
-        return "http://${profile.host}:${profile.httpPort}"
-    }
+    fun currentServerHttpBaseUrl(): String? = serverProfile.value?.httpBaseUrl
 
     fun findConflictingRecording(targetChannelId: Long): Pair<DvrEntry, String?>? {
         val entry = store.findConflictingRecording(targetChannelId) ?: return null
         val chName = store.getChannel(entry.channelId)?.name
         return entry to chName
+    }
+}
+
+internal fun mergeDvrEntriesWithLocalProgress(
+    serverMap: Map<Long, DvrEntry>,
+    localFallback: Map<Long, LocalDvrProgress>,
+): Map<Long, DvrEntry> {
+    if (localFallback.isEmpty()) return serverMap
+    return serverMap.mapValues { (id, entry) ->
+        val local = localFallback[id]
+        if (local != null) {
+            entry.copy(
+                playPositionSec = local.playPositionSec,
+                playCount = local.playCount,
+            )
+        } else {
+            entry
+        }
     }
 }

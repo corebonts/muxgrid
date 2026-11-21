@@ -151,7 +151,9 @@ class TvheadendStore(
     fun refreshNowNext() {
         synchronized(lock) {
             if (!shadowSyncActive) {
-                publishNowNextLocked(rebuildEpg = false)
+                val minStopSec = epochSecondsProvider() - pastRetentionSeconds
+                val pruned = pruneExpiredEventsLocked(minStopSec)
+                publishNowNextLocked(rebuildEpg = pruned)
             }
         }
     }
@@ -213,20 +215,17 @@ class TvheadendStore(
         }
         is HtspPushEvent.TagUpdate -> {
             val d = event.delta
-            val existing = tagsMap[d.id]
-            if (existing != null) {
-                tagsMap[d.id] = existing.copy(
-                    name = d.name ?: existing.name,
-                    icon = d.icon ?: existing.icon,
-                    index = d.index ?: existing.index,
-                    memberChannelIds = d.memberChannelIds ?: existing.memberChannelIds,
-                )
-            }
+            val existing = tagsMap[d.id] ?: return ChangeScope.NONE
+            tagsMap[d.id] = existing.copy(
+                name = d.name ?: existing.name,
+                icon = d.icon ?: existing.icon,
+                index = d.index ?: existing.index,
+                memberChannelIds = d.memberChannelIds ?: existing.memberChannelIds,
+            )
             ChangeScope.TAGS
         }
         is HtspPushEvent.TagDelete -> {
-            tagsMap.remove(event.tagId)
-            ChangeScope.TAGS
+            if (tagsMap.remove(event.tagId) != null) ChangeScope.TAGS else ChangeScope.NONE
         }
         is HtspPushEvent.ChannelAdd -> {
             channelsMap[event.channel.id] = event.channel
@@ -234,24 +233,21 @@ class TvheadendStore(
         }
         is HtspPushEvent.ChannelUpdate -> {
             val d = event.delta
-            val existing = channelsMap[d.id]
-            if (existing != null) {
-                channelsMap[d.id] = existing.copy(
-                    number = d.number ?: existing.number,
-                    numberMinor = d.numberMinor ?: existing.numberMinor,
-                    name = d.name ?: existing.name,
-                    icon = if (d.hasIconField) d.icon else existing.icon,
-                    tagIds = d.tagIds ?: existing.tagIds,
-                    isRadio = d.isRadio ?: existing.isRadio,
-                    eventId = if (d.hasEventIdField) d.eventId else existing.eventId,
-                    nextEventId = if (d.hasNextEventIdField) d.nextEventId else existing.nextEventId,
-                )
-            }
+            val existing = channelsMap[d.id] ?: return ChangeScope.NONE
+            channelsMap[d.id] = existing.copy(
+                number = d.number ?: existing.number,
+                numberMinor = d.numberMinor ?: existing.numberMinor,
+                name = d.name ?: existing.name,
+                icon = if (d.hasIconField) d.icon else existing.icon,
+                tagIds = d.tagIds ?: existing.tagIds,
+                isRadio = d.isRadio ?: existing.isRadio,
+                eventId = if (d.hasEventIdField) d.eventId else existing.eventId,
+                nextEventId = if (d.hasNextEventIdField) d.nextEventId else existing.nextEventId,
+            )
             ChangeScope.CHANNELS
         }
         is HtspPushEvent.ChannelDelete -> {
-            channelsMap.remove(event.channelId)
-            ChangeScope.CHANNELS
+            if (channelsMap.remove(event.channelId) != null) ChangeScope.CHANNELS else ChangeScope.NONE
         }
         is HtspPushEvent.EventAdd -> {
             eventsMap[event.event.id] = event.event
@@ -259,20 +255,18 @@ class TvheadendStore(
         }
         is HtspPushEvent.EventUpdate -> {
             val d = event.delta
-            val existing = eventsMap[d.id]
-            if (existing != null) {
-                eventsMap[d.id] = existing.copy(
-                    channelId = d.channelId ?: existing.channelId,
-                    startEpochSec = d.startEpochSec ?: existing.startEpochSec,
-                    stopEpochSec = d.stopEpochSec ?: existing.stopEpochSec,
-                    title = d.title ?: existing.title,
-                    subtitle = d.subtitle ?: existing.subtitle,
-                    summary = d.summary ?: existing.summary,
-                    description = d.description ?: existing.description,
-                    nextEventId = d.nextEventId ?: existing.nextEventId,
-                    dvrId = if (d.hasDvrIdField) d.dvrId else existing.dvrId,
-                )
-            }
+            val existing = eventsMap[d.id] ?: return ChangeScope.NONE
+            eventsMap[d.id] = existing.copy(
+                channelId = d.channelId ?: existing.channelId,
+                startEpochSec = d.startEpochSec ?: existing.startEpochSec,
+                stopEpochSec = d.stopEpochSec ?: existing.stopEpochSec,
+                title = d.title ?: existing.title,
+                subtitle = d.subtitle ?: existing.subtitle,
+                summary = d.summary ?: existing.summary,
+                description = d.description ?: existing.description,
+                nextEventId = d.nextEventId ?: existing.nextEventId,
+                dvrId = if (d.hasDvrIdField) d.dvrId else existing.dvrId,
+            )
             ChangeScope.EVENTS
         }
         is HtspPushEvent.EventDelete -> {
@@ -281,9 +275,10 @@ class TvheadendStore(
             if (existing != null && existing.stopEpochSec <= nowSec && existing.stopEpochSec >= minStopSec) {
                 // Tvheadend purges EPG events as soon as they finish; keep recent past shows locally.
                 ChangeScope.NONE
-            } else {
-                eventsMap.remove(event.eventId)
+            } else if (eventsMap.remove(event.eventId) != null) {
                 ChangeScope.EVENTS
+            } else {
+                ChangeScope.NONE
             }
         }
         is HtspPushEvent.DvrEntryAdd -> {
@@ -292,27 +287,24 @@ class TvheadendStore(
         }
         is HtspPushEvent.DvrEntryUpdate -> {
             val d = event.delta
-            val existing = dvrMap[d.id]
-            if (existing != null) {
-                dvrMap[d.id] = existing.copy(
-                    channelId = d.channelId ?: existing.channelId,
-                    startEpochSec = d.startEpochSec ?: existing.startEpochSec,
-                    stopEpochSec = d.stopEpochSec ?: existing.stopEpochSec,
-                    title = d.title ?: existing.title,
-                    subtitle = d.subtitle ?: existing.subtitle,
-                    description = d.description ?: existing.description,
-                    state = d.state ?: existing.state,
-                    error = if (d.hasErrorField) d.error else existing.error,
-                    dataSize = d.dataSize ?: existing.dataSize,
-                    playPositionSec = d.playPositionSec ?: existing.playPositionSec,
-                    playCount = d.playCount ?: existing.playCount,
-                )
-            }
+            val existing = dvrMap[d.id] ?: return ChangeScope.NONE
+            dvrMap[d.id] = existing.copy(
+                channelId = d.channelId ?: existing.channelId,
+                startEpochSec = d.startEpochSec ?: existing.startEpochSec,
+                stopEpochSec = d.stopEpochSec ?: existing.stopEpochSec,
+                title = d.title ?: existing.title,
+                subtitle = d.subtitle ?: existing.subtitle,
+                description = d.description ?: existing.description,
+                state = d.state ?: existing.state,
+                error = if (d.hasErrorField) d.error else existing.error,
+                dataSize = d.dataSize ?: existing.dataSize,
+                playPositionSec = d.playPositionSec ?: existing.playPositionSec,
+                playCount = d.playCount ?: existing.playCount,
+            )
             ChangeScope.DVR
         }
         is HtspPushEvent.DvrEntryDelete -> {
-            dvrMap.remove(event.entryId)
-            ChangeScope.DVR
+            if (dvrMap.remove(event.entryId) != null) ChangeScope.DVR else ChangeScope.NONE
         }
         HtspPushEvent.SyncStarting, HtspPushEvent.InitialSyncCompleted -> ChangeScope.NONE
     }
@@ -340,13 +332,16 @@ class TvheadendStore(
         }
     }
 
-    private fun pruneExpiredEventsLocked(minStopSec: Long) {
+    private fun pruneExpiredEventsLocked(minStopSec: Long): Boolean {
+        var removed = false
         val it = liveEvents.values.iterator()
         while (it.hasNext()) {
             if (it.next().stopEpochSec < minStopSec) {
                 it.remove()
+                removed = true
             }
         }
+        return removed
     }
 
     private fun publishAllLocked() {
