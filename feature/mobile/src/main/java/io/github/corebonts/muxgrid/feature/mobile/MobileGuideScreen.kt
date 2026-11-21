@@ -1,5 +1,6 @@
 package io.github.corebonts.muxgrid.feature.mobile
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +23,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -29,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,6 +42,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
@@ -52,6 +59,7 @@ import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrConfirmKind
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MobileTopBarHeight
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridConfirmDialog
@@ -95,11 +103,26 @@ internal fun MobileGuideScreen(
     var selectedChannelId by remember(initialSelectedChannelId) {
         mutableStateOf(initialSelectedChannelId ?: channels.firstOrNull()?.id)
     }
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedEvent by remember { mutableStateOf<EpgEvent?>(null) }
+    val searchState = rememberTextFieldState()
+    var isSearchExpanded by remember { mutableStateOf(false) }
+    val searchFocusRequester = remember { FocusRequester() }
+    var selectedEventKey by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     var pendingConfirm by remember { mutableStateOf<Pair<DvrConfirmKind, DvrEntry>?>(null) }
     var actionBusy by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
+
+    val searchQuery = searchState.text.toString()
+
+    BackHandler(enabled = isSearchExpanded) {
+        searchState.clearText()
+        isSearchExpanded = false
+    }
+
+    LaunchedEffect(isSearchExpanded) {
+        if (isSearchExpanded) {
+            runCatching { searchFocusRequester.requestFocus() }
+        }
+    }
 
     val activeDay = days.getOrElse(selectedDayIndex) { days.first() }
     val channelById = remember(channels) { channels.associateBy { it.id } }
@@ -127,6 +150,7 @@ internal fun MobileGuideScreen(
                     if (ev.stopEpochSec >= nowEpochSec - 900L && (
                             ev.title.contains(trimmedQuery, ignoreCase = true) ||
                                 (ev.subtitle?.contains(trimmedQuery, ignoreCase = true) == true) ||
+                                (ev.summary?.contains(trimmedQuery, ignoreCase = true) == true) ||
                                 (ev.description?.contains(trimmedQuery, ignoreCase = true) == true)
                             )
                     ) {
@@ -143,79 +167,139 @@ internal fun MobileGuideScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Compact Search box
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp)
-                .clip(MuxGridShapes.Sm)
-                .background(MuxGridColors.CardSurface)
-                .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Sm)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = MuxGridIcons.Search,
-                contentDescription = null,
-                tint = MuxGridColors.TextMuted,
-                modifier = Modifier.size(16.dp),
+        if (isSearchExpanded) {
+            val searchTextStyle = TextStyle(
+                color = MuxGridColors.TextPrimary,
+                fontSize = 14.sp,
+                lineHeight = 18.sp,
             )
-            Spacer(Modifier.width(8.dp))
-            Box(modifier = Modifier.weight(1f)) {
-                if (searchQuery.isEmpty()) {
-                    Text(
-                        text = "Search upcoming programs…",
-                        color = MuxGridColors.TextMuted,
-                        fontSize = 13.sp,
-                    )
-                }
-                BasicTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    singleLine = true,
-                    textStyle = TextStyle(color = MuxGridColors.TextPrimary, fontSize = 13.sp),
-                    cursorBrush = SolidColor(MuxGridColors.AccentSoft),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            if (searchQuery.isNotEmpty()) {
-                Spacer(Modifier.width(8.dp))
-                Box(
+            // Full-width expanded search bar matching MobileTopBarHeight to prevent layout jumps
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(MobileTopBarHeight)
+                    .padding(horizontal = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
                     modifier = Modifier
-                        .clip(MuxGridShapes.Xs)
-                        .clickable { searchQuery = "" }
-                        .padding(4.dp),
-                    contentAlignment = Alignment.Center,
+                        .fillMaxWidth()
+                        .height(36.dp)
+                        .clip(MuxGridShapes.Sm)
+                        .background(MuxGridColors.CardSurface)
+                        .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Sm)
+                        .padding(horizontal = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        imageVector = MuxGridIcons.Close,
-                        contentDescription = "Clear search",
-                        tint = MuxGridColors.AccentSoft,
-                        modifier = Modifier.size(15.dp),
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(MuxGridShapes.Xs)
+                            .clickable {
+                                searchState.clearText()
+                                isSearchExpanded = false
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = MuxGridIcons.ArrowBack,
+                            contentDescription = "Close search",
+                            tint = MuxGridColors.TextSecondary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    BasicTextField(
+                        state = searchState,
+                        lineLimits = TextFieldLineLimits.SingleLine,
+                        textStyle = searchTextStyle,
+                        cursorBrush = SolidColor(MuxGridColors.AccentSoft),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(searchFocusRequester),
+                        decorator = { innerTextField ->
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        text = "Search upcoming programs…",
+                                        style = searchTextStyle.copy(color = MuxGridColors.TextMuted),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        },
                     )
+                    if (searchQuery.isNotEmpty()) {
+                        Spacer(Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(MuxGridShapes.Xs)
+                                .clickable { searchState.clearText() },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = MuxGridIcons.Close,
+                                contentDescription = "Clear search",
+                                tint = MuxGridColors.AccentSoft,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
                 }
             }
-        }
-
-        if (trimmedQuery.isEmpty()) {
-            // Day underline tabs
+            MuxGridDivider()
+        } else {
+            // Day underline tabs + icon-only search trigger
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    .height(MobileTopBarHeight),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                days.forEachIndexed { idx, day ->
-                    BroadcastUnderlineTab(
-                        label = formatDayLabel(day, nowEpochSec),
-                        selected = idx == selectedDayIndex,
-                        onClick = { selectedDayIndex = idx },
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 16.dp, end = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    days.forEachIndexed { idx, day ->
+                        BroadcastUnderlineTab(
+                            label = formatDayLabel(day, nowEpochSec),
+                            selected = idx == selectedDayIndex,
+                            onClick = { selectedDayIndex = idx },
+                            modifier = Modifier.fillMaxHeight(),
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .padding(end = 10.dp)
+                        .size(36.dp)
+                        .clip(MuxGridShapes.Sm)
+                        .clickable { isSearchExpanded = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = MuxGridIcons.Search,
+                        contentDescription = "Search programs",
+                        tint = MuxGridColors.TextSecondary,
+                        modifier = Modifier.size(18.dp),
                     )
                 }
             }
             MuxGridDivider()
+        }
 
+        if (trimmedQuery.isEmpty()) {
             // Compact borderless channel strip
             Row(
                 modifier = Modifier
@@ -283,7 +367,7 @@ internal fun MobileGuideScreen(
                                 .background(if (isLiveNow) MuxGridColors.CardSurface else Color.Transparent)
                                 .clickable {
                                     actionError = null
-                                    selectedEvent = event
+                                    selectedEventKey = event.channelId to event.id
                                 },
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -390,14 +474,16 @@ internal fun MobileGuideScreen(
         }
     }
 
-    val detailEvent = selectedEvent
+    val detailEvent = selectedEventKey?.let { (chId, evId) ->
+        epgByChannel[chId]?.firstOrNull { it.id == evId }
+    }
     if (detailEvent != null) {
         val detailChannel = channelById[detailEvent.channelId]
         val linkedDvr = findMatchingDvrEntry(detailEvent, dvrEntries)
         val isLiveNow = nowEpochSec in detailEvent.startEpochSec until detailEvent.stopEpochSec
 
         MuxGridModalSheet(
-            onDismissRequest = { if (!actionBusy) selectedEvent = null },
+            onDismissRequest = { if (!actionBusy) selectedEventKey = null },
         ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -464,7 +550,7 @@ internal fun MobileGuideScreen(
                         if (detailChannel != null) {
                             Button(
                                 onClick = {
-                                    selectedEvent = null
+                                    selectedEventKey = null
                                     onWatchChannel(detailChannel)
                                 },
                                 shape = MuxGridShapes.Sm,
@@ -487,7 +573,7 @@ internal fun MobileGuideScreen(
                                 enabled = !actionBusy,
                                 shape = MuxGridShapes.Sm,
                                 onClick = {
-                                    selectedEvent = null
+                                    selectedEventKey = null
                                     val startSec = if (linkedDvr.hasResumePosition) linkedDvr.playPositionSec else 0L
                                     onPlayRecording(linkedDvr, detailChannel, startSec)
                                 },
@@ -523,7 +609,7 @@ internal fun MobileGuideScreen(
                         if (detailChannel != null) {
                             Button(
                                 onClick = {
-                                    selectedEvent = null
+                                    selectedEventKey = null
                                     onWatchChannel(detailChannel)
                                 },
                                 shape = MuxGridShapes.Sm,
@@ -563,7 +649,7 @@ internal fun MobileGuideScreen(
                                             actionBusy = true
                                             actionError = null
                                             onScheduleRecording(detailEvent.id)
-                                                .onSuccess { selectedEvent = null }
+                                                .onSuccess { selectedEventKey = null }
                                                 .onFailure { actionError = it.message ?: "Failed to schedule recording" }
                                             actionBusy = false
                                         }
@@ -605,7 +691,7 @@ internal fun MobileGuideScreen(
                         else -> Result.success(Unit)
                     }
                     result
-                        .onSuccess { selectedEvent = null }
+                        .onSuccess { selectedEventKey = null }
                         .onFailure {
                             actionError = it.message ?: when (kind) {
                                 DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop recording"

@@ -66,6 +66,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import coil3.ImageLoader
 import coil3.compose.SubcomposeAsyncImage
@@ -96,6 +100,8 @@ fun MuxGridDivider(
     )
 }
 
+val MobileTopBarHeight: Dp = 48.dp
+
 @Composable
 fun BroadcastUnderlineTab(
     label: String,
@@ -104,16 +110,15 @@ fun BroadcastUnderlineTab(
     modifier: Modifier = Modifier,
     leadingIcon: ImageVector? = null,
 ) {
-    Column(
+    Box(
         modifier = modifier
-            .clickable(onClick = onClick)
-            .padding(top = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp),
-            modifier = Modifier.padding(bottom = 8.dp),
+            modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
         ) {
             if (leadingIcon != null) {
                 Icon(
@@ -126,13 +131,14 @@ fun BroadcastUnderlineTab(
             Text(
                 text = label,
                 color = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextMuted,
-                fontSize = 12.5.sp,
+                fontSize = 13.sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
             )
         }
         Box(
             modifier = Modifier
+                .align(Alignment.BottomCenter)
                 .width(if (selected) 28.dp else 0.dp)
                 .height(2.dp)
                 .background(if (selected) MuxGridColors.Accent else Color.Transparent),
@@ -195,6 +201,29 @@ private fun PiconFallbackLabel(
         color = MuxGridColors.TextSecondary,
         maxLines = 1,
     )
+}
+
+@Composable
+fun rememberNowEpochSec(
+    serverClockOffsetMs: Long,
+    intervalMs: Long = 30_000L,
+): Long {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val nowState = remember(serverClockOffsetMs) {
+        mutableLongStateOf((System.currentTimeMillis() + serverClockOffsetMs) / 1000L)
+    }
+    LaunchedEffect(lifecycleOwner, serverClockOffsetMs, intervalMs) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                val nowMs = System.currentTimeMillis() + serverClockOffsetMs
+                nowState.longValue = nowMs / 1000L
+                val remainderMs = nowMs % intervalMs
+                val delayMs = (intervalMs - remainderMs).coerceIn(1_000L, intervalMs)
+                delay(delayMs)
+            }
+        }
+    }
+    return nowState.longValue
 }
 
 @Composable
@@ -416,42 +445,27 @@ fun MuxGridSeekBar(
     }
 }
 
+fun connectionStatusDotColor(state: ConnectionState): Color? = when (state) {
+    is ConnectionState.Connected -> null
+    ConnectionState.Connecting, is ConnectionState.Syncing -> MuxGridColors.AmberWarn
+    is ConnectionState.Error -> MuxGridColors.CoralLive
+    ConnectionState.Disconnected -> MuxGridColors.TextMuted
+}
+
 @Composable
-fun ConnectionStatusBadge(
-    state: ConnectionState,
+fun ConnectionStatusDot(
+    color: Color,
     modifier: Modifier = Modifier,
+    borderColor: Color = MuxGridColors.CanvasPhone,
+    size: Dp = 8.dp,
 ) {
-    val (dotColor, label) = when (state) {
-        ConnectionState.Disconnected -> MuxGridColors.TextMuted to "Offline"
-        ConnectionState.Connecting -> MuxGridColors.AmberWarn to "Connecting…"
-        is ConnectionState.Syncing -> MuxGridColors.AmberWarn to "Syncing…"
-        is ConnectionState.Connected -> MuxGridColors.EmeraldOk to state.serverName
-        is ConnectionState.Error -> MuxGridColors.CoralLive to "Error"
-    }
-    Row(
+    Box(
         modifier = modifier
-            .clip(MuxGridShapes.Sm)
-            .background(MuxGridColors.CardSurface)
-            .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Sm)
-            .padding(horizontal = 9.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(dotColor),
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            text = label,
-            fontSize = 11.5.sp,
-            fontWeight = FontWeight.Medium,
-            color = MuxGridColors.TextSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+            .size(size)
+            .clip(CircleShape)
+            .background(color)
+            .border(1.5.dp, borderColor, CircleShape),
+    )
 }
 
 @Composable

@@ -58,9 +58,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import coil3.ImageLoader
 import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazeState
@@ -73,21 +70,24 @@ import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.data.TvheadendRepository
 import io.github.corebonts.muxgrid.core.designsystem.BroadcastUnderlineTab
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
-import io.github.corebonts.muxgrid.core.designsystem.ConnectionStatusBadge
+import io.github.corebonts.muxgrid.core.designsystem.ConnectionStatusDot
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MobileTopBarHeight
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
-import io.github.corebonts.muxgrid.core.designsystem.MuxGridCompactButton
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridModalSheet
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridSwitch
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
+import io.github.corebonts.muxgrid.core.designsystem.connectionStatusDotColor
 import io.github.corebonts.muxgrid.core.designsystem.filterChannels
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
 import io.github.corebonts.muxgrid.core.designsystem.label
+import io.github.corebonts.muxgrid.core.designsystem.rememberNowEpochSec
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
@@ -99,7 +99,6 @@ import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private enum class MobileRoute {
@@ -175,7 +174,7 @@ fun MobileRoot(
     }
 
     val offsetMs = (connectionState as? ConnectionState.Connected)?.serverClockOffsetMs ?: 0L
-    val nowEpochSec = (System.currentTimeMillis() + offsetMs) / 1000L
+    val nowEpochSec = rememberNowEpochSec(offsetMs)
 
     val hasMiniPlayer = playbackState.status != PlaybackStatus.IDLE &&
         (playbackState.channelId != null || playbackState.dvrEntryId != null)
@@ -225,8 +224,6 @@ fun MobileRoot(
                     nowEpochSec = nowEpochSec,
                     imageLoader = repository.imageLoader,
                     onSelectTab = { activeTab = it },
-                    onOpenServerSetup = { route = MobileRoute.ONBOARDING },
-                    onRetryConnect = { repository.reconnect() },
                     onExpandMiniPlayer = {
                         if (!playbackState.isRadio && playbackState.isAudioOnly) {
                             playbackEngine.setAudioOnly(false)
@@ -330,6 +327,9 @@ fun MobileRoot(
                                 },
                                 onTogglePip = { enabled ->
                                     scope.launch { repository.setPipEnabled(enabled) }
+                                },
+                                onRetryConnect = {
+                                    repository.reconnect()
                                 },
                                 onOpenServerSetup = {
                                     route = MobileRoute.ONBOARDING
@@ -439,29 +439,14 @@ private fun MobileMainScaffold(
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     onSelectTab: (MainTab) -> Unit,
-    onOpenServerSetup: () -> Unit,
-    onRetryConnect: () -> Unit,
     onExpandMiniPlayer: () -> Unit,
     onToggleMiniPlayerPause: () -> Unit,
     onStopMiniPlayer: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var visibleError by remember { mutableStateOf<ConnectionState.Error?>(null) }
     val hazeState = rememberHazeState()
     val glassStyle = rememberFrostedGlassStyle()
-
-    LaunchedEffect(connectionState, lifecycleOwner) {
-        visibleError = null
-        if (connectionState is ConnectionState.Error) {
-            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                if (!connectionState.isAuthError) {
-                    delay(1_200L)
-                }
-                visibleError = connectionState
-            }
-        }
-    }
+    val settingsStatusDotColor = connectionStatusDotColor(connectionState)
 
     val hasMiniPlayer = playbackState.status != PlaybackStatus.IDLE &&
         (playbackState.channelId != null || playbackState.dvrEntryId != null)
@@ -479,6 +464,7 @@ private fun MobileMainScaffold(
         if (useNavigationRail) {
             MobileNavigationRail(
                 activeTab = activeTab,
+                settingsStatusDotColor = settingsStatusDotColor,
                 hazeState = hazeState,
                 glassStyle = glassStyle,
                 onSelectTab = onSelectTab,
@@ -487,81 +473,12 @@ private fun MobileMainScaffold(
 
         Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
             // Haze source wraps non-video browsing content
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .hazeSource(state = hazeState),
             ) {
-                // Header
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = when (activeTab) {
-                            MainTab.LIVE -> "Live"
-                            MainTab.GUIDE -> "Guide"
-                            MainTab.RECORDINGS -> "Recordings"
-                            MainTab.SETTINGS -> "Settings"
-                        },
-                        style = MuxGridType.ScreenTitle,
-                    )
-                    if (connectionState !is ConnectionState.Connected) {
-                        ConnectionStatusBadge(state = connectionState)
-                    }
-                }
-
-                visibleError?.let { errState ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                            .clip(MuxGridShapes.Row)
-                            .background(MuxGridColors.CoralLive.copy(alpha = 0.14f))
-                            .border(MuxGridBorders.Hairline, MuxGridColors.CoralLive.copy(alpha = 0.4f), MuxGridShapes.Row)
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = errState.message,
-                            color = MuxGridColors.TextPrimary,
-                            fontSize = 13.sp,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier
-                                .clip(MuxGridShapes.Sm)
-                                .clickable {
-                                    if (errState.isAuthError) onOpenServerSetup() else onRetryConnect()
-                                }
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                        ) {
-                            Icon(
-                                imageVector = if (errState.isAuthError) MuxGridIcons.Edit else MuxGridIcons.Refresh,
-                                contentDescription = null,
-                                tint = MuxGridColors.AccentSoft,
-                                modifier = Modifier.size(15.dp),
-                            )
-                            Text(
-                                text = if (errState.isAuthError) "Edit" else "Retry",
-                                color = MuxGridColors.AccentSoft,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                    }
-                }
-
-                Box(modifier = Modifier.weight(1f)) {
-                    content()
-                }
+                content()
             }
 
             // Docked frosted-glass bottom chrome (Mini-player + Portrait Bottom Nav Bar)
@@ -619,6 +536,7 @@ private fun MobileMainScaffold(
                             ).forEach { (tab, label, icons) ->
                                 val selected = tab == activeTab
                                 val contentColor = if (selected) MuxGridColors.Accent else MuxGridColors.TextMuted
+                                val dotColor = if (tab == MainTab.SETTINGS) settingsStatusDotColor else null
                                 Column(
                                     modifier = Modifier
                                         .weight(1f)
@@ -628,12 +546,21 @@ private fun MobileMainScaffold(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.spacedBy(2.dp),
                                 ) {
-                                    Icon(
-                                        imageVector = if (selected) icons.second else icons.first,
-                                        contentDescription = label,
-                                        tint = contentColor,
-                                        modifier = Modifier.size(22.dp),
-                                    )
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = if (selected) icons.second else icons.first,
+                                            contentDescription = label,
+                                            tint = contentColor,
+                                            modifier = Modifier.size(22.dp),
+                                        )
+                                        if (dotColor != null) {
+                                            ConnectionStatusDot(
+                                                color = dotColor,
+                                                borderColor = MuxGridColors.CanvasPhone,
+                                                modifier = Modifier.align(Alignment.TopEnd),
+                                            )
+                                        }
+                                    }
                                     Text(
                                         text = label,
                                         color = contentColor,
@@ -654,6 +581,7 @@ private fun MobileMainScaffold(
 @Composable
 private fun MobileNavigationRail(
     activeTab: MainTab,
+    settingsStatusDotColor: Color?,
     hazeState: HazeState,
     glassStyle: HazeBlurStyle,
     onSelectTab: (MainTab) -> Unit,
@@ -667,7 +595,7 @@ private fun MobileNavigationRail(
                 .width(72.dp)
                 .hazeBlur(input = HazeInput.Sources(hazeState), style = glassStyle)
                 .navigationBarsPadding()
-                .padding(vertical = 12.dp, horizontal = 8.dp),
+                .padding(vertical = 12.dp, horizontal = 4.dp),
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -691,6 +619,7 @@ private fun MobileNavigationRail(
                 icon = if (settingsSelected) MuxGridIcons.SettingsFilled else MuxGridIcons.Settings,
                 label = "Settings",
                 selected = settingsSelected,
+                statusDotColor = settingsStatusDotColor,
                 onClick = { onSelectTab(MainTab.SETTINGS) },
             )
         }
@@ -709,32 +638,54 @@ private fun MobileRailItem(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
+    statusDotColor: Color? = null,
 ) {
     val contentColor = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextMuted
+    val itemBg = if (selected) MuxGridColors.CardSurfaceElevated else Color.Transparent
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(MuxGridShapes.Sm)
-            .background(if (selected) MuxGridColors.CardSurfaceElevated else Color.Transparent)
+            .background(itemBg)
             .clickable(onClick = onClick)
-            .padding(vertical = 11.dp),
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
                 .width(3.dp)
-                .height(18.dp)
+                .height(22.dp)
                 .background(if (selected) MuxGridColors.Accent else Color.Transparent),
         )
-        Box(
-            modifier = Modifier.weight(1f),
-            contentAlignment = Alignment.Center,
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = contentColor,
-                modifier = Modifier.size(22.dp),
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = contentColor,
+                    modifier = Modifier.size(22.dp),
+                )
+                if (statusDotColor != null) {
+                    ConnectionStatusDot(
+                        color = statusDotColor,
+                        borderColor = if (selected) MuxGridColors.CardSurfaceElevated else MuxGridColors.CanvasPhone,
+                        modifier = Modifier.align(Alignment.TopEnd),
+                    )
+                }
+            }
+            Text(
+                text = label,
+                color = contentColor,
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -877,7 +828,7 @@ private fun MobileLiveChannelsTab(
     onRefresh: suspend () -> Result<Unit>,
 ) {
     val scope = rememberCoroutineScope()
-    var actionChannel by remember { mutableStateOf<Channel?>(null) }
+    var actionChannelId by remember { mutableStateOf<Long?>(null) }
     var actionBusy by remember { mutableStateOf(false) }
     var actionMessage by remember { mutableStateOf<String?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
@@ -901,9 +852,11 @@ private fun MobileLiveChannelsTab(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(MobileTopBarHeight)
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             filters.forEach { filter ->
                 val selected = filter == activeFilter
@@ -918,6 +871,7 @@ private fun MobileLiveChannelsTab(
                     selected = selected,
                     leadingIcon = filterIcon,
                     onClick = { onSelectFilter(filter) },
+                    modifier = Modifier.fillMaxHeight(),
                 )
             }
         }
@@ -971,7 +925,7 @@ private fun MobileLiveChannelsTab(
                             onClick = { onChannelClick(channel) },
                             onLongClick = {
                                 actionMessage = null
-                                actionChannel = channel
+                                actionChannelId = channel.id
                             },
                             onToggleFavorite = { onToggleFavorite(channel) },
                         )
@@ -994,7 +948,7 @@ private fun MobileLiveChannelsTab(
                                 onClick = { onChannelClick(channel) },
                                 onLongClick = {
                                     actionMessage = null
-                                    actionChannel = channel
+                                    actionChannelId = channel.id
                                 },
                                 onToggleFavorite = { onToggleFavorite(channel) },
                             )
@@ -1006,11 +960,12 @@ private fun MobileLiveChannelsTab(
         }
     }
 
+    val actionChannel = actionChannelId?.let { id -> channels.firstOrNull { it.id == id } }
     actionChannel?.let { ch ->
         val nowEvent = nowNextMap[ch.id]?.now
         val isFav = ch.id in favorites
-        io.github.corebonts.muxgrid.core.designsystem.MuxGridModalSheet(
-            onDismissRequest = { if (!actionBusy) actionChannel = null },
+        MuxGridModalSheet(
+            onDismissRequest = { if (!actionBusy) actionChannelId = null },
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1033,7 +988,7 @@ private fun MobileLiveChannelsTab(
             Button(
                 enabled = !actionBusy,
                 onClick = {
-                    actionChannel = null
+                    actionChannelId = null
                     onChannelClick(ch)
                 },
                 shape = MuxGridShapes.Sm,
@@ -1048,7 +1003,7 @@ private fun MobileLiveChannelsTab(
                 enabled = !actionBusy,
                 onClick = {
                     onToggleFavorite(ch)
-                    actionChannel = null
+                    actionChannelId = null
                 },
                 shape = MuxGridShapes.Sm,
                 modifier = Modifier.fillMaxWidth(),
@@ -1065,7 +1020,7 @@ private fun MobileLiveChannelsTab(
             OutlinedButton(
                 enabled = !actionBusy,
                 onClick = {
-                    actionChannel = null
+                    actionChannelId = null
                     onOpenGuideForChannel(ch)
                 },
                 shape = MuxGridShapes.Sm,
@@ -1083,7 +1038,7 @@ private fun MobileLiveChannelsTab(
                             actionBusy = true
                             actionMessage = null
                             onRecordEvent(nowEvent.id)
-                                .onSuccess { actionChannel = null }
+                                .onSuccess { actionChannelId = null }
                                 .onFailure { actionMessage = it.message ?: "Failed to record" }
                             actionBusy = false
                         }
@@ -1236,15 +1191,18 @@ private fun MobileSettingsTab(
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
     onToggleBackgroundPlay: (Boolean) -> Unit,
     onTogglePip: (Boolean) -> Unit,
+    onRetryConnect: () -> Unit,
     onOpenServerSetup: () -> Unit,
 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottomContentPadding),
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = bottomContentPadding),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        val isServerError = connectionState is ConnectionState.Error
+        val canRetryConnect = isServerError || connectionState is ConnectionState.Disconnected
         Column(
             modifier = Modifier.widthIn(max = 680.dp).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1255,6 +1213,17 @@ private fun MobileSettingsTab(
                     .fillMaxWidth()
                     .clip(MuxGridShapes.Card)
                     .background(MuxGridColors.CardSurface)
+                    .then(
+                        if (isServerError) {
+                            Modifier.border(
+                                width = MuxGridBorders.Hairline,
+                                color = MuxGridColors.CoralLive.copy(alpha = 0.45f),
+                                shape = MuxGridShapes.Card,
+                            )
+                        } else {
+                            Modifier
+                        },
+                    )
                     .padding(horizontal = 12.dp, vertical = 11.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
@@ -1289,24 +1258,46 @@ private fun MobileSettingsTab(
                         text = statusText,
                         style = MuxGridType.TabularSmall,
                         color = statusColor,
-                        maxLines = 1,
+                        maxLines = if (isServerError) 3 else 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(MuxGridShapes.Sm)
-                        .background(MuxGridColors.CardSurfaceElevated)
-                        .clickable(onClick = onOpenServerSetup),
-                    contentAlignment = Alignment.Center,
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        imageVector = MuxGridIcons.Edit,
-                        contentDescription = "Edit Server",
-                        tint = MuxGridColors.TextPrimary,
-                        modifier = Modifier.size(20.dp),
-                    )
+                    if (canRetryConnect) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(MuxGridShapes.Sm)
+                                .background(MuxGridColors.CardSurfaceElevated)
+                                .clickable(onClick = onRetryConnect),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = MuxGridIcons.Refresh,
+                                contentDescription = "Reconnect",
+                                tint = MuxGridColors.AccentSoft,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(MuxGridShapes.Sm)
+                            .background(MuxGridColors.CardSurfaceElevated)
+                            .clickable(onClick = onOpenServerSetup),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = MuxGridIcons.Edit,
+                            contentDescription = "Edit Server",
+                            tint = MuxGridColors.TextPrimary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
             }
         }

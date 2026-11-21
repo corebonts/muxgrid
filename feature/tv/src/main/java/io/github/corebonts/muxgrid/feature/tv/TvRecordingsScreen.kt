@@ -96,7 +96,7 @@ internal fun TvRecordingsScreen(
         allEntries.filter { it.state == DvrState.SCHEDULED }.sortedBy { it.startEpochSec }
     }
 
-    var selectedEntry by remember { mutableStateOf<DvrEntry?>(null) }
+    var selectedEntryId by remember { mutableStateOf<Long?>(null) }
     var pendingConfirm by remember { mutableStateOf<Pair<DvrConfirmKind, DvrEntry>?>(null) }
     var actionBusy by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
@@ -123,7 +123,7 @@ internal fun TvRecordingsScreen(
                     imageLoader = imageLoader,
                     onClickEntry = { entry ->
                         actionError = null
-                        selectedEntry = entry
+                        selectedEntryId = entry.id
                     },
                 )
             }
@@ -139,7 +139,7 @@ internal fun TvRecordingsScreen(
                     imageLoader = imageLoader,
                     onClickEntry = { entry ->
                         actionError = null
-                        selectedEntry = entry
+                        selectedEntryId = entry.id
                     },
                 )
             }
@@ -155,7 +155,7 @@ internal fun TvRecordingsScreen(
                     imageLoader = imageLoader,
                     onClickEntry = { entry ->
                         actionError = null
-                        selectedEntry = entry
+                        selectedEntryId = entry.id
                     },
                 )
             }
@@ -171,13 +171,14 @@ internal fun TvRecordingsScreen(
                     imageLoader = imageLoader,
                     onClickEntry = { entry ->
                         actionError = null
-                        selectedEntry = entry
+                        selectedEntryId = entry.id
                     },
                 )
             }
         }
     }
 
+    val selectedEntry = selectedEntryId?.let { dvrEntries[it] }
     selectedEntry?.let { entry ->
         val ch = channelById[entry.channelId]
         val primaryFocusRequester = remember { FocusRequester() }
@@ -186,7 +187,7 @@ internal fun TvRecordingsScreen(
         }
 
         TvModalDialog(
-            onDismissRequest = { if (!actionBusy) selectedEntry = null },
+            onDismissRequest = { if (!actionBusy) selectedEntryId = null },
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -237,7 +238,7 @@ internal fun TvRecordingsScreen(
                         Button(
                             enabled = !actionBusy,
                             onClick = {
-                                selectedEntry = null
+                                selectedEntryId = null
                                 val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
                                 onPlayRecording(entry, ch, startSec)
                             },
@@ -262,7 +263,7 @@ internal fun TvRecordingsScreen(
                             Button(
                                 enabled = !actionBusy,
                                 onClick = {
-                                    selectedEntry = null
+                                    selectedEntryId = null
                                     onWatchLiveChannel(ch)
                                 },
                                 shape = tvButtonShape(),
@@ -299,7 +300,7 @@ internal fun TvRecordingsScreen(
                             Button(
                                 enabled = !actionBusy,
                                 onClick = {
-                                    selectedEntry = null
+                                    selectedEntryId = null
                                     val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
                                     onPlayRecording(entry, ch, startSec)
                                 },
@@ -320,7 +321,7 @@ internal fun TvRecordingsScreen(
                                 Button(
                                     enabled = !actionBusy,
                                     onClick = {
-                                        selectedEntry = null
+                                        selectedEntryId = null
                                         onPlayRecording(entry, ch, 0L)
                                     },
                                     shape = tvButtonShape(),
@@ -337,7 +338,7 @@ internal fun TvRecordingsScreen(
                                     scope.launch {
                                         actionBusy = true
                                         onToggleWatched(entry.id, !entry.isWatched)
-                                            .onSuccess { selectedEntry = null }
+                                            .onSuccess { selectedEntryId = null }
                                             .onFailure { actionError = it.message ?: "Failed to update" }
                                         actionBusy = false
                                     }
@@ -391,7 +392,7 @@ internal fun TvRecordingsScreen(
                 }
                 Button(
                     enabled = !actionBusy,
-                    onClick = { selectedEntry = null },
+                    onClick = { selectedEntryId = null },
                     shape = tvButtonShape(),
                     colors = tvDialogSecondaryButtonColors(),
                 ) {
@@ -423,7 +424,7 @@ internal fun TvRecordingsScreen(
                         DvrConfirmKind.DELETE_RECORDING -> onDeleteRecording(entry.id)
                     }
                     result
-                        .onSuccess { selectedEntry = null }
+                        .onSuccess { selectedEntryId = null }
                         .onFailure { err ->
                             actionError = err.message ?: when (kind) {
                                 DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop"

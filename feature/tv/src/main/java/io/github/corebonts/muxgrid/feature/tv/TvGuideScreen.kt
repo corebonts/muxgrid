@@ -63,7 +63,6 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.dvrConfirmSpec
-import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
@@ -112,7 +111,7 @@ internal fun TvGuideScreen(
     val windowEndEpochSec = windowStartEpochSec + TIMELINE_WINDOW_SEC
 
     var focusedEvent by remember { mutableStateOf<EpgEvent?>(null) }
-    var actionEvent by remember { mutableStateOf<EpgEvent?>(null) }
+    var actionEventKey by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     var pendingConfirm by remember { mutableStateOf<Pair<DvrConfirmKind, DvrEntry>?>(null) }
     var actionBusy by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
@@ -387,7 +386,7 @@ internal fun TvGuideScreen(
                                                             onWatchChannel(channel)
                                                         } else {
                                                             actionError = null
-                                                            actionEvent = ev
+                                                            actionEventKey = ev.channelId to ev.id
                                                         }
                                                     },
                                                     modifier = Modifier
@@ -539,6 +538,9 @@ internal fun TvGuideScreen(
         }
     }
 
+    val actionEvent = actionEventKey?.let { (chId, evId) ->
+        epgByChannel[chId]?.firstOrNull { it.id == evId }
+    }
     actionEvent?.let { ev ->
         val ch = channelById[ev.channelId]
         val linkedDvr = findMatchingDvrEntry(ev, dvrEntries)
@@ -550,7 +552,7 @@ internal fun TvGuideScreen(
         }
 
         TvModalDialog(
-            onDismissRequest = { if (!actionBusy) actionEvent = null },
+            onDismissRequest = { if (!actionBusy) actionEventKey = null },
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -610,7 +612,7 @@ internal fun TvGuideScreen(
                     Button(
                         enabled = !actionBusy,
                         onClick = {
-                            actionEvent = null
+                            actionEventKey = null
                             onWatchChannel(ch)
                         },
                         modifier = Modifier.focusRequester(primaryFocusRequester),
@@ -639,7 +641,7 @@ internal fun TvGuideScreen(
                         Button(
                             enabled = !actionBusy,
                             onClick = {
-                                actionEvent = null
+                                actionEventKey = null
                                 val startSec = if (linkedDvr.hasResumePosition) linkedDvr.playPositionSec else 0L
                                 onPlayRecording(linkedDvr, ch, startSec)
                             },
@@ -691,7 +693,7 @@ internal fun TvGuideScreen(
                                     actionBusy = true
                                     actionError = null
                                     onScheduleRecording(ev.id)
-                                        .onSuccess { actionEvent = null }
+                                        .onSuccess { actionEventKey = null }
                                         .onFailure { actionError = it.message ?: "Failed to schedule" }
                                     actionBusy = false
                                 }
@@ -709,7 +711,7 @@ internal fun TvGuideScreen(
 
                 Button(
                     enabled = !actionBusy,
-                    onClick = { actionEvent = null },
+                    onClick = { actionEventKey = null },
                     shape = tvButtonShape(),
                     colors = tvDialogSecondaryButtonColors(),
                 ) {
@@ -741,7 +743,7 @@ internal fun TvGuideScreen(
                         else -> Result.success(Unit)
                     }
                     result
-                        .onSuccess { actionEvent = null }
+                        .onSuccess { actionEventKey = null }
                         .onFailure { err ->
                             actionError = err.message ?: when (kind) {
                                 DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop"

@@ -50,6 +50,7 @@ import io.github.corebonts.muxgrid.core.designsystem.DvrConfirmKind
 import io.github.corebonts.muxgrid.core.designsystem.DvrSeriesGroup
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MobileTopBarHeight
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridCompactButton
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridConfirmDialog
@@ -94,7 +95,7 @@ internal fun MobileRecordingsScreen(
     val scope = rememberCoroutineScope()
     var filter by remember { mutableStateOf(RecordingsFilter.ALL) }
     var expandedGroupKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var actionEntry by remember { mutableStateOf<DvrEntry?>(null) }
+    var actionEntryId by remember { mutableStateOf<Long?>(null) }
     var pendingConfirm by remember { mutableStateOf<Pair<DvrConfirmKind, DvrEntry>?>(null) }
     var sheetBusy by remember { mutableStateOf(false) }
     var sheetError by remember { mutableStateOf<String?>(null) }
@@ -136,14 +137,17 @@ internal fun MobileRecordingsScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(MobileTopBarHeight)
                 .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             RecordingsFilter.entries.forEach { tab ->
                 BroadcastUnderlineTab(
                     label = tab.label,
                     selected = filter == tab,
                     onClick = { filter = tab },
+                    modifier = Modifier.fillMaxHeight(),
                 )
             }
         }
@@ -207,7 +211,7 @@ internal fun MobileRecordingsScreen(
                                 },
                                 onOpenMenu = {
                                     sheetError = null
-                                    actionEntry = entry
+                                    actionEntryId = entry.id
                                 },
                             )
                         }
@@ -231,7 +235,7 @@ internal fun MobileRecordingsScreen(
                                     },
                                     onOpenMenu = {
                                         sheetError = null
-                                        actionEntry = entry
+                                        actionEntryId = entry.id
                                     },
                                 )
                                 MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
@@ -255,7 +259,7 @@ internal fun MobileRecordingsScreen(
                                     },
                                     onOpenMenu = {
                                         sheetError = null
-                                        actionEntry = it
+                                        actionEntryId = it.id
                                     },
                                 )
                                 MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
@@ -301,10 +305,11 @@ internal fun MobileRecordingsScreen(
         }
     }
 
+    val actionEntry = actionEntryId?.let { dvrEntries[it] }
     actionEntry?.let { entry ->
         val ch = channelById[entry.channelId]
         MuxGridModalSheet(
-            onDismissRequest = { if (!sheetBusy) actionEntry = null },
+            onDismissRequest = { if (!sheetBusy) actionEntryId = null },
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -340,7 +345,7 @@ internal fun MobileRecordingsScreen(
                 Button(
                     enabled = !sheetBusy,
                     onClick = {
-                        actionEntry = null
+                        actionEntryId = null
                         val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
                         onPlayRecording(entry, ch, startSec)
                     },
@@ -363,7 +368,7 @@ internal fun MobileRecordingsScreen(
                     OutlinedButton(
                         enabled = !sheetBusy,
                         onClick = {
-                            actionEntry = null
+                            actionEntryId = null
                             onWatchLiveChannel(ch)
                         },
                         shape = MuxGridShapes.Sm,
@@ -403,7 +408,7 @@ internal fun MobileRecordingsScreen(
                     Button(
                         enabled = !sheetBusy,
                         onClick = {
-                            actionEntry = null
+                            actionEntryId = null
                             val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
                             onPlayRecording(entry, ch, startSec)
                         },
@@ -422,7 +427,7 @@ internal fun MobileRecordingsScreen(
                         OutlinedButton(
                             enabled = !sheetBusy,
                             onClick = {
-                                actionEntry = null
+                                actionEntryId = null
                                 onPlayRecording(entry, ch, 0L)
                             },
                             shape = MuxGridShapes.Sm,
@@ -440,7 +445,7 @@ internal fun MobileRecordingsScreen(
                                 sheetBusy = true
                                 sheetError = null
                                 onToggleWatched(entry.id, !entry.isWatched)
-                                    .onSuccess { actionEntry = null }
+                                    .onSuccess { actionEntryId = null }
                                     .onFailure { sheetError = it.message ?: "Failed to update watched state" }
                                 sheetBusy = false
                             }
@@ -494,7 +499,7 @@ internal fun MobileRecordingsScreen(
                         DvrConfirmKind.DELETE_RECORDING -> onDeleteRecording(targetId)
                     }
                     result
-                        .onSuccess { actionEntry = null }
+                        .onSuccess { actionEntryId = null }
                         .onFailure { err ->
                             val fallback = when (kind) {
                                 DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop recording"
@@ -503,7 +508,7 @@ internal fun MobileRecordingsScreen(
                                 DvrConfirmKind.DELETE_RECORDING -> "Failed to delete recording"
                             }
                             val msg = err.message ?: fallback
-                            if (actionEntry != null) {
+                            if (actionEntryId != null) {
                                 sheetError = msg
                             } else {
                                 actionFeedback = msg

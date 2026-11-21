@@ -29,34 +29,37 @@ MuxGrid uses a low-glare **Broadcast Monitor** dark visual language (`Carbon & S
 
 ---
 
-## 2. Information Architecture (3 Primary Tabs + Settings)
+## 2. Information Architecture (4 Primary Tabs)
 
 Navigation stays minimal and consistent across both form factors:
 
 1. **Live** — Channel cards/rows with Now/Next program, live progress bar, and one-tap/click playback.
 2. **Guide** — Electronic Program Guide (EPG) for browsing upcoming broadcasts and scheduling recordings.
 3. **Recordings** — Active (`Recording Now`), Completed (grouped cleanly by series/title), and Scheduled timers.
-4. **Settings** — Compact sheet/dialog (Server connection, Decoder/Deinterlace preset, Timeshift cache limit, Background Play & PiP toggles).
+4. **Settings** — Server card (connection status, error details, quick Retry & Edit), Decoder/Deinterlace preset, Timeshift cache limit, and (on mobile) Background Play & PiP toggles.
 
 ---
 
 ## 3. Phone & Tablet Experience (`:feature:mobile`)
 
 ### Navigation Chrome
-- **Portrait Phone:** Floating translucent frosted-glass bottom bar (`Live`, `Guide`, `Recordings`) with Settings action in the top-right header.
-- **Landscape / Tablet:** Compact left translucent navigation rail + adaptive multi-column grids (`2–3` columns).
-- **Persistent Mini-Player:** When Radio or Live TV is playing in background audio mode, docks cleanly above the bottom nav bar (Picon, Channel + Show title, Play/Pause, Close). Tapping expands back to the player.
+- **Portrait Phone:** Docked frosted-glass bottom bar (`Live`, `Guide`, `Recordings`, `Settings`) with no redundant per-tab top headers so content starts right below the status bar.
+- **Landscape / Tablet:** Compact left translucent navigation rail with icon + label items and adaptive multi-column grids (`2–3` columns).
+- **Unified Top Bar (`48dp`):** Live filter tabs, Guide day tabs / expanded search bar, and Recordings filter tabs share a consistent `48dp` height (`MobileTopBarHeight`) so toggling search or switching tabs never shifts the layout.
+- **Server Status Indicator:** Non-connected states (`Connecting`/`Syncing` amber, `Error` coral, `Disconnected` muted) surface as a compact status dot on the **Settings** tab icon rather than a persistent top banner; opening **Settings** reveals the full status/error message and quick **Retry** / **Edit** actions on the server card.
+- **Persistent Mini-Player:** When Radio or Live TV is playing in background audio mode, docks cleanly above the bottom nav bar (or floats centered above the bottom edge in rail mode) with Picon, Channel + Show title, Play/Pause, and Stop. Tapping expands back to the player.
 
 ### Screen Layouts
 - **Live Screen:**
-  - Top horizontal filter pills: `All`, `TV`, `Radio`, `Favorites`, plus Tvheadend server tags.
+  - Top horizontal underline filter tabs (`All`, `TV`, `Radio`, `Favorites`, plus Tvheadend server tags).
   - Channel rows/cards: picon badge, tabular channel number, channel name, **Now** title + thin progress bar + remaining minutes, subtle **Next** preview.
   - Long-press a channel to Favorite, open its Guide, or jump straight into playback.
 - **Guide (EPG) Screen:**
-  - Vertical channel agenda with instant search and day/channel filtering.
-  - Tap any program to open a translucent bottom sheet with full description, time, channel, and **Watch Live** / **Record** / **Cancel Recording** actions.
+  - Vertical channel agenda with day underline tabs paired with an icon-only **Search** button on the right; tapping Search expands a full-width search bar (with Back/Clear dismissal) in place of the day chooser.
+  - Compact borderless channel strip below the day chooser (hidden while a search query is active).
+  - Tap any program to open a modal bottom sheet with full description, time, channel, and **Watch Live** / **Record** / **Cancel Recording** actions.
 - **Recordings Screen:**
-  - Stacked sections for **Recording Now** (coral badge, live elapsed duration, **Watch from Start** / **Watch Live** / **Stop** / **Cancel**), **Completed** (grouped by series/title with episode count, resume progress bar, watched checkmark, Play/Resume/Delete), and **Scheduled** (Cancel).
+  - Underline filter tabs (`All`, `Completed`, `Scheduled`) and stacked sections for **Recording Now** (coral badge, live elapsed duration, **Chase Play** / **Stop** / overflow sheet), **Completed** (grouped by series/title with episode count, resume progress bar, watched badge, Play/Resume/Delete), and **Scheduled** (Cancel).
 
 ### Mobile Fullscreen Player
 - Edge-to-edge immersive video.
@@ -79,11 +82,12 @@ Navigation stays minimal and consistent across both form factors:
 Designed strictly for **10-foot viewing** and a standard TV remote (`D-pad`, `OK/Select`, `Back`, `Ch+/Ch-`, `Play/Pause`).
 
 ### Navigation Chrome
-- Collapsible left **Navigation Rail** (`Live`, `Guide`, `Recordings`, `Settings`) with focus restoration and clean left/right traversal into screen content without focus traps.
+- Collapsible left **Navigation Rail** (`Live`, `Guide`, `Recordings`, `Settings`) with focus restoration, a server status indicator dot on **Settings** when not connected, and clean left/right traversal into screen content without focus traps.
+- Compact top header retains the tab title and D-pad-focusable **Refresh** action.
 
 ### Screen Layouts
-- **Live Screen:** Multi-column grid of large legible channel cards + focusable filter pills above the grid.
-- **Guide (EPG) Screen:** Horizontal timeline grid (sticky channel column, time slots horizontally, red vertical "Now" hairline) paired with a dynamic top preview header showing title, air time, and synopsis of the currently focused program.
+- **Live Screen:** Multi-column grid of large legible channel cards + focusable filter chips above the grid.
+- **Guide (EPG) Screen:** Horizontal timeline grid (sticky channel column, time slots horizontally, red vertical "Now" hairline) paired with a fixed-height bottom details bar showing title, air time, and synopsis of the currently focused program.
 - **Recordings Screen:** Horizontal shelves (`Recording Now`, `Continue Watching`, `All Recordings`, `Scheduled`).
 
 ### TV Fullscreen Player (Zero-Friction Remote Controls)
