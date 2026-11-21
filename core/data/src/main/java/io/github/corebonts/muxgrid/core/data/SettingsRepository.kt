@@ -14,6 +14,7 @@ import com.google.crypto.tink.KeyTemplates
 import com.google.crypto.tink.RegistryConfiguration
 import com.google.crypto.tink.aead.AeadConfig
 import com.google.crypto.tink.integration.android.AndroidKeysetManager
+import io.github.corebonts.muxgrid.core.model.BackgroundPlaybackMode
 import io.github.corebonts.muxgrid.core.model.FormFactor
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LocalDvrProgress
@@ -95,12 +96,13 @@ class SettingsRepository(
         TimeshiftWindow.fromPersisted(prefs[KEY_TIMESHIFT_WINDOW], formFactor)
     }
 
-    val backgroundPlayEnabled: Flow<Boolean> = context.muxGridDataStore.data.map { prefs ->
-        prefs[KEY_BACKGROUND_PLAY] ?: false
-    }
-
-    val pipEnabled: Flow<Boolean> = context.muxGridDataStore.data.map { prefs ->
-        prefs[KEY_PIP_ENABLED] ?: (formFactor == FormFactor.PHONE)
+    val backgroundPlaybackMode: Flow<BackgroundPlaybackMode> = context.muxGridDataStore.data.map { prefs ->
+        BackgroundPlaybackMode.fromPersisted(
+            raw = prefs[KEY_BACKGROUND_PLAYBACK_MODE],
+            legacyPipEnabled = prefs[KEY_PIP_ENABLED],
+            legacyBackgroundPlay = prefs[KEY_BACKGROUND_PLAY],
+            formFactor = formFactor,
+        )
     }
 
     val startScreen: Flow<StartScreen> = context.muxGridDataStore.data.map { prefs ->
@@ -188,15 +190,9 @@ class SettingsRepository(
         }
     }
 
-    suspend fun setBackgroundPlayEnabled(enabled: Boolean) {
+    suspend fun setBackgroundPlaybackMode(mode: BackgroundPlaybackMode) {
         context.muxGridDataStore.edit { prefs ->
-            prefs[KEY_BACKGROUND_PLAY] = enabled
-        }
-    }
-
-    suspend fun setPipEnabled(enabled: Boolean) {
-        context.muxGridDataStore.edit { prefs ->
-            prefs[KEY_PIP_ENABLED] = enabled
+            prefs[KEY_BACKGROUND_PLAYBACK_MODE] = mode.name
         }
     }
 
@@ -267,6 +263,7 @@ class SettingsRepository(
         private val KEY_FAVORITES = stringSetPreferencesKey("favorite_channel_ids")
         private val KEY_HWDEC_PRESET = stringPreferencesKey("hwdec_preset")
         private val KEY_TIMESHIFT_WINDOW = stringPreferencesKey("timeshift_window")
+        private val KEY_BACKGROUND_PLAYBACK_MODE = stringPreferencesKey("background_playback_mode")
         private val KEY_BACKGROUND_PLAY = booleanPreferencesKey("background_play_enabled")
         private val KEY_PIP_ENABLED = booleanPreferencesKey("pip_enabled")
         private val KEY_START_SCREEN = stringPreferencesKey("start_screen")

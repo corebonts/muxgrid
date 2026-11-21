@@ -92,7 +92,6 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridModalSheet
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
-import io.github.corebonts.muxgrid.core.designsystem.MuxGridSwitch
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
@@ -110,6 +109,7 @@ import io.github.corebonts.muxgrid.core.designsystem.label
 import io.github.corebonts.muxgrid.core.designsystem.rememberNowEpochSec
 import io.github.corebonts.muxgrid.core.designsystem.serverHeadline
 import io.github.corebonts.muxgrid.core.model.AppBuildInfo
+import io.github.corebonts.muxgrid.core.model.BackgroundPlaybackMode
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
@@ -332,8 +332,7 @@ fun MobileRoot(
                             val themeMode by repository.themeMode.collectAsState()
                             val hwDecPreset by repository.hwDecPreset.collectAsState()
                             val timeshiftWindow by repository.timeshiftWindow.collectAsState()
-                            val backgroundPlayEnabled by repository.backgroundPlayEnabled.collectAsState()
-                            val pipEnabled by repository.pipEnabled.collectAsState()
+                            val backgroundPlaybackMode by repository.backgroundPlaybackMode.collectAsState()
                             MobileSettingsTab(
                                 profile = currentProfile,
                                 connectionState = connectionState,
@@ -341,8 +340,8 @@ fun MobileRoot(
                                 themeMode = themeMode,
                                 hwDecPreset = hwDecPreset,
                                 timeshiftWindow = timeshiftWindow,
-                                backgroundPlayEnabled = backgroundPlayEnabled,
-                                pipEnabled = pipEnabled,
+                                backgroundPlaybackMode = backgroundPlaybackMode,
+                                pipSupported = canEnterPip,
                                 appInfo = appInfo,
                                 bottomContentPadding = bottomPad,
                                 onSelectStartScreen = { screen ->
@@ -358,11 +357,8 @@ fun MobileRoot(
                                 onSelectTimeshiftWindow = { window ->
                                     scope.launch { repository.setTimeshiftWindow(window) }
                                 },
-                                onToggleBackgroundPlay = { enabled ->
-                                    scope.launch { repository.setBackgroundPlayEnabled(enabled) }
-                                },
-                                onTogglePip = { enabled ->
-                                    scope.launch { repository.setPipEnabled(enabled) }
+                                onSelectBackgroundPlaybackMode = { mode ->
+                                    scope.launch { repository.setBackgroundPlaybackMode(mode) }
                                 },
                                 onRetryConnect = {
                                     repository.reconnect()
@@ -380,19 +376,12 @@ fun MobileRoot(
             val playbackState by playbackEngine.state.collectAsState()
             val nowNextMap by repository.nowNextByChannel.collectAsState()
             val hwDecPreset by repository.hwDecPreset.collectAsState()
-            val backgroundPlayEnabled by repository.backgroundPlayEnabled.collectAsState()
             val nowEpochSec = rememberNowEpochSec(offsetMs)
             val activeChannel = channels.firstOrNull { it.id == playbackState.channelId }
             val activeNowNext = activeChannel?.let { nowNextMap[it.id] }
-            val minimizeOnBack = playbackState.isRadio || playbackState.isAudioOnly || backgroundPlayEnabled
             BackHandler(enabled = !isInPictureInPictureMode) {
-                if (minimizeOnBack) {
-                    playbackEngine.setAudioOnly(true)
-                    route = MobileRoute.MAIN
-                } else {
-                    playbackEngine.stop()
-                    route = MobileRoute.MAIN
-                }
+                playbackEngine.setAudioOnly(true)
+                route = MobileRoute.MAIN
             }
             val zapPool = filteredChannels.ifEmpty { channels }
             MuxGridTheme(isTv = false, darkTheme = true) {
@@ -409,12 +398,7 @@ fun MobileRoot(
                     isInPip = isInPictureInPictureMode,
                     canEnterPip = canEnterPip,
                     canZap = zapPool.size > 1,
-                    minimizeOnBack = minimizeOnBack,
                     onEnterPip = onEnterPip,
-                    onMinimizeToAudio = {
-                        playbackEngine.setAudioOnly(true)
-                        route = MobileRoute.MAIN
-                    },
                     onSelectChannel = { channel ->
                         playbackEngine.playChannel(channel, hwDecPreset)
                     },
@@ -448,11 +432,7 @@ fun MobileRoot(
                         route = MobileRoute.MAIN
                     },
                     onExit = {
-                        if (minimizeOnBack) {
-                            playbackEngine.setAudioOnly(true)
-                        } else {
-                            playbackEngine.stop()
-                        }
+                        playbackEngine.setAudioOnly(true)
                         route = MobileRoute.MAIN
                     },
                 )
@@ -1289,16 +1269,15 @@ private fun MobileSettingsTab(
     themeMode: ThemeMode,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
-    backgroundPlayEnabled: Boolean,
-    pipEnabled: Boolean,
+    backgroundPlaybackMode: BackgroundPlaybackMode,
+    pipSupported: Boolean,
     appInfo: AppBuildInfo,
     bottomContentPadding: Dp,
     onSelectStartScreen: (StartScreen) -> Unit,
     onSelectThemeMode: (ThemeMode) -> Unit,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
-    onToggleBackgroundPlay: (Boolean) -> Unit,
-    onTogglePip: (Boolean) -> Unit,
+    onSelectBackgroundPlaybackMode: (BackgroundPlaybackMode) -> Unit,
     onRetryConnect: () -> Unit,
     onOpenServerSetup: () -> Unit,
 ) {
@@ -1482,29 +1461,47 @@ private fun MobileSettingsTab(
             }
         }
 
+        val backgroundModeOptions = if (pipSupported) {
+            BackgroundPlaybackMode.entries
+        } else {
+            listOf(BackgroundPlaybackMode.OFF, BackgroundPlaybackMode.AUDIO)
+        }
+        val effectiveBackgroundMode = if (!pipSupported && backgroundPlaybackMode == BackgroundPlaybackMode.PIP) {
+            BackgroundPlaybackMode.OFF
+        } else {
+            backgroundPlaybackMode
+        }
         Column(
             modifier = Modifier.widthIn(max = 680.dp).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text("PLAYBACK & BACKGROUND", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+            Text("BACKGROUND PLAYBACK", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(MuxGridShapes.Card)
-                    .background(MuxGridColors.Divider),
-                verticalArrangement = Arrangement.spacedBy(1.dp),
+                    .background(MuxGridColors.CardSurface)
+                    .padding(horizontal = 12.dp, vertical = 11.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                SettingToggleRow(
-                    title = "Auto Picture-in-Picture",
-                    subtitle = "Shrink live TV & recordings into PiP when leaving",
-                    checked = pipEnabled,
-                    onCheckedChange = onTogglePip,
-                )
-                SettingToggleRow(
-                    title = "Background Audio",
-                    subtitle = "Keep live TV audio playing when minimized (Radio always on)",
-                    checked = backgroundPlayEnabled,
-                    onCheckedChange = onToggleBackgroundPlay,
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    backgroundModeOptions.forEach { option ->
+                        BroadcastUnderlineTab(
+                            label = option.label,
+                            selected = option == effectiveBackgroundMode,
+                            onClick = { onSelectBackgroundPlaybackMode(option) },
+                        )
+                    }
+                }
+                Text(
+                    text = effectiveBackgroundMode.description,
+                    style = MuxGridType.TabularSmall,
+                    color = MuxGridColors.TextSecondary,
                 )
             }
         }
@@ -1640,8 +1637,7 @@ private fun MobileSettingsTab(
                                         hwDecPreset = hwDecPreset,
                                         timeshiftWindow = timeshiftWindow,
                                         themeMode = themeMode,
-                                        backgroundAudioEnabled = backgroundPlayEnabled,
-                                        pipEnabled = pipEnabled,
+                                        backgroundPlaybackMode = effectiveBackgroundMode,
                                     ),
                                 )
                             }
@@ -1786,33 +1782,6 @@ private fun SettingInfoRow(
             color = MuxGridColors.TextSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
-private fun SettingToggleRow(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MuxGridColors.CardSurface)
-            .clickable { onCheckedChange(!checked) }
-            .padding(horizontal = 12.dp, vertical = 11.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-            Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MuxGridColors.TextPrimary)
-            Text(subtitle, fontSize = 11.sp, color = MuxGridColors.TextSecondary)
-        }
-        MuxGridSwitch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
         )
     }
 }

@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.StatFs
 import io.github.corebonts.muxgrid.core.model.AppBuildInfo
+import io.github.corebonts.muxgrid.core.model.BackgroundPlaybackMode
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.ThemeMode
@@ -40,7 +41,7 @@ data class DebugEnvironmentSnapshot(
     val decoderPreset: HwDecPreset,
     val timeshiftWindow: TimeshiftWindow,
     val themeMode: ThemeMode,
-    val backgroundAudioEnabled: Boolean?,
+    val backgroundPlaybackMode: BackgroundPlaybackMode?,
     val pipStatus: String,
     val serverSoftwareSummary: String,
 )
@@ -53,8 +54,7 @@ fun collectDebugEnvironmentSnapshot(
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
     themeMode: ThemeMode,
-    backgroundAudioEnabled: Boolean? = null,
-    pipEnabled: Boolean? = null,
+    backgroundPlaybackMode: BackgroundPlaybackMode? = null,
 ): DebugEnvironmentSnapshot {
     val isDebuggable = context.isDebuggableBuild()
     val resolvedBuildType = appInfo.buildType.trim().ifEmpty {
@@ -92,14 +92,10 @@ fun collectDebugEnvironmentSnapshot(
 
     val pipStatus = if (isTv) {
         "N/A (TV)"
+    } else if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+        "Supported"
     } else {
-        val supported = context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
-        when {
-            !supported -> "Unsupported"
-            pipEnabled == true -> "Enabled"
-            pipEnabled == false -> "Disabled"
-            else -> "Supported"
-        }
+        "Unsupported"
     }
 
     val serverSummary = when (connectionState) {
@@ -138,7 +134,7 @@ fun collectDebugEnvironmentSnapshot(
         decoderPreset = hwDecPreset,
         timeshiftWindow = timeshiftWindow,
         themeMode = themeMode,
-        backgroundAudioEnabled = backgroundAudioEnabled,
+        backgroundPlaybackMode = backgroundPlaybackMode,
         pipStatus = pipStatus,
         serverSoftwareSummary = serverSummary,
     )
@@ -271,8 +267,8 @@ fun formatDebugInfoReport(snapshot: DebugEnvironmentSnapshot): String {
         appendLine("Decoder: ${snapshot.decoderPreset.name}")
         appendLine("Timeshift: ${snapshot.timeshiftWindow.shortLabel}")
         appendLine("Theme: ${snapshot.themeMode.name}")
-        snapshot.backgroundAudioEnabled?.let { enabled ->
-            appendLine("Background Audio: ${if (enabled) "Enabled" else "Disabled"}")
+        snapshot.backgroundPlaybackMode?.let { mode ->
+            appendLine("Background Playback: ${mode.label}")
         }
         appendLine("PiP: ${snapshot.pipStatus}")
         append("Server: ${snapshot.serverSoftwareSummary}")

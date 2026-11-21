@@ -140,9 +140,7 @@ internal fun MobilePlayerScreen(
     isInPip: Boolean,
     canEnterPip: Boolean,
     canZap: Boolean,
-    minimizeOnBack: Boolean,
     onEnterPip: () -> Unit,
-    onMinimizeToAudio: () -> Unit,
     onSelectChannel: (Channel) -> Unit,
     onZapPrevious: () -> Unit,
     onZapNext: () -> Unit,
@@ -533,9 +531,9 @@ internal fun MobilePlayerScreen(
                         modifier = Modifier.weight(1f),
                     ) {
                         TopHudIconButton(
-                            icon = MuxGridIcons.ArrowBack,
-                            contentDescription = "Back",
-                            iconSize = 20.dp,
+                            icon = MuxGridIcons.ExpandMore,
+                            contentDescription = "Minimize player",
+                            iconSize = 22.dp,
                             onClick = onExit,
                         )
                         Spacer(Modifier.width(8.dp))
@@ -586,13 +584,6 @@ internal fun MobilePlayerScreen(
                                 icon = MuxGridIcons.Pip,
                                 contentDescription = "Picture-in-Picture",
                                 onClick = onEnterPip,
-                            )
-                        }
-                        if (!isAudioStage && !minimizeOnBack) {
-                            TopHudIconButton(
-                                icon = MuxGridIcons.Headphones,
-                                contentDescription = "Background Audio",
-                                onClick = onMinimizeToAudio,
                             )
                         }
                         TopHudIconButton(

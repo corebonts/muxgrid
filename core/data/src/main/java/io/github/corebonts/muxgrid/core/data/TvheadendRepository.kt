@@ -6,6 +6,7 @@ import io.github.corebonts.muxgrid.core.htsp.HtspClient
 import io.github.corebonts.muxgrid.core.htsp.HtspNoAccessException
 import io.github.corebonts.muxgrid.core.htsp.HtspPushEvent
 import io.github.corebonts.muxgrid.core.htsp.HtspVfsClient
+import io.github.corebonts.muxgrid.core.model.BackgroundPlaybackMode
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ChannelTag
 import io.github.corebonts.muxgrid.core.model.ConnectionState
@@ -86,11 +87,8 @@ class TvheadendRepository(
     val timeshiftWindow: StateFlow<TimeshiftWindow> = settings.timeshiftWindow
         .stateIn(scope, SharingStarted.Eagerly, TimeshiftWindow.defaultFor(formFactor))
 
-    val backgroundPlayEnabled: StateFlow<Boolean> = settings.backgroundPlayEnabled
-        .stateIn(scope, SharingStarted.Eagerly, false)
-
-    val pipEnabled: StateFlow<Boolean> = settings.pipEnabled
-        .stateIn(scope, SharingStarted.Eagerly, formFactor == FormFactor.PHONE)
+    val backgroundPlaybackMode: StateFlow<BackgroundPlaybackMode> = settings.backgroundPlaybackMode
+        .stateIn(scope, SharingStarted.Eagerly, BackgroundPlaybackMode.defaultFor(formFactor))
 
     val startScreen: StateFlow<StartScreen?> = settings.startScreen
         .stateIn(scope, SharingStarted.Eagerly, null)
@@ -333,12 +331,8 @@ class TvheadendRepository(
         settings.setTimeshiftWindow(window)
     }
 
-    suspend fun setBackgroundPlayEnabled(enabled: Boolean) {
-        settings.setBackgroundPlayEnabled(enabled)
-    }
-
-    suspend fun setPipEnabled(enabled: Boolean) {
-        settings.setPipEnabled(enabled)
+    suspend fun setBackgroundPlaybackMode(mode: BackgroundPlaybackMode) {
+        settings.setBackgroundPlaybackMode(mode)
     }
 
     suspend fun setStartScreen(screen: StartScreen) {
