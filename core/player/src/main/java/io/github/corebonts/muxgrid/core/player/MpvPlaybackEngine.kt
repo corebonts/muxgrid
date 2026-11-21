@@ -18,6 +18,7 @@ import io.github.corebonts.muxgrid.core.model.PlaybackError
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.model.StreamTicket
+import io.github.corebonts.muxgrid.core.model.SubtitlePreference
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.model.TrackType
 import io.github.corebonts.muxgrid.core.model.VideoAspectMode
@@ -60,6 +61,8 @@ class MpvPlaybackEngine(
     private val dvrEntryProvider: (dvrId: Long) -> DvrEntry? = { null },
     private val nowEpochSecProvider: () -> Long = { System.currentTimeMillis() / 1000L },
     initialTimeshiftWindow: TimeshiftWindow = TimeshiftWindow.GB_1,
+    initialSubtitlePreference: SubtitlePreference = SubtitlePreference(),
+    private val onSubtitlePreferenceChanged: (SubtitlePreference) -> Unit = {},
     private val conflictFinder: (channelId: Long) -> Pair<DvrEntry, String?>?,
 ) : PlaybackEngine {
 
@@ -138,6 +141,9 @@ class MpvPlaybackEngine(
 
     @Volatile
     private var currentTimeshiftWindow: TimeshiftWindow = initialTimeshiftWindow
+
+    @Volatile
+    private var currentSubtitlePreference: SubtitlePreference = initialSubtitlePreference
 
     @Volatile
     private var effectiveForwardCapBytes: Long = DEFAULT_RAM_CACHE_BYTES
@@ -245,6 +251,7 @@ class MpvPlaybackEngine(
             setPropertyBoolean("pause", false)
 
             applyPresetOnInstance(this, currentPreset)
+            applySubtitlePreferenceLocked(this, currentSubtitlePreference)
 
             observeProperty("pause", MPV.mpvFormat.MPV_FORMAT_FLAG)
             observeProperty("core-idle", MPV.mpvFormat.MPV_FORMAT_FLAG)
@@ -305,6 +312,7 @@ class MpvPlaybackEngine(
             instance.command("stop")
             applyPresetOnInstance(instance, preset)
             applyAspectModeLocked(instance, currentAspectMode)
+            applySubtitlePreferenceLocked(instance, currentSubtitlePreference)
             configureLiveTimeshiftLocked(instance, requestedWindow)
             instance.setPropertyString("idle", "yes")
             instance.setPropertyString("start", "none")
@@ -387,6 +395,7 @@ class MpvPlaybackEngine(
             instance.command("stop")
             applyPresetOnInstance(instance, preset)
             applyAspectModeLocked(instance, currentAspectMode)
+            applySubtitlePreferenceLocked(instance, currentSubtitlePreference)
             configureDvrCacheLocked(instance, isGrowing)
             instance.setPropertyString("idle", "yes")
             instance.setPropertyString("start", if (resumeSec > 0L) "+$resumeSec" else "none")
@@ -520,15 +529,36 @@ class MpvPlaybackEngine(
     }
 
     override fun setSubtitleTrack(trackId: Int?) {
+        val selectedTrackLanguage = if (trackId != null) {
+            _state.value.subtitleTracks.firstOrNull { it.id == trackId }?.language
+        } else {
+            null
+        }
+        val nextPref = if (trackId == null) {
+            currentSubtitlePreference.copy(enabled = false)
+        } else {
+            SubtitlePreference(
+                enabled = true,
+                preferredLanguage = SubtitlePreference.sanitizeLanguage(selectedTrackLanguage)
+                    ?: currentSubtitlePreference.preferredLanguage,
+            )
+        }
+        currentSubtitlePreference = nextPref
+        runCatching { onSubtitlePreferenceChanged(nextPref) }
+
         mpvExecutor.execute {
             val instance = mpv ?: return@execute
             if (instance.isInitialized) {
-                if (trackId == null) {
-                    instance.setPropertyString("sid", "no")
-                } else {
-                    instance.setPropertyInt("sid", trackId)
+                runCatching {
+                    if (trackId == null) {
+                        instance.setPropertyString("sid", "no")
+                    } else {
+                        instance.setPropertyInt("sid", trackId)
+                    }
+                    refreshTracksLocked(instance)
+                }.onFailure { err ->
+                    Log.w(TAG, "Failed to set subtitle track=$trackId", err)
                 }
-                refreshTracksLocked(instance)
             }
         }
     }
@@ -545,6 +575,28 @@ class MpvPlaybackEngine(
 
     override fun setTimeshiftWindow(window: TimeshiftWindow) {
         currentTimeshiftWindow = window
+    }
+
+    override fun setSubtitlePreference(preference: SubtitlePreference) {
+        currentSubtitlePreference = preference
+        mpvExecutor.execute {
+            val instance = mpv ?: return@execute
+            if (instance.isInitialized && !hadFileLoaded && activeChannel == null && activeDvrEntry == null) {
+                applySubtitlePreferenceLocked(instance, preference)
+            }
+        }
+    }
+
+    private fun applySubtitlePreferenceLocked(instance: MPV, preference: SubtitlePreference) {
+        if (!preference.enabled) {
+            runCatching { instance.setPropertyString("sid", "no") }
+                .onFailure { Log.w(TAG, "Failed to disable subtitles (sid=no)", it) }
+            return
+        }
+        runCatching { instance.setPropertyString("slang", preference.sanitizedLanguage.orEmpty()) }
+            .onFailure { Log.w(TAG, "Failed to set subtitle language=${preference.sanitizedLanguage}", it) }
+        runCatching { instance.setPropertyString("sid", "auto") }
+            .onFailure { Log.w(TAG, "Failed to enable auto subtitles (sid=auto)", it) }
     }
 
     override fun setAudioOnly(audioOnly: Boolean) {

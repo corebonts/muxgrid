@@ -39,6 +39,12 @@ class MuxGridAppContainer(context: Context) {
         dvrEntryProvider = { dvrId -> repository.getDvrEntry(dvrId) },
         nowEpochSecProvider = { repository.currentServerEpochSec() },
         initialTimeshiftWindow = repository.timeshiftWindow.value,
+        initialSubtitlePreference = repository.subtitlePreference.value,
+        onSubtitlePreferenceChanged = { preference ->
+            applicationScope.launch {
+                runCatching { repository.setSubtitlePreference(preference) }
+            }
+        },
         conflictFinder = { channelId -> repository.findConflictingRecording(channelId) },
     )
 
@@ -59,6 +65,11 @@ class MuxGridAppContainer(context: Context) {
         applicationScope.launch {
             repository.timeshiftWindow.collect { window ->
                 playbackEngine.setTimeshiftWindow(window)
+            }
+        }
+        applicationScope.launch {
+            repository.subtitlePreference.collect { preference ->
+                playbackEngine.setSubtitlePreference(preference)
             }
         }
         startDvrProgressTracking()

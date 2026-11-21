@@ -152,6 +152,30 @@ data class PlaybackDiagnostics(
 )
 
 /**
+ * Persisted subtitle playback preference.
+ *
+ * When [enabled] is false, `sid=no` is applied to streams. When true, `sid=auto` is used
+ * (with [preferredLanguage] passed to `slang` when present and valid).
+ */
+data class SubtitlePreference(
+    val enabled: Boolean = true,
+    val preferredLanguage: String? = null,
+) {
+    val sanitizedLanguage: String?
+        get() = sanitizeLanguage(preferredLanguage)
+
+    companion object {
+        private val LANGUAGE_REGEX = Regex("^[a-zA-Z]{2,3}(?:[-_][a-zA-Z0-9]{1,8})*$")
+
+        fun sanitizeLanguage(raw: String?): String? {
+            val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            if (trimmed.equals("und", ignoreCase = true)) return null
+            return trimmed.takeIf { LANGUAGE_REGEX.matches(it) }
+        }
+    }
+}
+
+/**
  * Abstraction over an open growing DVR file (backed by HTSP VFS `fileOpen`/`fileStat`/`fileRead`/`fileClose`).
  */
 interface GrowingDvrFile : AutoCloseable {
