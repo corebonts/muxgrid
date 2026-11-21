@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,8 +19,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.clearText
@@ -68,18 +69,23 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridModalSheet
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
-import io.github.corebonts.muxgrid.core.designsystem.buildUpcomingDays
+import io.github.corebonts.muxgrid.core.designsystem.buildAvailableGuideDays
 import io.github.corebonts.muxgrid.core.designsystem.dvrConfirmSpec
 import io.github.corebonts.muxgrid.core.designsystem.filterEpgEventsForDay
 import io.github.corebonts.muxgrid.core.designsystem.findMatchingDvrEntry
 import io.github.corebonts.muxgrid.core.designsystem.formatDayLabel
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
+import io.github.corebonts.muxgrid.core.designsystem.formatEpochDayHm
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
+import io.github.corebonts.muxgrid.core.designsystem.scrollItemIntoViewport
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.EpgEvent
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,8 +104,11 @@ internal fun MobileGuideScreen(
     onCancelRecording: suspend (Long) -> Result<Unit>,
 ) {
     val scope = rememberCoroutineScope()
-    val days = remember(nowEpochSec / 3600L) { buildUpcomingDays(nowEpochSec, count = 7) }
-    var selectedDayIndex by remember { mutableStateOf(0) }
+    val activeZone = remember { ZoneId.systemDefault() }
+    val todayDate = remember(nowEpochSec / 3600L) {
+        Instant.ofEpochSecond(nowEpochSec).atZone(activeZone).toLocalDate()
+    }
+    var selectedDay by remember { mutableStateOf(todayDate) }
     var selectedChannelId by remember(initialSelectedChannelId) {
         mutableStateOf(initialSelectedChannelId ?: channels.firstOrNull()?.id)
     }
@@ -124,13 +133,39 @@ internal fun MobileGuideScreen(
         }
     }
 
-    val activeDay = days.getOrElse(selectedDayIndex) { days.first() }
     val channelById = remember(channels) { channels.associateBy { it.id } }
 
     // Ensure selectedChannelId stays valid if channel list loads after initial render
     val effectiveChannelId = when {
         selectedChannelId != null && channelById.containsKey(selectedChannelId) -> selectedChannelId
         else -> channels.firstOrNull()?.id
+    }
+
+    val days = remember(effectiveChannelId, epgByChannel, nowEpochSec / 3600L) {
+        val events = effectiveChannelId?.let { epgByChannel[it] }.orEmpty()
+        buildAvailableGuideDays(events, nowEpochSec, activeZone)
+    }
+    val activeDay = if (selectedDay in days) selectedDay else todayDate
+    val selectedDayIndex = days.indexOf(activeDay).coerceAtLeast(0)
+    val selectedChannelIndex = remember(channels, effectiveChannelId) {
+        channels.indexOfFirst { it.id == effectiveChannelId }
+    }
+
+    val dayListState = rememberLazyListState()
+    val channelListState = rememberLazyListState()
+    val agendaListState = rememberLazyListState()
+    var hasScrolledDayOnce by remember { mutableStateOf(false) }
+    var hasScrolledChannelOnce by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedDayIndex, days.size, dayListState.layoutInfo.viewportSize.width) {
+        scrollItemIntoViewport(dayListState, selectedDayIndex, animate = hasScrolledDayOnce)
+        hasScrolledDayOnce = true
+    }
+    LaunchedEffect(selectedChannelIndex, channels.size, channelListState.layoutInfo.viewportSize.width) {
+        if (selectedChannelIndex >= 0) {
+            scrollItemIntoViewport(channelListState, selectedChannelIndex, animate = hasScrolledChannelOnce)
+            hasScrolledChannelOnce = true
+        }
     }
 
     val trimmedQuery = searchQuery.trim()
@@ -147,22 +182,42 @@ internal fun MobileGuideScreen(
             for (ch in channels) {
                 val list = epgByChannel[ch.id].orEmpty()
                 for (ev in list) {
-                    if (ev.stopEpochSec >= nowEpochSec - 900L && (
-                            ev.title.contains(trimmedQuery, ignoreCase = true) ||
-                                (ev.subtitle?.contains(trimmedQuery, ignoreCase = true) == true) ||
-                                (ev.summary?.contains(trimmedQuery, ignoreCase = true) == true) ||
-                                (ev.description?.contains(trimmedQuery, ignoreCase = true) == true)
-                            )
+                    if (ev.title.contains(trimmedQuery, ignoreCase = true) ||
+                        (ev.subtitle?.contains(trimmedQuery, ignoreCase = true) == true) ||
+                        (ev.summary?.contains(trimmedQuery, ignoreCase = true) == true) ||
+                        (ev.description?.contains(trimmedQuery, ignoreCase = true) == true)
                     ) {
                         results.add(ev to ch)
                     }
                 }
             }
-            results.sortedBy { it.first.startEpochSec }.take(120)
+            results.sortedWith(
+                compareBy<Pair<EpgEvent, Channel?>> { it.first.stopEpochSec < nowEpochSec }
+                    .thenBy { if (it.first.stopEpochSec < nowEpochSec) -it.first.startEpochSec else it.first.startEpochSec },
+            ).take(120)
         } else {
             val ch = effectiveChannelId?.let { channelById[it] }
             val events = effectiveChannelId?.let { epgByChannel[it] }.orEmpty()
-            filterEpgEventsForDay(events, activeDay, nowEpochSec).map { it to ch }
+            filterEpgEventsForDay(events, activeDay, activeZone).map { it to ch }
+        }
+    }
+
+    var lastAgendaAnchorKey by remember { mutableStateOf<Triple<LocalDate, Long?, Boolean>?>(null) }
+    var hasAnchoredAgenda by remember { mutableStateOf(false) }
+    LaunchedEffect(activeDay, effectiveChannelId, trimmedQuery.isEmpty(), agendaItems.size) {
+        val anchorKey = Triple(activeDay, effectiveChannelId, trimmedQuery.isEmpty())
+        if (anchorKey != lastAgendaAnchorKey) {
+            lastAgendaAnchorKey = anchorKey
+            hasAnchoredAgenda = false
+        }
+        if (!hasAnchoredAgenda && agendaItems.isNotEmpty()) {
+            val targetIdx = if (trimmedQuery.isEmpty() && activeDay == todayDate) {
+                agendaItems.indexOfFirst { it.first.stopEpochSec > nowEpochSec }.coerceAtLeast(0)
+            } else {
+                0
+            }
+            agendaListState.scrollToItem(targetIdx)
+            hasAnchoredAgenda = true
         }
     }
 
@@ -224,7 +279,7 @@ internal fun MobileGuideScreen(
                             ) {
                                 if (searchQuery.isEmpty()) {
                                     Text(
-                                        text = "Search upcoming programs…",
+                                        text = "Search programs…",
                                         style = searchTextStyle.copy(color = MuxGridColors.TextMuted),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -262,20 +317,23 @@ internal fun MobileGuideScreen(
                     .height(MobileTopBarHeight),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
+                LazyRow(
+                    state = dayListState,
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxHeight()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(start = 16.dp, end = 8.dp),
+                        .fillMaxHeight(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(18.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    days.forEachIndexed { idx, day ->
+                    itemsIndexed(
+                        items = days,
+                        key = { _, day -> day.toEpochDay() },
+                    ) { idx, day ->
                         BroadcastUnderlineTab(
                             label = formatDayLabel(day, nowEpochSec),
                             selected = idx == selectedDayIndex,
-                            onClick = { selectedDayIndex = idx },
+                            onClick = { selectedDay = day },
                             modifier = Modifier.fillMaxHeight(),
                         )
                     }
@@ -301,14 +359,16 @@ internal fun MobileGuideScreen(
 
         if (trimmedQuery.isEmpty()) {
             // Compact borderless channel strip
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            LazyRow(
+                state = channelListState,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                channels.forEach { ch ->
+                items(
+                    items = channels,
+                    key = { it.id },
+                ) { ch ->
                     val selected = ch.id == effectiveChannelId
                     Row(
                         modifier = Modifier
@@ -351,12 +411,14 @@ internal fun MobileGuideScreen(
             }
         } else {
             LazyColumn(
+                state = agendaListState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(top = 2.dp, bottom = bottomContentPadding),
             ) {
                 items(agendaItems, key = { it.first.id }) { (event, channel) ->
                     val linkedDvr = findMatchingDvrEntry(event, dvrEntries)
                     val isLiveNow = nowEpochSec in event.startEpochSec until event.stopEpochSec
+                    val isPast = event.stopEpochSec <= nowEpochSec
                     val isRecording = linkedDvr?.state == DvrState.RECORDING
 
                     Column {
@@ -416,6 +478,7 @@ internal fun MobileGuideScreen(
                                         Text(
                                             text = event.title,
                                             style = MuxGridType.CardTitle,
+                                            color = if (isPast) MuxGridColors.TextSecondary else MuxGridColors.TextPrimary,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.weight(1f),
@@ -435,9 +498,9 @@ internal fun MobileGuideScreen(
                                     }
                                     if (trimmedQuery.isNotEmpty() && channel != null) {
                                         Text(
-                                            text = "${channel.name} · ${formatDayLabel(buildUpcomingDays(event.startEpochSec, 1).first(), nowEpochSec)}",
+                                            text = "${channel.name} · ${formatEpochDayHm(event.startEpochSec, nowEpochSec)}",
                                             style = MuxGridType.TabularSmall,
-                                            color = MuxGridColors.AccentSoft,
+                                            color = if (isPast) MuxGridColors.TextMuted else MuxGridColors.AccentSoft,
                                         )
                                     } else if (!event.subtitle.isNullOrBlank()) {
                                         Text(
@@ -481,6 +544,7 @@ internal fun MobileGuideScreen(
         val detailChannel = channelById[detailEvent.channelId]
         val linkedDvr = findMatchingDvrEntry(detailEvent, dvrEntries)
         val isLiveNow = nowEpochSec in detailEvent.startEpochSec until detailEvent.stopEpochSec
+        val isPast = detailEvent.stopEpochSec <= nowEpochSec
 
         MuxGridModalSheet(
             onDismissRequest = { if (!actionBusy) selectedEventKey = null },
@@ -506,7 +570,7 @@ internal fun MobileGuideScreen(
                         )
                         val meta = buildString {
                             if (detailChannel != null) append("${detailChannel.name} · ")
-                            append("${formatEpochHm(detailEvent.startEpochSec)}–${formatEpochHm(detailEvent.stopEpochSec)}")
+                            append("${formatEpochDayHm(detailEvent.startEpochSec, nowEpochSec)}–${formatEpochHm(detailEvent.stopEpochSec)}")
                             append(" (${formatDurationMinutes(detailEvent.startEpochSec, detailEvent.stopEpochSec)})")
                         }
                         Text(text = meta, style = MuxGridType.TabularSmall)
@@ -640,7 +704,27 @@ internal fun MobileGuideScreen(
                                     Text("Cancel Timer", color = MuxGridColors.CoralLive, maxLines = 1)
                                 }
                             }
-                            else -> {
+                            DvrState.COMPLETED -> if (!linkedDvr.isFileMissing) {
+                                OutlinedButton(
+                                    enabled = !actionBusy,
+                                    shape = MuxGridShapes.Sm,
+                                    onClick = {
+                                        selectedEventKey = null
+                                        val startSec = if (linkedDvr.hasResumePosition) linkedDvr.playPositionSec else 0L
+                                        onPlayRecording(linkedDvr, detailChannel, startSec)
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Icon(MuxGridIcons.Play, contentDescription = null, tint = MuxGridColors.AccentSoft, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        text = if (linkedDvr.hasResumePosition) "Resume Recording" else "Play Recording",
+                                        color = MuxGridColors.AccentSoft,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                            else -> if (!isPast) {
                                 OutlinedButton(
                                     enabled = !actionBusy,
                                     shape = MuxGridShapes.Sm,

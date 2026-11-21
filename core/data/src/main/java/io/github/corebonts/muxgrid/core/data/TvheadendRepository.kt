@@ -29,12 +29,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * Single source of truth coordinating [HtspClient], [HtspVfsClient], [TvheadendStore],
@@ -48,6 +50,7 @@ class TvheadendRepository(
     private val settings = SettingsRepository(context.applicationContext, formFactor)
     private val htspClient = HtspClient(scope = scope)
     private val vfsClient = HtspVfsClient(profileProvider = { serverProfile.value ?: ServerProfile(host = "") })
+    private val epgDiskCache = EpgDiskCache(File(context.applicationContext.filesDir, "epg_cache.dat"))
     private var backgroundDisconnectJob: Job? = null
     private val store = TvheadendStore(
         epochSecondsProvider = {
@@ -175,16 +178,44 @@ class TvheadendRepository(
             }
         }
         scope.launch {
+            var previousServerKey: String? = null
             settings.serverProfile
                 .distinctUntilChanged()
                 .collect { profile ->
                     vfsClient.disconnect()
+                    val serverKey = if (profile.isConfigured) "${profile.host}:${profile.htspPort}" else ""
+                    if (serverKey != previousServerKey) {
+                        val switchedServer = previousServerKey != null
+                        previousServerKey = serverKey
+                        scope.launch(Dispatchers.IO) {
+                            val minStopSec = currentServerEpochSec() - TvheadendStore.EPG_PAST_RETENTION_SEC
+                            val cached = if (serverKey.isNotEmpty()) {
+                                epgDiskCache.load(serverKey, minStopSec)
+                            } else {
+                                emptyList()
+                            }
+                            store.seedCachedEvents(cached, clearExisting = switchedServer)
+                        }
+                    }
                     if (profile.isConfigured) {
                         htspClient.connect(profile)
                     } else {
                         htspClient.disconnect()
                     }
                 }
+        }
+        // Persist recent EPG events (debounced) off the main thread so past shows survive restarts
+        scope.launch(Dispatchers.IO) {
+            store.epgByChannel.collectLatest { epgMap ->
+                if (epgMap.isEmpty()) return@collectLatest
+                delay(3_000L)
+                val profile = serverProfile.value ?: return@collectLatest
+                if (!profile.isConfigured) return@collectLatest
+                val serverKey = "${profile.host}:${profile.htspPort}"
+                val minStopSec = currentServerEpochSec() - TvheadendStore.EPG_PAST_RETENTION_SEC
+                val allEvents = epgMap.values.flatten()
+                epgDiskCache.save(serverKey, allEvents, minStopSec)
+            }
         }
         // Refresh Now/Next progress & transitions every 15 s off the main thread
         scope.launch(Dispatchers.Default) {

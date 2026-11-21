@@ -6,7 +6,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,10 +27,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.clearText
@@ -89,12 +88,14 @@ import io.github.corebonts.muxgrid.core.designsystem.dvrConfirmSpec
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
-import io.github.corebonts.muxgrid.core.designsystem.buildUpcomingDays
+import io.github.corebonts.muxgrid.core.designsystem.buildAvailableGuideDays
+import io.github.corebonts.muxgrid.core.designsystem.computeGuideEventBounds
 import io.github.corebonts.muxgrid.core.designsystem.findMatchingDvrEntry
 import io.github.corebonts.muxgrid.core.designsystem.formatDayLabel
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochDayHm
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
+import io.github.corebonts.muxgrid.core.designsystem.scrollItemIntoViewport
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
@@ -136,7 +137,54 @@ internal fun TvGuideScreen(
     onCancelRecording: suspend (Long) -> Result<Unit>,
 ) {
     val scope = rememberCoroutineScope()
-    val days = remember(nowEpochSec / 3600L) { buildUpcomingDays(nowEpochSec, count = 7) }
+    val activeZone = remember { ZoneId.systemDefault() }
+    val todayDate = remember(nowEpochSec / 3600L) {
+        Instant.ofEpochSecond(nowEpochSec).atZone(activeZone).toLocalDate()
+    }
+    val days = remember(epgByChannel, nowEpochSec / 3600L) {
+        buildAvailableGuideDays(epgByChannel, nowEpochSec, activeZone)
+    }
+    val eventBounds = remember(epgByChannel, nowEpochSec / 3600L) {
+        computeGuideEventBounds(epgByChannel, nowEpochSec, activeZone)
+    }
+    val todayStartHalfHour = floorToHalfHour(nowEpochSec)
+    val minWindowStartSec = remember(eventBounds, todayStartHalfHour) {
+        val earliest = eventBounds?.first ?: (todayStartHalfHour - 3600L)
+        minOf(floorToHalfHour(earliest), todayStartHalfHour - 3600L)
+    }
+    val maxWindowStartSec = remember(eventBounds, todayStartHalfHour) {
+        val latest = eventBounds?.second ?: (todayStartHalfHour + 24L * 3600L)
+        maxOf(todayStartHalfHour, floorToHalfHour(latest - TIMELINE_WINDOW_SEC))
+    }
+    val windowDate = remember(windowStartEpochSec) {
+        Instant.ofEpochSecond(windowStartEpochSec).atZone(activeZone).toLocalDate()
+    }
+    val selectedDayIndex = remember(days, windowDate) {
+        val exact = days.indexOf(windowDate)
+        if (exact >= 0) {
+            exact
+        } else {
+            days.indexOfLast { !it.isAfter(windowDate) }.coerceAtLeast(0)
+        }
+    }
+    val dayListState = rememberLazyListState()
+    var dayStripHasFocus by remember { mutableStateOf(false) }
+    var hasInitializedDayScroll by remember { mutableStateOf(false) }
+    var lastScrolledDayIndex by remember { mutableIntStateOf(-1) }
+
+    LaunchedEffect(selectedDayIndex, days.size, dayStripHasFocus, dayListState.layoutInfo.viewportSize.width) {
+        val dayChanged = selectedDayIndex != lastScrolledDayIndex
+        if (!hasInitializedDayScroll || !dayStripHasFocus || dayChanged) {
+            scrollItemIntoViewport(
+                listState = dayListState,
+                index = selectedDayIndex,
+                animate = hasInitializedDayScroll,
+            )
+            hasInitializedDayScroll = true
+            lastScrolledDayIndex = selectedDayIndex
+        }
+    }
+
     val windowEndEpochSec = windowStartEpochSec + TIMELINE_WINDOW_SEC
     val dvrIndex = remember(dvrEntries) { DvrLookupIndex(dvrEntries) }
 
@@ -245,18 +293,19 @@ internal fun TvGuideScreen(
             for (ch in channels) {
                 val list = epgByChannel[ch.id].orEmpty()
                 for (ev in list) {
-                    if (ev.stopEpochSec >= nowEpochSec - 900L && (
-                            ev.title.contains(trimmedQuery, ignoreCase = true) ||
-                                (ev.subtitle?.contains(trimmedQuery, ignoreCase = true) == true) ||
-                                (ev.summary?.contains(trimmedQuery, ignoreCase = true) == true) ||
-                                (ev.description?.contains(trimmedQuery, ignoreCase = true) == true)
-                            )
+                    if (ev.title.contains(trimmedQuery, ignoreCase = true) ||
+                        (ev.subtitle?.contains(trimmedQuery, ignoreCase = true) == true) ||
+                        (ev.summary?.contains(trimmedQuery, ignoreCase = true) == true) ||
+                        (ev.description?.contains(trimmedQuery, ignoreCase = true) == true)
                     ) {
                         results.add(ev to ch)
                     }
                 }
             }
-            results.sortedBy { it.first.startEpochSec }.take(120)
+            results.sortedWith(
+                compareBy<Pair<EpgEvent, Channel>> { it.first.stopEpochSec < nowEpochSec }
+                    .thenBy { if (it.first.stopEpochSec < nowEpochSec) -it.first.startEpochSec else it.first.startEpochSec },
+            ).take(120)
         }
     }
 
@@ -360,7 +409,7 @@ internal fun TvGuideScreen(
                             ) {
                                 if (searchQuery.isEmpty()) {
                                     Text(
-                                        text = "Search upcoming programs…",
+                                        text = "Search programs…",
                                         style = searchTextStyle.copy(color = MuxGridColors.TextMuted),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -384,19 +433,18 @@ internal fun TvGuideScreen(
                 }
             }
         } else {
-            // Time navigation + Day jump bar
+            // Time navigation (pinned) + Day jump bar (auto-scrolled to keep selected in viewport)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusGroup()
-                    .focusRestorer()
-                    .horizontalScroll(rememberScrollState()),
+                    .focusRestorer(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Button(
                     onClick = {
-                        onWindowStartChange((windowStartEpochSec - TIMELINE_STEP_SEC).coerceAtLeast(floorToHalfHour(nowEpochSec) - 3600L))
+                        onWindowStartChange((windowStartEpochSec - TIMELINE_STEP_SEC).coerceAtLeast(minWindowStartSec))
                     },
                     shape = tvButtonShape(),
                     colors = tvSecondaryButtonColors(),
@@ -406,7 +454,7 @@ internal fun TvGuideScreen(
                     Text("-2h", fontSize = 12.sp)
                 }
                 Button(
-                    onClick = { onWindowStartChange(floorToHalfHour(nowEpochSec)) },
+                    onClick = { onWindowStartChange(todayStartHalfHour) },
                     modifier = Modifier.focusRequester(nowButtonFocusRequester),
                     shape = tvButtonShape(),
                     colors = tvPrimaryButtonColors(),
@@ -416,7 +464,9 @@ internal fun TvGuideScreen(
                     Text("Now", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Button(
-                    onClick = { onWindowStartChange(windowStartEpochSec + TIMELINE_STEP_SEC) },
+                    onClick = {
+                        onWindowStartChange((windowStartEpochSec + TIMELINE_STEP_SEC).coerceAtMost(maxWindowStartSec))
+                    },
                     shape = tvButtonShape(),
                     colors = tvSecondaryButtonColors(),
                 ) {
@@ -425,45 +475,78 @@ internal fun TvGuideScreen(
                     Icon(MuxGridIcons.ChevronRight, contentDescription = null, modifier = Modifier.size(16.dp))
                 }
                 Spacer(Modifier.width(6.dp))
-                val activeZone = ZoneId.systemDefault()
-                val windowDate = Instant.ofEpochSecond(windowStartEpochSec).atZone(activeZone).toLocalDate()
-                val todayDate = Instant.ofEpochSecond(nowEpochSec).atZone(activeZone).toLocalDate()
-                days.forEach { dayDate ->
-                    val selected = dayDate == windowDate
-                    FilterChip(
-                        selected = selected,
-                        onClick = {
-                            val todayStart = floorToHalfHour(nowEpochSec)
-                            val targetMidnight = dayDate.atStartOfDay(activeZone).toEpochSecond()
-                            onWindowStartChange(
-                                if (dayDate == todayDate) {
-                                    todayStart
+                LazyRow(
+                    state = dayListState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .onFocusChanged { dayStripHasFocus = it.hasFocus }
+                        .focusGroup()
+                        .focusRestorer(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    itemsIndexed(
+                        items = days,
+                        key = { _, dayDate -> dayDate.toEpochDay() },
+                    ) { idx, dayDate ->
+                        val selected = idx == selectedDayIndex
+                        FilterChip(
+                            selected = selected,
+                            onClick = {
+                                val targetWindow = if (dayDate == todayDate) {
+                                    todayStartHalfHour
                                 } else {
-                                    targetMidnight + 18L * 3600L // Prime time 18:00 on future days
-                                },
+                                    val dayStartSec = dayDate.atStartOfDay(activeZone).toEpochSecond()
+                                    val dayEndSec = dayDate.plusDays(1).atStartOfDay(activeZone).toEpochSecond()
+                                    val primeTime = dayStartSec + 18L * 3600L
+                                    var hasPrimeTimeEvent = false
+                                    var dayEarliestStart = Long.MAX_VALUE
+                                    var dayLatestStop = Long.MIN_VALUE
+                                    for (list in epgByChannel.values) {
+                                        for (ev in list) {
+                                            if (ev.stopEpochSec <= dayStartSec || ev.startEpochSec >= dayEndSec) continue
+                                            val cs = maxOf(ev.startEpochSec, dayStartSec)
+                                            val ce = minOf(ev.stopEpochSec, dayEndSec)
+                                            if (cs < dayEarliestStart) dayEarliestStart = cs
+                                            if (ce > dayLatestStop) dayLatestStop = ce
+                                            if (ev.stopEpochSec > primeTime && ev.startEpochSec < primeTime + TIMELINE_WINDOW_SEC) {
+                                                hasPrimeTimeEvent = true
+                                            }
+                                        }
+                                    }
+                                    when {
+                                        hasPrimeTimeEvent -> primeTime
+                                        dayEarliestStart <= dayLatestStop && dayLatestStop <= primeTime ->
+                                            floorToHalfHour(dayLatestStop - TIMELINE_WINDOW_SEC).coerceAtLeast(dayStartSec)
+                                        dayEarliestStart <= dayLatestStop ->
+                                            floorToHalfHour(dayEarliestStart)
+                                        else -> primeTime
+                                    }
+                                }
+                                onWindowStartChange(targetWindow.coerceIn(minWindowStartSec, maxWindowStartSec))
+                            },
+                            shape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm),
+                            colors = FilterChipDefaults.colors(
+                                containerColor = MuxGridColors.CardSurface,
+                                contentColor = MuxGridColors.TextSecondary,
+                                selectedContainerColor = MuxGridColors.Accent,
+                                selectedContentColor = MuxGridColors.OnAccent,
+                                focusedContainerColor = MuxGridColors.FocusBorder,
+                                focusedContentColor = MuxGridColors.CanvasTv,
+                                focusedSelectedContainerColor = MuxGridColors.FocusBorder,
+                                focusedSelectedContentColor = MuxGridColors.CanvasTv,
+                            ),
+                            border = FilterChipDefaults.border(
+                                border = Border.None,
+                                selectedBorder = Border.None,
+                            ),
+                        ) {
+                            Text(
+                                text = formatDayLabel(dayDate, nowEpochSec),
+                                fontSize = 12.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                             )
-                        },
-                        shape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm),
-                        colors = FilterChipDefaults.colors(
-                            containerColor = MuxGridColors.CardSurface,
-                            contentColor = MuxGridColors.TextSecondary,
-                            selectedContainerColor = MuxGridColors.Accent,
-                            selectedContentColor = MuxGridColors.OnAccent,
-                            focusedContainerColor = MuxGridColors.FocusBorder,
-                            focusedContentColor = MuxGridColors.CanvasTv,
-                            focusedSelectedContainerColor = MuxGridColors.FocusBorder,
-                            focusedSelectedContentColor = MuxGridColors.CanvasTv,
-                        ),
-                        border = FilterChipDefaults.border(
-                            border = Border.None,
-                            selectedBorder = Border.None,
-                        ),
-                    ) {
-                        Text(
-                            text = formatDayLabel(dayDate, nowEpochSec),
-                            fontSize = 12.sp,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                        )
+                        }
                     }
                 }
             }
@@ -737,6 +820,7 @@ internal fun TvGuideScreen(
                                                 }
                                             } else {
                                                 val isLiveNow = nowEpochSec in ev.startEpochSec until ev.stopEpochSec
+                                                val isPast = ev.stopEpochSec <= nowEpochSec
                                                 val linkedDvr = dvrIndex.findMatch(ev)
                                                 val evFocusKey = "ev_${channel.id}_${ev.id}"
                                                 val evFocusRequester = remember(evFocusKey) { FocusRequester() }
@@ -814,7 +898,7 @@ internal fun TvGuideScreen(
                                                     ) {
                                                         Text(
                                                             text = ev.title,
-                                                            color = MuxGridColors.TextPrimary,
+                                                            color = if (isPast && !evFocused) MuxGridColors.TextSecondary else MuxGridColors.TextPrimary,
                                                             fontSize = 12.5.sp,
                                                             fontWeight = FontWeight.SemiBold,
                                                             maxLines = 1,
@@ -859,6 +943,7 @@ internal fun TvGuideScreen(
             focusedEventState = focusedEventState,
             fallbackEvent = fallbackPreviewEvent,
             dvrIndex = dvrIndex,
+            nowEpochSec = nowEpochSec,
         )
     }
 
@@ -869,6 +954,7 @@ internal fun TvGuideScreen(
         val ch = channelById[ev.channelId]
         val linkedDvr = findMatchingDvrEntry(ev, dvrEntries)
         val isLiveNow = nowEpochSec in ev.startEpochSec until ev.stopEpochSec
+        val isPast = ev.stopEpochSec <= nowEpochSec
         val primaryFocusRequester = remember { FocusRequester() }
 
         LaunchedEffect(ev.id, pendingConfirm == null) {
@@ -897,7 +983,7 @@ internal fun TvGuideScreen(
                     Text(ev.title, style = MuxGridType.Title, fontSize = 18.sp)
                     val meta = buildString {
                         if (ch != null) append("${ch.name} · ")
-                        append("${formatEpochHm(ev.startEpochSec)}–${formatEpochHm(ev.stopEpochSec)}")
+                        append("${formatEpochDayHm(ev.startEpochSec, nowEpochSec)}–${formatEpochHm(ev.stopEpochSec)}")
                         append(" (${formatDurationMinutes(ev.startEpochSec, ev.stopEpochSec)})")
                     }
                     Text(text = meta, style = MuxGridType.TabularSmall)
@@ -1011,7 +1097,28 @@ internal fun TvGuideScreen(
                             Text("Cancel Timer", maxLines = 1, softWrap = false)
                         }
                     }
-                    else -> {
+                    DvrState.COMPLETED -> if (!linkedDvr.isFileMissing) {
+                        Button(
+                            enabled = !actionBusy,
+                            onClick = {
+                                actionEventKey = null
+                                val startSec = if (linkedDvr.hasResumePosition) linkedDvr.playPositionSec else 0L
+                                onPlayRecording(linkedDvr, ch, startSec)
+                            },
+                            modifier = recordButtonModifier,
+                            shape = tvButtonShape(),
+                            colors = tvDialogSecondaryButtonColors(),
+                        ) {
+                            Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = if (linkedDvr.hasResumePosition) "Resume Recording" else "Play Recording",
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                    }
+                    else -> if (!isPast) {
                         Button(
                             enabled = !actionBusy,
                             onClick = {
@@ -1089,6 +1196,7 @@ private fun TvGuidePreviewBar(
     focusedEventState: State<EpgEvent?>,
     fallbackEvent: EpgEvent?,
     dvrIndex: DvrLookupIndex,
+    nowEpochSec: Long,
 ) {
     val previewEvent = focusedEventState.value ?: fallbackEvent
     Column(
@@ -1121,7 +1229,7 @@ private fun TvGuidePreviewBar(
                             Spacer(Modifier.width(10.dp))
                         }
                         Text(
-                            text = "${formatEpochHm(previewEvent.startEpochSec)}–${formatEpochHm(previewEvent.stopEpochSec)} (${formatDurationMinutes(previewEvent.startEpochSec, previewEvent.stopEpochSec)})",
+                            text = "${formatEpochDayHm(previewEvent.startEpochSec, nowEpochSec)}–${formatEpochHm(previewEvent.stopEpochSec)} (${formatDurationMinutes(previewEvent.startEpochSec, previewEvent.stopEpochSec)})",
                             style = MuxGridType.TabularSmall,
                             color = MuxGridColors.AccentSoft,
                         )

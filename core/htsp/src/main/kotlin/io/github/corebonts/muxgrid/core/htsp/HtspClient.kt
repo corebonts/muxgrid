@@ -470,7 +470,7 @@ class HtspClient(
         private const val RPC_TIMEOUT_MS = 10_000L
         private const val INITIAL_SYNC_TIMEOUT_MS = 30_000L
         private const val RESYNC_TIMEOUT_MS = 30_000L
-        private const val DEFAULT_EPG_WINDOW_SEC = 7L * 86_400L
+        private const val DEFAULT_EPG_WINDOW_SEC = 2L * 7L * 86_400L // +2 weeks
         private const val DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000L
         private const val INITIAL_BACKOFF_MS = 1_000L
         private const val MAX_BACKOFF_MS = 15_000L
