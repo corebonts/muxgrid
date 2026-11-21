@@ -32,6 +32,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+/**
+ * Single source of truth coordinating [HtspClient], [HtspVfsClient], [TvheadendStore],
+ * [SettingsRepository], and Coil's picon [ImageLoader] for UI and player layers.
+ */
 class TvheadendRepository(
     context: Context,
     formFactor: FormFactor,

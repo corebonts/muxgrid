@@ -5,12 +5,29 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-val dotEnv = Properties().apply {
-    val envFile = rootProject.file(".env")
-    if (envFile.exists()) {
-        envFile.inputStream().use { load(it) }
+val keystoreProps = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) {
+        file.inputStream().use { load(it) }
     }
 }
+
+val releaseStorePath = keystoreProps.getProperty("storeFile")
+    ?: System.getenv("MUXGRID_KEYSTORE_PATH")
+val releaseStorePassword = keystoreProps.getProperty("storePassword")
+    ?: System.getenv("MUXGRID_KEYSTORE_PASSWORD")
+val releaseKeyAlias = keystoreProps.getProperty("keyAlias")
+    ?: System.getenv("MUXGRID_KEY_ALIAS")
+val releaseKeyPassword = keystoreProps.getProperty("keyPassword")
+    ?: System.getenv("MUXGRID_KEY_PASSWORD")
+val releaseStoreFile = releaseStorePath
+    ?.takeIf { it.isNotBlank() }
+    ?.let { rootProject.file(it) }
+    ?.takeIf { it.exists() }
+val hasReleaseSigning = releaseStoreFile != null &&
+    !releaseStorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
 
 android {
     namespace = "io.github.corebonts.muxgrid"
@@ -24,12 +41,19 @@ android {
         applicationId = "io.github.corebonts.muxgrid"
         minSdk = 28
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0-m1"
+        versionCode = 3
+        versionName = "0.5.0"
+    }
 
-        buildConfigField("String", "SPIKE_TVH_HOST", "\"${dotEnv.getProperty("TVH_HOST", "192.168.1.5")}\"")
-        buildConfigField("String", "SPIKE_TVH_USER", "\"${dotEnv.getProperty("TVH_USER", "")}\"")
-        buildConfigField("String", "SPIKE_TVH_PASS", "\"${dotEnv.getProperty("TVH_PASS", "")}\"")
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = releaseStoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     splits {
@@ -43,6 +67,9 @@ android {
 
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -69,7 +96,6 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = true
     }
 }
 
@@ -86,6 +112,4 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.mpv.android.lib)
-    implementation(libs.androidx.tv.material)
 }

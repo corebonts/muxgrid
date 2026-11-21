@@ -38,6 +38,10 @@ data class PiconModel(
     val rawIcon: String?,
 )
 
+/**
+ * Coil 3 [Fetcher] that normalizes Tvheadend channel icons (`imagecache/<id>`, `/imagecache/<id>`,
+ * or external `http(s)://` URLs), fetching via HTSP VFS first and falling back to Digest/Basic HTTP.
+ */
 class PiconFetcher(
     private val rawIcon: String,
     private val htspClient: HtspClient,

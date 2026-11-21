@@ -31,6 +31,6 @@ dependencies {
     implementation(project(":core:player"))
     implementation(project(":core:designsystem"))
     implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.tv.material)
-    implementation(libs.androidx.navigation.compose)
 }

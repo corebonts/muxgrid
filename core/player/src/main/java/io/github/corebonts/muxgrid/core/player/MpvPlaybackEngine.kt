@@ -35,6 +35,13 @@ import java.io.File
 import java.util.Locale
 import java.util.concurrent.Executors
 
+/**
+ * [PlaybackEngine] backed by `libmpv` (`mpv-android-lib`) and [LocalMediaProxy].
+ *
+ * Uses `vo=gpu` on a `SurfaceView` so bitmap `DVBSUB` subtitles and OSD composite cleanly,
+ * applies device-appropriate hardware decode/deinterlace presets, manages a disk-backed live
+ * timeshift ring buffer, and coordinates platform audio focus and Wi-Fi/wake locks.
+ */
 class MpvPlaybackEngine(
     private val context: Context,
     serverBaseUrlProvider: () -> String?,
@@ -238,7 +245,7 @@ class MpvPlaybackEngine(
 
         val url = liveStrategy.resolveLiveUrl(channel.id)
         val requestedWindow = currentTimeshiftWindow
-        Log.i(TAG, "playChannel id=${channel.id} (${channel.name}) timeshift=$requestedWindow url=$url")
+        Log.i(TAG, "playChannel id=${channel.id} (${channel.name}) timeshift=$requestedWindow mode=live")
         mpvExecutor.execute {
             val instance = ensureMpvLocked() ?: return@execute
             instance.command("stop")
@@ -316,7 +323,8 @@ class MpvPlaybackEngine(
         } else {
             proxy.dvrStreamUrl(entry.id)
         }
-        Log.i(TAG, "playDvrEntry id=${entry.id} (${entry.title}) growing=$isGrowing start=${resumeSec}s url=$url")
+        val mode = if (isGrowing) "growing" else "dvr"
+        Log.i(TAG, "playDvrEntry id=${entry.id} (${entry.title}) mode=$mode start=${resumeSec}s")
         mpvExecutor.execute {
             val instance = ensureMpvLocked() ?: return@execute
             instance.command("stop")
@@ -533,7 +541,7 @@ class MpvPlaybackEngine(
             if (urlToLoad != null && !explicitlyStopped) {
                 instance.setPropertyBoolean("pause", false)
                 val rc = instance.command("loadfile", urlToLoad)
-                Log.i(TAG, "loadfile on attachSurface rc=$rc url=$urlToLoad")
+                Log.i(TAG, "loadfile on attachSurface rc=$rc")
             }
         }
     }

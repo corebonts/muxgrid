@@ -9,6 +9,9 @@ import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.model.VideoAspectMode
 import kotlinx.coroutines.flow.StateFlow
 
+/**
+ * Transport-agnostic playback contract decoupling UI and data layers from `libmpv`.
+ */
 interface PlaybackEngine {
     val state: StateFlow<PlaybackState>
 

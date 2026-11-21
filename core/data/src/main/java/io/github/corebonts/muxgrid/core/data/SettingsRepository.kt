@@ -26,6 +26,10 @@ import java.nio.charset.StandardCharsets
 
 private val Context.muxGridDataStore: DataStore<Preferences> by preferencesDataStore(name = "muxgrid_settings")
 
+/**
+ * Persists server connection settings, favorites, playback preferences, and local DVR resume
+ * fallback in Jetpack DataStore, encrypting server passwords with Google Tink (Keystore AEAD).
+ */
 class SettingsRepository(
     private val context: Context,
     private val formFactor: FormFactor,
@@ -37,7 +41,7 @@ class SettingsRepository(
         val password = if (!encryptedPass.isNullOrEmpty()) decryptPassword(encryptedPass) else ""
         ServerProfile(
             id = "default",
-            name = prefs[KEY_NAME] ?: "Homelab Tvheadend",
+            name = prefs[KEY_NAME] ?: "Tvheadend",
             host = prefs[KEY_HOST] ?: "",
             htspPort = prefs[KEY_HTSP_PORT] ?: 9982,
             httpPort = prefs[KEY_HTTP_PORT] ?: 9981,

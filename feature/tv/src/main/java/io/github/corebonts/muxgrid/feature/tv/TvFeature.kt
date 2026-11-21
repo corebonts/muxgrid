@@ -128,7 +128,7 @@ internal fun tvDialogSecondaryButtonColors() = ButtonDefaults.colors(
 internal fun tvButtonShape() = ButtonDefaults.shape(shape = MuxGridShapes.Sm)
 
 @Composable
-fun TvMvpRoot(
+fun TvRoot(
     repository: TvheadendRepository,
     playbackEngine: PlaybackEngine,
 ) {
@@ -144,13 +144,13 @@ fun TvMvpRoot(
             onSurfaceVariant = MuxGridColors.TextSecondary,
         ),
     ) {
-        TvMvpContent(repository = repository, playbackEngine = playbackEngine)
+        TvContent(repository = repository, playbackEngine = playbackEngine)
     }
 }
 
 @OptIn(ExperimentalTvMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
-private fun TvMvpContent(
+private fun TvContent(
     repository: TvheadendRepository,
     playbackEngine: PlaybackEngine,
 ) {

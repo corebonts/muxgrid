@@ -180,7 +180,9 @@ class MuxGridApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        installCrashRecorder()
+        if ((applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            installCrashRecorder()
+        }
         container = MuxGridAppContainer(this)
     }
 

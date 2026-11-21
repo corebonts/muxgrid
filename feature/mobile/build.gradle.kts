@@ -31,7 +31,8 @@ dependencies {
     implementation(project(":core:player"))
     implementation(project(":core:designsystem"))
     implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.activity.compose)
     implementation(libs.haze)
     implementation(libs.haze.blur)
 }

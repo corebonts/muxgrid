@@ -33,6 +33,13 @@ import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.min
 
+/**
+ * Persistent TCP client for Tvheadend's HTSP binary protocol (`9982/tcp`).
+ *
+ * Handles handshake (`hello` + SHA-1 `authenticate`), `enableAsyncMetadata` push sync,
+ * periodic `getSysTime` heartbeats with clock-offset estimation, automatic reconnect with
+ * exponential backoff, and serialized control/DVR RPCs.
+ */
 class HtspClient(
     private val scope: CoroutineScope,
     private val epgWindowSeconds: Long = DEFAULT_EPG_WINDOW_SEC,
@@ -457,7 +464,7 @@ class HtspClient(
     companion object {
         const val CLIENT_HTSP_VERSION = 44
         const val CLIENT_NAME = "MuxGrid"
-        const val CLIENT_VERSION = "0.1.0"
+        const val CLIENT_VERSION = "0.5.0"
 
         private const val CONNECT_TIMEOUT_MS = 6_000
         private const val RPC_TIMEOUT_MS = 10_000L

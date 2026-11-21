@@ -112,7 +112,7 @@ private enum class MobileRoute {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MobileMvpRoot(
+fun MobileRoot(
     repository: TvheadendRepository,
     playbackEngine: PlaybackEngine,
     isInPictureInPictureMode: Boolean = false,

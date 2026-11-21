@@ -4,7 +4,7 @@ Copyright 2026 corebonts
 This product's source code is licensed under the Apache License, Version 2.0.
 Compiled APKs that bundle prebuilt libmpv and FFmpeg native binaries
 (via mpv-android-lib) are subject to the GNU General Public License v3.0
-or later (GPL-3.0-or-later).
+or later (GPL-3.0-or-later): https://www.gnu.org/licenses/gpl-3.0.txt
 
 =========================================================================
 Third-Party Software & Attributions
@@ -15,11 +15,15 @@ Third-Party Software & Attributions
    - Note: MuxGrid contains a clean-room Kotlin implementation of the
      HTSP (Home TV Streaming Protocol) binary client and VFS RPC subset.
 
-2. mpv, FFmpeg & mpv-android-lib
-   - mpv: https://mpv.io/ (GPL-2.0-or-later / LGPL-2.1-or-later)
-   - FFmpeg: https://ffmpeg.org/ (GPL-3.0-or-later / LGPL-2.1-or-later)
+2. mpv, FFmpeg & mpv-android-lib (v0.2.1)
+   - mpv: https://mpv.io/ | https://github.com/mpv-player/mpv
+     (GPL-2.0-or-later / LGPL-2.1-or-later)
+   - FFmpeg: https://ffmpeg.org/ | https://github.com/FFmpeg/FFmpeg
+     (GPL-3.0-or-later / LGPL-2.1-or-later)
    - mpv-android-lib: https://github.com/abdallahmehiz/mpv-android-lib
-     Copyright (c) Abdallah Mehiz (MIT wrapper bundling GPLv3 libmpv/FFmpeg)
+     (build scripts: https://github.com/abdallahmehiz/mpv-android)
+     Copyright (c) Abdallah Mehiz
+     License: MIT wrapper bundling prebuilt GPL-3.0-or-later libmpv/FFmpeg binaries
 
 3. Google Material Symbols (Rounded)
    - Project: https://github.com/google/material-design-icons
@@ -37,12 +41,17 @@ Third-Party Software & Attributions
    - Copyright (c) Coil Contributors
    - License: Apache License, Version 2.0
 
-6. Google Tink
+6. OkHttp
+   - Project: https://square.github.io/okhttp/ | https://github.com/square/okhttp
+   - Copyright (c) Square, Inc.
+   - License: Apache License, Version 2.0
+
+7. Google Tink
    - Project: https://github.com/tink-crypto/tink-java
    - Copyright (c) Google LLC
    - License: Apache License, Version 2.0
 
-7. Android Jetpack (Compose, Compose for TV, Media3, DataStore, Lifecycle, Navigation) & Kotlin Coroutines
+8. Android Jetpack (Compose, Compose for TV, Media3, DataStore, Lifecycle) & Kotlin Coroutines
    - Projects: https://developer.android.com/jetpack | https://github.com/Kotlin/kotlinx.coroutines
    - Copyright (c) The Android Open Source Project / JetBrains s.r.o.
    - License: Apache License, Version 2.0

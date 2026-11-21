@@ -2,7 +2,7 @@ package io.github.corebonts.muxgrid.core.model
 
 data class ServerProfile(
     val id: String = "default",
-    val name: String = "Homelab Tvheadend",
+    val name: String = "Tvheadend",
     val host: String,
     val htspPort: Int = 9982,
     val httpPort: Int = 9981,

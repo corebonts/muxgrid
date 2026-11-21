@@ -43,8 +43,8 @@ import io.github.corebonts.muxgrid.core.model.FormFactor
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.player.MuxGridMediaSessionService
-import io.github.corebonts.muxgrid.feature.mobile.MobileMvpRoot
-import io.github.corebonts.muxgrid.feature.tv.TvMvpRoot
+import io.github.corebonts.muxgrid.feature.mobile.MobileRoot
+import io.github.corebonts.muxgrid.feature.tv.TvRoot
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -107,22 +107,27 @@ class MainActivity : ComponentActivity() {
 
             MuxGridTheme(isTv = isTv) {
                 val context = LocalContext.current
+                val isDebuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
                 var lastCrashText by remember {
                     mutableStateOf(
-                        runCatching {
-                            val f = File(context.filesDir, "last_crash.txt")
-                            if (f.exists()) f.readText().takeIf { it.isNotBlank() } else null
-                        }.getOrNull(),
+                        if (!isDebuggable) {
+                            null
+                        } else {
+                            runCatching {
+                                val f = File(context.filesDir, "last_crash.txt")
+                                if (f.exists()) f.readText().takeIf { it.isNotBlank() } else null
+                            }.getOrNull()
+                        },
                     )
                 }
 
                 if (isTv) {
-                    TvMvpRoot(
+                    TvRoot(
                         repository = container.repository,
                         playbackEngine = container.playbackEngine,
                     )
                 } else {
-                    MobileMvpRoot(
+                    MobileRoot(
                         repository = container.repository,
                         playbackEngine = container.playbackEngine,
                         isInPictureInPictureMode = isInPipModeState,
