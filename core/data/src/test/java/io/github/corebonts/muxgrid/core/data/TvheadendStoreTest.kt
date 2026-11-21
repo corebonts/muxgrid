@@ -8,7 +8,9 @@ import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.EpgEvent
+import io.github.corebonts.muxgrid.core.model.LocalDvrProgress
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
@@ -278,5 +280,91 @@ class TvheadendStoreTest {
         store.applyEvent(HtspPushEvent.InitialSyncCompleted)
 
         assertEquals(listOf(2L, 30L, 4L), store.epgByChannel.value[1L].orEmpty().map { it.id })
+    }
+
+    @Test
+    fun `refreshNowNext prunes expired past events older than retention window`() {
+        var nowSec = 1_000_000L
+        val store = TvheadendStore(epochSecondsProvider = { nowSec }, pastRetentionSeconds = 100L)
+        store.applyEvent(HtspPushEvent.SyncStarting)
+        store.applyEvent(HtspPushEvent.ChannelAdd(Channel(id = 1L, number = 1, name = "M1 HD")))
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 1L, channelId = 1L, startEpochSec = nowSec - 90L, stopEpochSec = nowSec - 50L, title = "Old"),
+            ),
+        )
+        store.applyEvent(
+            HtspPushEvent.EventAdd(
+                EpgEvent(id = 2L, channelId = 1L, startEpochSec = nowSec + 10L, stopEpochSec = nowSec + 200L, title = "Later"),
+            ),
+        )
+        store.applyEvent(HtspPushEvent.InitialSyncCompleted)
+        assertEquals(listOf(1L, 2L), store.epgByChannel.value[1L].orEmpty().map { it.id })
+
+        // Advance past Old's stopEpochSec + pastRetentionSeconds (nowSec - 50 < nowSec_new - 100)
+        nowSec += 60L
+        store.refreshNowNext()
+        assertEquals(listOf(2L), store.epgByChannel.value[1L].orEmpty().map { it.id })
+    }
+
+    @Test
+    fun `no-op updates and deletes for missing IDs keep state untouched`() {
+        val store = TvheadendStore(epochSecondsProvider = { 1_000L })
+        store.applyEvent(HtspPushEvent.SyncStarting)
+        store.applyEvent(HtspPushEvent.ChannelAdd(Channel(id = 1L, number = 1, name = "M1 HD")))
+        store.applyEvent(HtspPushEvent.InitialSyncCompleted)
+
+        val channelsBefore = store.channels.value
+        val epgBefore = store.epgByChannel.value
+        val dvrBefore = store.dvrEntries.value
+
+        store.applyEvents(
+            listOf(
+                HtspPushEvent.ChannelUpdate(ChannelUpdateDelta(id = 999L, name = "Missing")),
+                HtspPushEvent.ChannelDelete(999L),
+                HtspPushEvent.EventUpdate(EventUpdateDelta(id = 999L, title = "Missing")),
+                HtspPushEvent.DvrEntryUpdate(DvrEntryUpdateDelta(id = 999L, title = "Missing")),
+                HtspPushEvent.DvrEntryDelete(999L),
+            ),
+        )
+
+        assertEquals(channelsBefore, store.channels.value)
+        assertEquals(epgBefore, store.epgByChannel.value)
+        assertEquals(dvrBefore, store.dvrEntries.value)
+    }
+
+    @Test
+    fun `mergeDvrEntriesWithLocalProgress applies local unwatched and watched overrides over server state`() {
+        val serverWatched = DvrEntry(
+            id = 1L,
+            channelId = 10L,
+            startEpochSec = 100L,
+            stopEpochSec = 200L,
+            title = "Watched on Server",
+            state = DvrState.COMPLETED,
+            playPositionSec = 0L,
+            playCount = 1,
+        )
+        val serverResumable = DvrEntry(
+            id = 2L,
+            channelId = 10L,
+            startEpochSec = 300L,
+            stopEpochSec = 400L,
+            title = "Resumable on Server",
+            state = DvrState.COMPLETED,
+            playPositionSec = 45L,
+            playCount = 0,
+        )
+        val merged = mergeDvrEntriesWithLocalProgress(
+            serverMap = mapOf(1L to serverWatched, 2L to serverResumable),
+            localFallback = mapOf(
+                1L to LocalDvrProgress(playPositionSec = 0L, playCount = 0),
+                2L to LocalDvrProgress(playPositionSec = 0L, playCount = 1),
+            ),
+        )
+        assertFalse(merged[1L]!!.isWatched)
+        assertEquals(0, merged[1L]!!.playCount)
+        assertEquals(1, merged[2L]!!.playCount)
+        assertEquals(0L, merged[2L]!!.playPositionSec)
     }
 }

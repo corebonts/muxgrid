@@ -23,6 +23,7 @@ import io.github.corebonts.muxgrid.core.model.SubtitlePreference
 import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import java.nio.charset.StandardCharsets
 import java.security.GeneralSecurityException
@@ -46,19 +47,39 @@ class SettingsRepository(
         clearCorruptedKeyset = ::clearCorruptedKeyset,
     )
 
-    val serverProfile: Flow<ServerProfile> = context.muxGridDataStore.data.map { prefs ->
-        val encryptedPass = prefs[KEY_PASSWORD_ENC]
-        val password = if (!encryptedPass.isNullOrEmpty()) decryptPassword(encryptedPass) else ""
-        ServerProfile(
-            id = "default",
-            name = prefs[KEY_NAME] ?: "Tvheadend",
-            host = prefs[KEY_HOST] ?: "",
-            htspPort = prefs[KEY_HTSP_PORT] ?: 9982,
-            httpPort = prefs[KEY_HTTP_PORT] ?: 9981,
-            username = prefs[KEY_USERNAME] ?: "",
-            password = password,
-        )
-    }
+    private data class RawServerProfile(
+        val name: String,
+        val host: String,
+        val htspPort: Int,
+        val httpPort: Int,
+        val username: String,
+        val encryptedPassword: String,
+    )
+
+    val serverProfile: Flow<ServerProfile> = context.muxGridDataStore.data
+        .map { prefs ->
+            RawServerProfile(
+                name = prefs[KEY_NAME] ?: "Tvheadend",
+                host = prefs[KEY_HOST] ?: "",
+                htspPort = prefs[KEY_HTSP_PORT] ?: ServerProfile.DEFAULT_HTSP_PORT,
+                httpPort = prefs[KEY_HTTP_PORT] ?: ServerProfile.DEFAULT_HTTP_PORT,
+                username = prefs[KEY_USERNAME] ?: "",
+                encryptedPassword = prefs[KEY_PASSWORD_ENC] ?: "",
+            )
+        }
+        .distinctUntilChanged()
+        .map { raw ->
+            val password = if (raw.encryptedPassword.isNotEmpty()) decryptPassword(raw.encryptedPassword) else ""
+            ServerProfile(
+                id = "default",
+                name = raw.name,
+                host = raw.host,
+                htspPort = raw.htspPort,
+                httpPort = raw.httpPort,
+                username = raw.username,
+                password = password,
+            )
+        }
 
     val favoriteChannelIds: Flow<Set<Long>> = context.muxGridDataStore.data.map { prefs ->
         prefs[KEY_FAVORITES]?.mapNotNull { it.toLongOrNull() }?.toSet() ?: emptySet()

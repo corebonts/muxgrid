@@ -1,18 +1,21 @@
 package io.github.corebonts.muxgrid.core.htsp
 
 import io.github.corebonts.muxgrid.core.model.ConnectionState
+import io.github.corebonts.muxgrid.core.model.ConnectionTestResult
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.BufferedInputStream
@@ -20,6 +23,7 @@ import java.io.BufferedOutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 class HtspClientTest {
 
@@ -472,6 +476,403 @@ class HtspClientTest {
             } finally {
                 client.disconnect()
                 scope.cancel()
+                serverTask.await()
+            }
+        }
+    }
+
+    @Test
+    fun `initial sync timeout triggers reconnect instead of killing connectionJob`() = runBlocking {
+        val attempts = AtomicInteger(0)
+        ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
+            val serverTask = async(Dispatchers.IO) {
+                // Attempt 1: answer hello & enableAsyncMetadata, omit initialSyncCompleted so sync times out.
+                server.accept().use { sock ->
+                    attempts.incrementAndGet()
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val hello = HtsMsgCodec.readFrame(input)
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
+                    output.flush()
+                    val sync = HtsMsgCodec.readFrame(input)
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
+                    output.flush()
+                    // Keep reading until client closes after timeout
+                    runCatching { while (true) HtsMsgCodec.readFrame(input) }
+                }
+
+                // Attempt 2: complete initial sync normally.
+                server.accept().use { sock ->
+                    attempts.incrementAndGet()
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val hello = HtsMsgCodec.readFrame(input)
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
+                    output.flush()
+                    val sync = HtsMsgCodec.readFrame(input)
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
+                    output.flush()
+                    runCatching {
+                        while (true) {
+                            val req = HtsMsgCodec.readFrame(input)
+                            if (req.getString("method") == "getSysTime") {
+                                output.write(
+                                    HtsMsgCodec.encodeFrame(
+                                        htsMap {
+                                            put("seq", req.getLong("seq")!!)
+                                            put("time", System.currentTimeMillis() / 1000L)
+                                        },
+                                    ),
+                                )
+                                output.flush()
+                            }
+                        }
+                    }
+                }
+            }
+
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val client = HtspClient(
+                scope = scope,
+                rpcTimeoutMs = 200L,
+                initialSyncTimeoutMs = 150L,
+            )
+            try {
+                client.connect(ServerProfile(host = "127.0.0.1", htspPort = server.localPort))
+                withTimeout(5_000) {
+                    client.connectionState.first { it is ConnectionState.Connected }
+                }
+                assertEquals(2, attempts.get())
+            } finally {
+                client.disconnect()
+                scope.cancel()
+                serverTask.await()
+            }
+        }
+    }
+
+    @Test
+    fun `heartbeat timeout tears down half-open socket and reconnects`() = runBlocking {
+        val syncCount = AtomicInteger(0)
+        ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
+            val serverTask = async(Dispatchers.IO) {
+                // Connection 1: complete sync and initial getSysTime, then drop heartbeat getSysTime.
+                server.accept().use { sock ->
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val hello = HtsMsgCodec.readFrame(input)
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
+                    output.flush()
+                    val sync = HtsMsgCodec.readFrame(input)
+                    syncCount.incrementAndGet()
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
+                    output.flush()
+
+                    // Answer first getSysTime (clock offset), ignore subsequent heartbeat getSysTime
+                    val firstTime = HtsMsgCodec.readFrame(input)
+                    output.write(
+                        HtsMsgCodec.encodeFrame(
+                            htsMap {
+                                put("seq", firstTime.getLong("seq")!!)
+                                put("time", System.currentTimeMillis() / 1000L)
+                            },
+                        ),
+                    )
+                    output.flush()
+                    runCatching { while (true) HtsMsgCodec.readFrame(input) }
+                }
+
+                // Connection 2: complete sync cleanly.
+                server.accept().use { sock ->
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val hello = HtsMsgCodec.readFrame(input)
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
+                    output.flush()
+                    val sync = HtsMsgCodec.readFrame(input)
+                    syncCount.incrementAndGet()
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
+                    output.flush()
+                    runCatching {
+                        while (true) {
+                            val req = HtsMsgCodec.readFrame(input)
+                            if (req.getString("method") == "getSysTime") {
+                                output.write(
+                                    HtsMsgCodec.encodeFrame(
+                                        htsMap {
+                                            put("seq", req.getLong("seq")!!)
+                                            put("time", System.currentTimeMillis() / 1000L)
+                                        },
+                                    ),
+                                )
+                                output.flush()
+                            }
+                        }
+                    }
+                }
+            }
+
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val client = HtspClient(
+                scope = scope,
+                heartbeatIntervalMs = 60L,
+                rpcTimeoutMs = 150L,
+            )
+            try {
+                client.connect(ServerProfile(host = "127.0.0.1", htspPort = server.localPort))
+                withTimeout(5_000) {
+                    client.connectionState.first { it is ConnectionState.Connected }
+                }
+                // Wait for connection #2 to sync after connection #1's heartbeat times out
+                withTimeout(5_000) {
+                    while (syncCount.get() < 2) {
+                        delay(20L)
+                    }
+                    client.connectionState.first { it is ConnectionState.Connected }
+                }
+                assertEquals(2, syncCount.get())
+            } finally {
+                client.disconnect()
+                scope.cancel()
+                serverTask.await()
+            }
+        }
+    }
+
+    @Test
+    fun `disconnect keeps Disconnected state without socket error overwrite`() = runBlocking {
+        ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
+            val serverTask = async(Dispatchers.IO) {
+                server.accept().use { sock ->
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val hello = HtsMsgCodec.readFrame(input)
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
+                    output.flush()
+                    val sync = HtsMsgCodec.readFrame(input)
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
+                    output.flush()
+                    runCatching {
+                        while (true) {
+                            val req = HtsMsgCodec.readFrame(input)
+                            if (req.getString("method") == "getSysTime") {
+                                output.write(
+                                    HtsMsgCodec.encodeFrame(
+                                        htsMap {
+                                            put("seq", req.getLong("seq")!!)
+                                            put("time", System.currentTimeMillis() / 1000L)
+                                        },
+                                    ),
+                                )
+                                output.flush()
+                            }
+                        }
+                    }
+                }
+            }
+
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val client = HtspClient(scope = scope)
+            try {
+                client.connect(ServerProfile(host = "127.0.0.1", htspPort = server.localPort))
+                withTimeout(5_000) {
+                    client.connectionState.first { it is ConnectionState.Connected }
+                }
+                client.disconnect()
+                delay(200L)
+                assertEquals(ConnectionState.Disconnected, client.connectionState.value)
+            } finally {
+                client.disconnect()
+                scope.cancel()
+                serverTask.await()
+            }
+        }
+    }
+
+    @Test
+    fun `testConnection reuses HtspSession handshake and reports access flags and auth errors`() = runBlocking {
+        val challenge = ByteArray(32) { 7 }
+        ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
+            val serverTask = async(Dispatchers.IO) {
+                // 1. Successful auth with streaming + dvr flags
+                server.accept().use { sock ->
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val hello = HtsMsgCodec.readFrame(input)
+                    output.write(
+                        HtsMsgCodec.encodeFrame(
+                            htsMap {
+                                put("seq", hello.getLong("seq")!!)
+                                put("htspversion", 44)
+                                put("servername", "MockTvh")
+                                put("serverversion", "4.3")
+                                put("challenge", challenge)
+                            },
+                        ),
+                    )
+                    output.flush()
+                    val auth = HtsMsgCodec.readFrame(input)
+                    assertEquals("alice", auth.getString("username"))
+                    output.write(
+                        HtsMsgCodec.encodeFrame(
+                            htsMap {
+                                put("seq", auth.getLong("seq")!!)
+                                put("streaming", 1L)
+                                put("dvr", 1L)
+                            },
+                        ),
+                    )
+                    output.flush()
+                }
+                // 2. Auth failure
+                server.accept().use { sock ->
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val hello = HtsMsgCodec.readFrame(input)
+                    output.write(
+                        HtsMsgCodec.encodeFrame(
+                            htsMap {
+                                put("seq", hello.getLong("seq")!!)
+                                put("htspversion", 44)
+                                put("challenge", challenge)
+                            },
+                        ),
+                    )
+                    output.flush()
+                    val auth = HtsMsgCodec.readFrame(input)
+                    output.write(
+                        HtsMsgCodec.encodeFrame(
+                            htsMap {
+                                put("seq", auth.getLong("seq")!!)
+                                put("noaccess", 1L)
+                            },
+                        ),
+                    )
+                    output.flush()
+                }
+            }
+
+            val okResult = HtspClient.testConnection(
+                ServerProfile(host = "127.0.0.1", htspPort = server.localPort, username = "alice", password = "secret"),
+            )
+            assertTrue(okResult is ConnectionTestResult.Success)
+            okResult as ConnectionTestResult.Success
+            assertEquals("MockTvh", okResult.serverName)
+            assertEquals("4.3", okResult.serverVersion)
+            assertTrue(okResult.hasDvrAccess)
+            assertTrue(okResult.hasStreamingAccess)
+
+            val failResult = HtspClient.testConnection(
+                ServerProfile(host = "127.0.0.1", htspPort = server.localPort, username = "alice", password = "wrong"),
+            )
+            assertTrue(failResult is ConnectionTestResult.Failure)
+            failResult as ConnectionTestResult.Failure
+            assertTrue(failResult.isAuthError)
+
+            serverTask.await()
+        }
+    }
+
+    @Test
+    fun `HtspVfsClient keeps session open across overlapping open and close handles`() = runBlocking {
+        ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
+            val connectionCount = AtomicInteger(0)
+            val closedIds = mutableListOf<Long>()
+            val serverTask = async(Dispatchers.IO) {
+                server.accept().use { sock ->
+                    connectionCount.incrementAndGet()
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val hello = HtsMsgCodec.readFrame(input)
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
+                    output.flush()
+
+                    var nextHandle = 100L
+                    while (true) {
+                        val req = runCatching { HtsMsgCodec.readFrame(input) }.getOrNull() ?: break
+                        val seq = req.getLong("seq")!!
+                        val reply = when (req.getString("method")) {
+                            "fileOpen" -> htsMap {
+                                put("seq", seq)
+                                put("id", nextHandle++)
+                                put("size", 10L)
+                                put("mtime", 1L)
+                            }
+                            "fileStat" -> htsMap {
+                                put("seq", seq)
+                                put("size", 10L)
+                                put("mtime", 1L)
+                            }
+                            "fileClose" -> {
+                                closedIds.add(req.getLong("id")!!)
+                                htsMap { put("seq", seq) }
+                            }
+                            else -> htsMap { put("seq", seq) }
+                        }
+                        output.write(HtsMsgCodec.encodeFrame(reply))
+                        output.flush()
+                    }
+                }
+            }
+
+            val vfs = HtspVfsClient(
+                profileProvider = { ServerProfile(host = "127.0.0.1", htspPort = server.localPort) },
+                idleDisconnectDelayMs = 0L,
+            )
+            try {
+                val h1 = vfs.openFile("dvrfile/1")
+                val h2 = vfs.openFile("dvrfile/2")
+                h1.closeSuspend()
+                // Second handle must still operate on the same open session.
+                assertEquals(10L, h2.statSize())
+                assertEquals(1, connectionCount.get())
+                h2.closeSuspend()
+                assertEquals(listOf(100L, 101L), closedIds)
+                assertFalse(closedIds.isEmpty())
+            } finally {
+                vfs.close()
+                serverTask.await()
+            }
+        }
+    }
+
+    @Test
+    fun `HtspSession rpc overwrites any caller method or seq keys in params`() = runBlocking {
+        ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
+            val serverTask = async(Dispatchers.IO) {
+                server.accept().use { sock ->
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val req = HtsMsgCodec.readFrame(input)
+                    assertEquals("hello", req.getString("method"))
+                    assertEquals(1L, req.getLong("seq"))
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", 1L); put("ok", 1L) }))
+                    output.flush()
+                }
+            }
+
+            val sock = java.net.Socket("127.0.0.1", server.localPort)
+            val session = HtspSession(sock, AtomicLong(1L))
+            val wJob = launch(Dispatchers.IO) { session.writeLoop() }
+            val rJob = launch(Dispatchers.IO) { runCatching { session.readLoop() } }
+            try {
+                val reply = session.rpc(
+                    "hello",
+                    htsMap {
+                        put("method", "spoofed")
+                        put("seq", 999L)
+                    },
+                    2_000L,
+                )
+                assertEquals(1L, reply.getLong("ok"))
+            } finally {
+                wJob.cancel()
+                rJob.cancel()
+                session.close()
                 serverTask.await()
             }
         }

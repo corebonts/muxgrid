@@ -30,7 +30,7 @@ internal class TvheadendDigestAuthenticator(
         if (containsControlChars(profile.username)) return null
 
         val url = response.request.url
-        val expectedHost = profile.host.trim().removePrefix("[").removeSuffix("]")
+        val expectedHost = profile.normalizedHost
         if (!url.host.equals(expectedHost, ignoreCase = true) || url.port != profile.httpPort) {
             return null
         }

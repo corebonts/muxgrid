@@ -108,6 +108,14 @@ class HtsMap(
             map[key] = HtsValue.Uuid(bytes)
         }
 
+        fun put(key: String, value: HtsValue) {
+            map[key] = value
+        }
+
+        fun putAll(other: HtsMap) {
+            map.putAll(other)
+        }
+
         fun build(): HtsMap = HtsMap(LinkedHashMap(map))
     }
 }

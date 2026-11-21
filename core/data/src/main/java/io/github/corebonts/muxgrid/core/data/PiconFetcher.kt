@@ -17,14 +17,23 @@ import coil3.request.bitmapConfig
 import io.github.corebonts.muxgrid.core.htsp.HtspClient
 import io.github.corebonts.muxgrid.core.htsp.HtspNoAccessException
 import io.github.corebonts.muxgrid.core.model.ServerProfile
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import okio.Buffer
 import okio.FileSystem
 import okio.Path.Companion.toOkioPath
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 data class PiconModel(
     val channelId: Long,
@@ -79,21 +88,17 @@ class PiconFetcher(
             val url = when (normalized) {
                 is NormalizedIcon.ExternalUrl -> normalized.url
                 is NormalizedIcon.ImageCache -> {
-                    if (!profile.isConfigured) return null
-                    "http://${profile.host}:${profile.httpPort}/${normalized.htspPath}"
+                    val baseUrl = profile.httpBaseUrl ?: return null
+                    "$baseUrl/${normalized.htspPath}"
                 }
             }
             val request = Request.Builder().url(url).build()
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw IOException("Failed to fetch picon HTTP ${response.code} for $url")
-                }
-                fetchedBytes = response.body?.bytes() ?: return null
-                mimeType = response.header("Content-Type")
-            }
+            val result = httpClient.fetchBytes(request) ?: return null
+            fetchedBytes = result.bytes
+            mimeType = result.mimeType
         }
 
-        val bytes = fetchedBytes ?: return null
+        val bytes = fetchedBytes
         if (cache != null && bytes.isNotEmpty()) {
             val snapshot = writeToDiskCache(cache, diskKey, bytes)
             if (snapshot != null) {
@@ -149,17 +154,65 @@ class PiconFetcher(
                 offset += chunk.size
                 if (info.size in 1..offset) break
             }
-            out.toByteArray()
+            out.toByteArray().takeIf { it.isNotEmpty() }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: HtspNoAccessException) {
             null
         } catch (_: Exception) {
             null
         } finally {
             if (handleId != null) {
-                runCatching { htspClient.fileClose(handleId) }
+                withContext(NonCancellable) {
+                    runCatching { htspClient.fileClose(handleId) }
+                }
             }
         }
     }
+
+    private data class HttpBytesResult(
+        val bytes: ByteArray,
+        val mimeType: String?,
+    )
+
+    private suspend fun OkHttpClient.fetchBytes(request: Request): HttpBytesResult? =
+        suspendCancellableCoroutine { cont ->
+            val call = newCall(request)
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(
+                object : Callback {
+                    override fun onFailure(call: Call, e: IOException) {
+                        if (!cont.isCancelled) {
+                            cont.resumeWithException(e)
+                        }
+                    }
+
+                    override fun onResponse(call: Call, response: Response) {
+                        response.use { res ->
+                            if (!res.isSuccessful) {
+                                if (!cont.isCancelled) {
+                                    cont.resumeWithException(
+                                        IOException("Failed to fetch picon HTTP ${res.code} for ${request.url}"),
+                                    )
+                                }
+                                return
+                            }
+                            try {
+                                val bytes = res.body?.bytes()?.takeIf { it.isNotEmpty() }
+                                val mimeType = res.header("Content-Type")
+                                if (!cont.isCancelled) {
+                                    cont.resume(bytes?.let { HttpBytesResult(it, mimeType) })
+                                }
+                            } catch (e: IOException) {
+                                if (!cont.isCancelled) {
+                                    cont.resumeWithException(e)
+                                }
+                            }
+                        }
+                    }
+                },
+            )
+        }
 
     class KeyerImpl(
         private val profileProvider: () -> ServerProfile,
@@ -201,7 +254,10 @@ class PiconFetcher(
 
         internal fun cacheKeyFor(normalized: NormalizedIcon, profile: ServerProfile): String = when (normalized) {
             is NormalizedIcon.ExternalUrl -> "picon:url:${normalized.url}"
-            is NormalizedIcon.ImageCache -> "picon:tvh:${profile.host}:${profile.htspPort}:${normalized.htspPath}"
+            is NormalizedIcon.ImageCache -> {
+                val key = profile.serverKey.ifEmpty { "${profile.normalizedHost}:${profile.htspPort}" }
+                "picon:tvh:$key:${normalized.htspPath}"
+            }
         }
 
         fun normalizeIconPath(rawIcon: String?): NormalizedIcon? {
