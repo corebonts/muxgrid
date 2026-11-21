@@ -85,6 +85,7 @@ import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.ConnectionStatusDot
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MobileTopBarHeight
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridAlphas
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
@@ -97,13 +98,17 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
 import io.github.corebonts.muxgrid.core.designsystem.collectDebugEnvironmentSnapshot
+import io.github.corebonts.muxgrid.core.designsystem.connectionStatusColor
 import io.github.corebonts.muxgrid.core.designsystem.connectionStatusDotColor
-import io.github.corebonts.muxgrid.core.designsystem.copyDebugInfoToClipboard
+import io.github.corebonts.muxgrid.core.designsystem.connectionStatusText
+import io.github.corebonts.muxgrid.core.designsystem.copyTextToClipboard
 import io.github.corebonts.muxgrid.core.designsystem.filterChannels
 import io.github.corebonts.muxgrid.core.designsystem.formatDebugInfoReport
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
+import io.github.corebonts.muxgrid.core.designsystem.icon
 import io.github.corebonts.muxgrid.core.designsystem.label
 import io.github.corebonts.muxgrid.core.designsystem.rememberNowEpochSec
+import io.github.corebonts.muxgrid.core.designsystem.serverHeadline
 import io.github.corebonts.muxgrid.core.model.AppBuildInfo
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ConnectionState
@@ -582,13 +587,9 @@ private fun MobileMainScaffold(
                                 .navigationBarsPadding()
                                 .padding(horizontal = 8.dp, vertical = 6.dp),
                         ) {
-                            listOf(
-                                Triple(MainTab.LIVE, "Live", MuxGridIcons.Live to MuxGridIcons.LiveFilled),
-                                Triple(MainTab.GUIDE, "Guide", MuxGridIcons.Guide to MuxGridIcons.GuideFilled),
-                                Triple(MainTab.RECORDINGS, "Recordings", MuxGridIcons.Recordings to MuxGridIcons.RecordingsFilled),
-                                Triple(MainTab.SETTINGS, "Settings", MuxGridIcons.Settings to MuxGridIcons.SettingsFilled),
-                            ).forEach { (tab, label, icons) ->
+                            MainTab.entries.forEach { tab ->
                                 val selected = tab == activeTab
+                                val label = tab.label()
                                 val contentColor = if (selected) MuxGridColors.Accent else MuxGridColors.TextMuted
                                 val dotColor = if (tab == MainTab.SETTINGS) settingsStatusDotColor else null
                                 Column(
@@ -602,7 +603,7 @@ private fun MobileMainScaffold(
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
-                                            imageVector = if (selected) icons.second else icons.first,
+                                            imageVector = tab.icon(selected),
                                             contentDescription = label,
                                             tint = contentColor,
                                             modifier = Modifier.size(22.dp),
@@ -654,15 +655,12 @@ private fun MobileNavigationRail(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(
-                    Triple(MainTab.LIVE, "Live", MuxGridIcons.Live to MuxGridIcons.LiveFilled),
-                    Triple(MainTab.GUIDE, "Guide", MuxGridIcons.Guide to MuxGridIcons.GuideFilled),
-                    Triple(MainTab.RECORDINGS, "Recordings", MuxGridIcons.Recordings to MuxGridIcons.RecordingsFilled),
-                ).forEach { (tab, label, icons) ->
+                listOf(MainTab.LIVE, MainTab.GUIDE, MainTab.RECORDINGS).forEach { tab ->
+                    val selected = tab == activeTab
                     MobileRailItem(
-                        icon = if (tab == activeTab) icons.second else icons.first,
-                        label = label,
-                        selected = tab == activeTab,
+                        icon = tab.icon(selected),
+                        label = tab.label(),
+                        selected = selected,
                         onClick = { onSelectTab(tab) },
                     )
                 }
@@ -670,8 +668,8 @@ private fun MobileNavigationRail(
 
             val settingsSelected = activeTab == MainTab.SETTINGS
             MobileRailItem(
-                icon = if (settingsSelected) MuxGridIcons.SettingsFilled else MuxGridIcons.Settings,
-                label = "Settings",
+                icon = MainTab.SETTINGS.icon(settingsSelected),
+                label = MainTab.SETTINGS.label(),
                 selected = settingsSelected,
                 statusDotColor = settingsStatusDotColor,
                 onClick = { onSelectTab(MainTab.SETTINGS) },
@@ -964,16 +962,10 @@ private fun MobileLiveChannelsTab(
         ) {
             filters.forEach { filter ->
                 val selected = filter == activeFilter
-                val filterIcon = when (filter) {
-                    LiveFilter.Tv -> MuxGridIcons.Tv
-                    LiveFilter.Radio -> MuxGridIcons.Radio
-                    LiveFilter.Favorites -> MuxGridIcons.StarFilled
-                    else -> null
-                }
                 BroadcastUnderlineTab(
                     label = filter.label(),
                     selected = selected,
-                    leadingIcon = filterIcon,
+                    leadingIcon = filter.icon(),
                     onClick = { onSelectFilter(filter) },
                     modifier = Modifier.fillMaxHeight(),
                 )
@@ -1338,7 +1330,7 @@ private fun MobileSettingsTab(
                         if (isServerError) {
                             Modifier.border(
                                 width = MuxGridBorders.Hairline,
-                                color = MuxGridColors.CoralLive.copy(alpha = 0.45f),
+                                color = MuxGridColors.CoralLive.copy(alpha = MuxGridAlphas.BorderSubtle),
                                 shape = MuxGridShapes.Card,
                             )
                         } else {
@@ -1355,30 +1347,16 @@ private fun MobileSettingsTab(
                         .padding(end = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    val serverHeadline = if (connectionState is ConnectionState.Connected) {
-                        "${connectionState.serverName} · ${profile.host}:${profile.htspPort}"
-                    } else {
-                        "${profile.host}:${profile.htspPort}"
-                    }
                     Text(
-                        text = serverHeadline,
+                        text = serverHeadline(profile, connectionState),
                         style = MuxGridType.TabularNumber,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    val (statusText, statusColor) = when (connectionState) {
-                        is ConnectionState.Connected -> {
-                            "Connected · ${connectionState.serverVersion} · HTSP v${connectionState.htspVersion}" to MuxGridColors.EmeraldOk
-                        }
-                        ConnectionState.Connecting -> "Connecting…" to MuxGridColors.AmberWarn
-                        is ConnectionState.Syncing -> "Syncing…" to MuxGridColors.AmberWarn
-                        is ConnectionState.Error -> connectionState.message to MuxGridColors.CoralLive
-                        ConnectionState.Disconnected -> "Disconnected · HTTP ${profile.httpPort}" to MuxGridColors.TextMuted
-                    }
                     Text(
-                        text = statusText,
+                        text = connectionStatusText(profile, connectionState),
                         style = MuxGridType.TabularSmall,
-                        color = statusColor,
+                        color = connectionStatusColor(connectionState),
                         maxLines = if (isServerError) 3 else 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -1633,92 +1611,43 @@ private fun MobileSettingsTab(
                     label = "Build SHA",
                     value = appInfo.shortSha,
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MuxGridColors.CardSurface)
-                        .clickable {
-                            runCatching {
-                                uriHandler.openUri(appInfo.githubUrl)
-                            }.onFailure {
-                                Toast.makeText(context, appInfo.githubUrl, Toast.LENGTH_LONG).show()
+                MobileSettingsActionRow(
+                    title = "GitHub",
+                    subtitle = appInfo.githubDisplayUrl,
+                    subtitleColor = MuxGridColors.AccentSoft,
+                    contentDescription = "Open GitHub",
+                    onClick = {
+                        runCatching {
+                            uriHandler.openUri(appInfo.githubUrl)
+                        }.onFailure {
+                            Toast.makeText(context, appInfo.githubUrl, Toast.LENGTH_LONG).show()
+                        }
+                    },
+                )
+                MobileSettingsActionRow(
+                    title = "Debug Info",
+                    subtitle = "Device, OS, and playback environment",
+                    contentDescription = "Show Debug Info",
+                    onClick = {
+                        scope.launch {
+                            debugReport = withContext(Dispatchers.IO) {
+                                formatDebugInfoReport(
+                                    collectDebugEnvironmentSnapshot(
+                                        context = context,
+                                        appInfo = appInfo,
+                                        isTv = false,
+                                        connectionState = connectionState,
+                                        hwDecPreset = hwDecPreset,
+                                        timeshiftWindow = timeshiftWindow,
+                                        themeMode = themeMode,
+                                        backgroundAudioEnabled = backgroundPlayEnabled,
+                                        pipEnabled = pipEnabled,
+                                    ),
+                                )
                             }
                         }
-                        .padding(horizontal = 12.dp, vertical = 11.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Text(
-                            text = "GitHub",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MuxGridColors.TextPrimary,
-                        )
-                        Text(
-                            text = appInfo.githubDisplayUrl,
-                            style = MuxGridType.TabularSmall,
-                            color = MuxGridColors.AccentSoft,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Icon(
-                        imageVector = MuxGridIcons.ChevronRight,
-                        contentDescription = "Open GitHub",
-                        tint = MuxGridColors.TextMuted,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MuxGridColors.CardSurface)
-                        .clickable {
-                            scope.launch {
-                                debugReport = withContext(Dispatchers.IO) {
-                                    formatDebugInfoReport(
-                                        collectDebugEnvironmentSnapshot(
-                                            context = context,
-                                            appInfo = appInfo,
-                                            isTv = false,
-                                            connectionState = connectionState,
-                                            hwDecPreset = hwDecPreset,
-                                            timeshiftWindow = timeshiftWindow,
-                                            themeMode = themeMode,
-                                            backgroundAudioEnabled = backgroundPlayEnabled,
-                                            pipEnabled = pipEnabled,
-                                        ),
-                                    )
-                                }
-                            }
-                        }
-                        .padding(horizontal = 12.dp, vertical = 11.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Text(
-                            text = "Debug Info",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MuxGridColors.TextPrimary,
-                        )
-                        Text(
-                            text = "Device, OS, and playback environment",
-                            style = MuxGridType.TabularSmall,
-                            color = MuxGridColors.TextSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Icon(
-                        imageVector = MuxGridIcons.ChevronRight,
-                        contentDescription = "Show Debug Info",
-                        tint = MuxGridColors.TextMuted,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
+                    },
+                )
             }
         }
     }
@@ -1768,7 +1697,14 @@ private fun MobileSettingsTab(
                     Text("Close", color = MuxGridColors.TextPrimary)
                 }
                 Button(
-                    onClick = { copyDebugInfoToClipboard(context, report) },
+                    onClick = {
+                        copyTextToClipboard(
+                            context = context,
+                            label = "MuxGrid Debug Info",
+                            text = report,
+                            toastMessage = "Debug info copied",
+                        )
+                    },
                     shape = MuxGridShapes.Sm,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MuxGridColors.Accent,
@@ -1780,6 +1716,47 @@ private fun MobileSettingsTab(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MobileSettingsActionRow(
+    title: String,
+    subtitle: String,
+    contentDescription: String,
+    onClick: () -> Unit,
+    subtitleColor: Color = MuxGridColors.TextSecondary,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MuxGridColors.CardSurface)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MuxGridColors.TextPrimary,
+            )
+            Text(
+                text = subtitle,
+                style = MuxGridType.TabularSmall,
+                color = subtitleColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            imageVector = MuxGridIcons.ChevronRight,
+            contentDescription = contentDescription,
+            tint = MuxGridColors.TextMuted,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 

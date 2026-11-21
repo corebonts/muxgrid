@@ -41,6 +41,8 @@ import androidx.compose.ui.unit.sp
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
+import io.github.corebonts.muxgrid.core.designsystem.copyTextToClipboard
+import io.github.corebonts.muxgrid.core.designsystem.isDebuggableBuild
 import io.github.corebonts.muxgrid.core.model.AppBuildInfo
 import io.github.corebonts.muxgrid.core.model.FormFactor
 import io.github.corebonts.muxgrid.core.model.PlaybackState
@@ -148,14 +150,14 @@ class MainActivity : ComponentActivity() {
 
             MuxGridTheme(isTv = isTv, darkTheme = isDarkTheme) {
                 val context = LocalContext.current
-                val isDebuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                val isDebuggable = context.isDebuggableBuild()
                 val ioScope = rememberCoroutineScope()
                 var lastCrashText by remember { mutableStateOf<String?>(null) }
                 LaunchedEffect(isDebuggable) {
                     if (isDebuggable) {
                         lastCrashText = withContext(Dispatchers.IO) {
                             runCatching {
-                                val f = File(context.filesDir, "last_crash.txt")
+                                val f = lastCrashFile(context)
                                 if (f.exists()) f.readText().takeIf { it.isNotBlank() } else null
                             }.getOrNull()
                         }
@@ -193,9 +195,8 @@ class MainActivity : ComponentActivity() {
                 lastCrashText?.let { crashText ->
                     val dismissCrashDialog = {
                         lastCrashText = null
-                        val filesDir = context.filesDir
                         ioScope.launch(Dispatchers.IO) {
-                            runCatching { File(filesDir, "last_crash.txt").delete() }
+                            runCatching { lastCrashFile(context).delete() }
                         }
                         Unit
                     }
@@ -227,8 +228,12 @@ class MainActivity : ComponentActivity() {
                             Row {
                                 TextButton(
                                     onClick = {
-                                        val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                                        cm?.setPrimaryClip(android.content.ClipData.newPlainText("MuxGrid Crash", crashText))
+                                        copyTextToClipboard(
+                                            context = context,
+                                            label = "MuxGrid Crash",
+                                            text = crashText,
+                                            toastMessage = "Crash log copied",
+                                        )
                                     },
                                 ) {
                                     Text("Copy", color = MuxGridColors.TextSecondary)

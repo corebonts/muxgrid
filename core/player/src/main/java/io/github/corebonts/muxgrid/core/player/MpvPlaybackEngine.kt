@@ -224,7 +224,10 @@ class MpvPlaybackEngine(
             submitMpvTask {
                 val instance = mpv ?: return@submitMpvTask
                 if (instance.isInitialized) {
-                    instance.setPropertyDouble("volume", if (ducked) 25.0 else 100.0)
+                    instance.setPropertyDouble(
+                        "volume",
+                        if (ducked) MPV_VOLUME_DUCKED else MPV_VOLUME_FULL,
+                    )
                 }
             }
         },
@@ -291,8 +294,8 @@ class MpvPlaybackEngine(
             setOptionString("demuxer-seekable-cache", "yes")
             setOptionString("demuxer-donate-buffer", "yes")
             setOptionString("demuxer-cache-dir", mpvCacheDir.absolutePath)
-            setOptionString("demuxer-max-bytes", "64MiB")
-            setOptionString("demuxer-max-back-bytes", "64MiB")
+            setOptionString("demuxer-max-bytes", DEFAULT_RAM_CACHE_ARG)
+            setOptionString("demuxer-max-back-bytes", DEFAULT_RAM_CACHE_ARG)
             setOptionString("sub-visibility", "yes")
             setOptionString("force-window", "no")
             setOptionString("idle", "yes")
@@ -379,7 +382,7 @@ class MpvPlaybackEngine(
             configureLiveTimeshiftLocked(instance, requestedWindow)
             instance.setPropertyString("idle", "yes")
             instance.setPropertyString("start", "none")
-            instance.setPropertyDouble("volume", 100.0)
+            instance.setPropertyDouble("volume", MPV_VOLUME_FULL)
             instance.setPropertyString("vid", if (explicitAudioOnly) "no" else "auto")
             videoOutputDisabled = explicitAudioOnly
             instance.setPropertyBoolean("pause", false)
@@ -472,7 +475,7 @@ class MpvPlaybackEngine(
             configureDvrCacheLocked(instance, isGrowing)
             instance.setPropertyString("idle", "yes")
             instance.setPropertyString("start", if (resumeSec > 0L) "+$resumeSec" else "none")
-            instance.setPropertyDouble("volume", 100.0)
+            instance.setPropertyDouble("volume", MPV_VOLUME_FULL)
             instance.setPropertyString("vid", if (explicitAudioOnly) "no" else "auto")
             videoOutputDisabled = explicitAudioOnly
             instance.setPropertyBoolean("pause", false)
@@ -909,7 +912,7 @@ class MpvPlaybackEngine(
         val (bytesPerDir, useDisk) = resolveEffectiveTimeshiftBudget(requested)
         effectiveForwardCapBytes = bytesPerDir
         currentCacheOnDisk = useDisk
-        val mb = (bytesPerDir / (1024L * 1024L)).coerceAtLeast(64L)
+        val mb = (bytesPerDir / BYTES_PER_MIB).coerceAtLeast(DEFAULT_RAM_CACHE_MIB)
         instance.setPropertyString("cache-on-disk", if (useDisk) "yes" else "no")
         instance.setPropertyString(
             "demuxer-seekable-cache",
@@ -919,7 +922,10 @@ class MpvPlaybackEngine(
         instance.setPropertyString("demuxer-max-back-bytes", "${mb}MiB")
         instance.setPropertyString("force-seekable", "no")
         if (requested != TimeshiftWindow.OFF && !useDisk) {
-            postTimeshiftNotice("Low storage: live timeshift using memory buffer", autoClearMs = 6_000L)
+            postTimeshiftNotice(
+                "Low storage: live timeshift using memory buffer",
+                autoClearMs = TIMESHIFT_NOTICE_LONG_MS,
+            )
         }
     }
 
@@ -928,8 +934,8 @@ class MpvPlaybackEngine(
         currentCacheOnDisk = false
         instance.setPropertyString("cache-on-disk", "no")
         instance.setPropertyString("demuxer-seekable-cache", "auto")
-        instance.setPropertyString("demuxer-max-bytes", "64MiB")
-        instance.setPropertyString("demuxer-max-back-bytes", "64MiB")
+        instance.setPropertyString("demuxer-max-bytes", DEFAULT_RAM_CACHE_ARG)
+        instance.setPropertyString("demuxer-max-back-bytes", DEFAULT_RAM_CACHE_ARG)
         instance.setPropertyString("force-seekable", if (isGrowing) "yes" else "no")
     }
 
@@ -981,9 +987,10 @@ class MpvPlaybackEngine(
 
     private suspend fun refreshSystemDiagnosticsOffMpvThread() {
         val nowElapsed = SystemClock.elapsedRealtime()
-        val needMem = cachedMemoryStats == null || nowElapsed - lastMemorySampleElapsedMs >= 1_500L
+        val needMem = cachedMemoryStats == null ||
+            nowElapsed - lastMemorySampleElapsedMs >= MEMORY_STATS_SAMPLE_INTERVAL_MS
         val needDisk = currentCacheOnDisk && !mpvReportsFileCacheBytes &&
-            (cachedDiskCacheBytes == null || nowElapsed - lastDiskCacheSampleElapsedMs >= 2_000L)
+            (cachedDiskCacheBytes == null || nowElapsed - lastDiskCacheSampleElapsedMs >= DISK_CACHE_SAMPLE_INTERVAL_MS)
         if (!needMem && !needDisk) return
         withContext(Dispatchers.IO) {
             if (needMem) {
@@ -1061,15 +1068,18 @@ class MpvPlaybackEngine(
             effectiveForwardCapBytes > 0L
         ) {
             val fillRatio = fwBytes.toDouble() / effectiveForwardCapBytes.toDouble()
-            if (fillRatio >= 0.98) {
+            if (fillRatio >= TIMESHIFT_FULL_RESUME_RATIO) {
                 instance.setPropertyBoolean("pause", false)
-                postTimeshiftNotice("Timeshift buffer full — playback resumed", autoClearMs = 6_000L)
-            } else if (fillRatio >= 0.90) {
-                postTimeshiftNotice("Timeshift pause buffer nearly full", autoClearMs = null)
-            } else if (currentState.timeshiftNotice == "Timeshift pause buffer nearly full") {
+                postTimeshiftNotice(
+                    "Timeshift buffer full — playback resumed",
+                    autoClearMs = TIMESHIFT_NOTICE_LONG_MS,
+                )
+            } else if (fillRatio >= TIMESHIFT_WARN_RATIO) {
+                postTimeshiftNotice(TIMESHIFT_NEARLY_FULL_NOTICE, autoClearMs = null)
+            } else if (currentState.timeshiftNotice == TIMESHIFT_NEARLY_FULL_NOTICE) {
                 _state.update { it.copy(timeshiftNotice = null) }
             }
-        } else if (!currentState.isPaused && currentState.timeshiftNotice == "Timeshift pause buffer nearly full") {
+        } else if (!currentState.isPaused && currentState.timeshiftNotice == TIMESHIFT_NEARLY_FULL_NOTICE) {
             _state.update { it.copy(timeshiftNotice = null) }
         }
 
@@ -1278,7 +1288,7 @@ class MpvPlaybackEngine(
                     return
                 }
                 val prevPos = lastEmittedPosMs
-                val jumped = prevPos < 0L || kotlin.math.abs(posMs - prevPos) >= 1_500L
+                val jumped = prevPos < 0L || kotlin.math.abs(posMs - prevPos) >= POSITION_JUMP_THRESHOLD_MS
                 if (!jumped && (nowElapsed - lastPositionEmitElapsedMs) < POSITION_EMIT_INTERVAL_MS) {
                     return
                 }
@@ -1465,7 +1475,7 @@ class MpvPlaybackEngine(
                     } else if (hadFileLoaded && !retriedLiveReconnect) {
                         retriedLiveReconnect = true
                         timeshiftSmoother.reset()
-                        postTimeshiftNotice("Live stream reconnected", autoClearMs = 4_000L)
+                        postTimeshiftNotice("Live stream reconnected", autoClearMs = TIMESHIFT_NOTICE_SHORT_MS)
                         val url = liveStrategy.resolveLiveUrl(channel.id)
                         submitMpvTask {
                             val instance = mpv ?: return@submitMpvTask
@@ -1806,12 +1816,25 @@ class MpvPlaybackEngine(
     companion object {
         private const val TAG = "MuxGridPlayer"
         private const val POSITION_EMIT_INTERVAL_MS = 250L
+        private const val POSITION_JUMP_THRESHOLD_MS = 1_500L
         private const val CACHE_POLL_INTERVAL_MS = 500L
-        private const val DEFAULT_RAM_CACHE_BYTES = 64L * 1024L * 1024L
-        private const val DISK_SAFETY_RESERVE_BYTES = 512L * 1024L * 1024L
+        private const val MEMORY_STATS_SAMPLE_INTERVAL_MS = 1_500L
+        private const val DISK_CACHE_SAMPLE_INTERVAL_MS = 2_000L
+        private const val BYTES_PER_MIB = 1024L * 1024L
+        private const val DEFAULT_RAM_CACHE_MIB = 64L
+        private const val DEFAULT_RAM_CACHE_BYTES = DEFAULT_RAM_CACHE_MIB * BYTES_PER_MIB
+        private const val DEFAULT_RAM_CACHE_ARG = "${DEFAULT_RAM_CACHE_MIB}MiB"
+        private const val DISK_SAFETY_RESERVE_BYTES = 512L * BYTES_PER_MIB
         private const val SURFACE_DETACH_TIMEOUT_MS = 1_500L
         private const val SEEK_GUARD_SUBMIT_MS = 1_200L
         private const val SEEK_GUARD_SETTLE_MS = 450L
+        private const val MPV_VOLUME_DUCKED = 25.0
+        private const val MPV_VOLUME_FULL = 100.0
+        private const val TIMESHIFT_WARN_RATIO = 0.90
+        private const val TIMESHIFT_FULL_RESUME_RATIO = 0.98
+        private const val TIMESHIFT_NOTICE_SHORT_MS = 4_000L
+        private const val TIMESHIFT_NOTICE_LONG_MS = 6_000L
+        private const val TIMESHIFT_NEARLY_FULL_NOTICE = "Timeshift pause buffer nearly full"
     }
 }
 

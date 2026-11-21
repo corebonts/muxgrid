@@ -1,9 +1,13 @@
 package io.github.corebonts.muxgrid.core.designsystem
 
 import io.github.corebonts.muxgrid.core.model.Channel
+import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.EpgEvent
+import io.github.corebonts.muxgrid.core.model.PlaybackError
+import io.github.corebonts.muxgrid.core.model.PlaybackState
+import io.github.corebonts.muxgrid.core.model.ServerProfile
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
@@ -135,5 +139,63 @@ class MuxGridGuideFormattersTest {
         assertEquals(11L, stableDurationSec(10_700L, 10L))
         assertEquals(9L, stableDurationSec(9_300L, 10L))
         assertEquals(0L, stableDurationSec(-500L, 0L))
+    }
+
+    @Test
+    fun `floorToHalfHour aligns epoch seconds down to 1800s boundaries`() {
+        assertEquals(0L, floorToHalfHour(1_799L))
+        assertEquals(1_800L, floorToHalfHour(1_800L))
+        assertEquals(1_800L, floorToHalfHour(3_599L))
+        assertEquals(3_600L, floorToHalfHour(3_600L))
+    }
+
+    @Test
+    fun `formatByteCount and formatFileSize format byte ranges consistently`() {
+        assertEquals("0 B", formatByteCount(-5L))
+        assertEquals("512 B", formatByteCount(512L))
+        assertEquals("2 KB", formatByteCount(2_048L))
+        assertEquals("1.5 MB", formatByteCount(1_572_864L))
+        assertEquals("2.0 GB", formatByteCount(2L * 1024L * 1024L * 1024L))
+        assertEquals("", formatFileSize(0L))
+        assertEquals("", formatFileSize(-10L))
+        assertEquals("1.5 MB", formatFileSize(1_572_864L))
+    }
+
+    @Test
+    fun `playback state and error formatters produce expected display strings`() {
+        val live = PlaybackState(
+            channelId = 1L,
+            channelNumber = "1",
+            channelName = "Channel One",
+            videoWidth = 1920,
+            videoHeight = 1080,
+            hwdecCurrent = "mediacodec",
+            deinterlaceActive = true,
+        )
+        assertEquals("1 · Channel One", live.displayTitle())
+        assertEquals("1920×1080 · mediacodec", live.streamBadgeText())
+        assertEquals("1920×1080 · mediacodec · deint=true", live.streamBadgeText(includeDeinterlace = true))
+
+        val rec = PlaybackState(dvrEntryId = 5L, programTitle = "Doc", videoWidth = 0)
+        assertEquals("Doc", rec.displayTitle())
+        assertNull(rec.streamBadgeText())
+
+        val busy = PlaybackError.TunerBusy("News", "BBC")
+        assertEquals("Tuner Busy", busy.displayTitle())
+        assertEquals("The single tuner is currently busy recording on another mux.", busy.displayDetail())
+        val failed = PlaybackError.PlaybackFailed("boom")
+        assertEquals("Playback Error", failed.displayTitle())
+        assertNull(failed.displayDetail())
+    }
+
+    @Test
+    fun `serverHeadline and connectionStatusText format server connection states`() {
+        val profile = ServerProfile(host = "tvh.local", htspPort = 9982, httpPort = 9981)
+        val connected = ConnectionState.Connected("Tvheadend", "4.3-2375", 34)
+        assertEquals("Tvheadend · tvh.local:9982", serverHeadline(profile, connected))
+        assertEquals("Connected · 4.3-2375 · HTSP v34", connectionStatusText(profile, connected))
+        assertEquals("tvh.local:9982", serverHeadline(profile, ConnectionState.Disconnected))
+        assertEquals("Disconnected · HTTP 9981", connectionStatusText(profile, ConnectionState.Disconnected))
+        assertEquals("Timeout", connectionStatusText(profile, ConnectionState.Error("Timeout")))
     }
 }

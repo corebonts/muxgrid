@@ -13,16 +13,16 @@ MuxGrid uses a low-glare **Broadcast Monitor** dark visual language (`Carbon & S
     - Over **live/recorded video (`SurfaceView`)**: Compose/Haze/`RenderEffect` cannot sample a `SurfaceView` plane. Always use **translucent dark gradient scrims + hairline pill surfaces** (`ScrimSurface` / `ScrimLight`) for player HUDs and OSDs.
 - **Signal Amber & Broadcast Status Palette:**
   - Primary interactive accent: Signal Amber `#E5A00D` (`Accent`), highlighted variant `#F5B82E` (`AccentSoft`), dark `#09090B` (`OnAccent`) foreground on primary actions.
-  - TV D-pad focus border: crisp `#F4F4F5` (`FocusBorder`, `2dp`).
+  - TV D-pad focus border: crisp `#F4F4F5` (`FocusBorder`, `2dp`), paired with contrasting `OnFocusBorder` (`#09090B` dark / `#F4F4F5` light) whenever `FocusBorder` acts as a focused container background, and `SeekThumb` (`#FFFFFF` dark / `#18181B` light) for interactive seekbar thumbs.
   - Live / Recording indicator: `#E53935` (`CoralLive`).
   - Success / Watched indicator: `#3E9B63` (`EmeraldOk`).
   - Progress bars: crisp `#D4D4D8` (`ProgressFill`) on `TrackBackground` (`rgba(255,255,255,0.17)`), with Signal Amber reserved for live/interactive scrub cues.
 - **Theme Modes (`Auto` / `Light` / `Dark`):**
   - Users can switch between `Auto` (system appearance), `Light` (Daylight Monitor palette: `#F4F4F7` / `#F2F2F5` canvas, `#FFFFFF` cards, `#18181B` focus border, Signal Amber accents), and `Dark` (Carbon & Signal Amber) under **Settings → General → Theme** (defaults: `Auto` on Mobile, `Dark` on TV).
   - Fullscreen video/audio players (`MobilePlayerScreen`, `TvPlayerScreen`) and their over-video HUDs always remain locked to the dark palette to prevent glare and preserve contrast over video.
-- **Typography & Radii (`MuxGridTheme.kt` & `MuxGridTokens.kt`):**
+- **Typography, Radii & Tokens (`MuxGridTheme.kt` & `MuxGridTokens.kt`):**
   - System sans-serif with tight display tracking (`-0.5sp` screen titles, `-0.35sp` section titles) and **tabular numerals (`fontFeatureSettings = "tnum"`)** on all clocks, channel numbers, durations, and seekbar readouts.
-  - Compact crisp corners: `3dp` badges, `5dp` controls/buttons, `8dp` rows/cards, `12dp` dialogs/sheets.
+  - Compact crisp corners (`MuxGridRadii` / `MuxGridShapes`): `2dp` seek tracks, `3dp` badges, `5dp` controls/buttons, `8dp` rows/cards, `12dp` dialogs/sheets, with centralized border widths (`MuxGridBorders`), animation/OSD durations (`MuxGridDurations`), and surface/text opacities (`MuxGridAlphas`).
 - **Motion:**
   - Snappy transitions (~180–250ms) and subtle `2dp` focus borders + mild scale on TV cards without jumpy layouts.
 - **Dialogs, Sheets & Confirmations:**

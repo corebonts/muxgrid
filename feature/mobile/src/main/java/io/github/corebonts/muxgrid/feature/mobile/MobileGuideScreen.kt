@@ -653,8 +653,7 @@ internal fun MobileGuideScreen(
                                 shape = MuxGridShapes.Sm,
                                 onClick = {
                                     selectedEventKey = null
-                                    val startSec = if (linkedDvr.hasResumePosition) linkedDvr.playPositionSec else 0L
-                                    onPlayRecording(linkedDvr, detailChannel, startSec)
+                                    onPlayRecording(linkedDvr, detailChannel, linkedDvr.effectiveStartSec)
                                 },
                                 modifier = Modifier.weight(1f),
                             ) {
@@ -726,8 +725,7 @@ internal fun MobileGuideScreen(
                                     shape = MuxGridShapes.Sm,
                                     onClick = {
                                         selectedEventKey = null
-                                        val startSec = if (linkedDvr.hasResumePosition) linkedDvr.playPositionSec else 0L
-                                        onPlayRecording(linkedDvr, detailChannel, startSec)
+                                        onPlayRecording(linkedDvr, detailChannel, linkedDvr.effectiveStartSec)
                                     },
                                     modifier = Modifier.weight(1f),
                                 ) {
@@ -797,11 +795,7 @@ internal fun MobileGuideScreen(
                         result
                             .onSuccess { selectedEventKey = null }
                             .onFailure {
-                                actionError = it.message ?: when (kind) {
-                                    DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop recording"
-                                    DvrConfirmKind.CANCEL_TIMER -> "Failed to cancel timer"
-                                    else -> "Action failed"
-                                }
+                                actionError = it.message ?: spec.failureFallbackMessage
                             }
                     } finally {
                         actionBusy = false

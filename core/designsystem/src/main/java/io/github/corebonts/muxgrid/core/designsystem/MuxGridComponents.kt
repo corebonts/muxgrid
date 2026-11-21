@@ -1,5 +1,10 @@
 package io.github.corebonts.muxgrid.core.designsystem
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -32,7 +37,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -91,6 +95,7 @@ import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LiveFilter
+import io.github.corebonts.muxgrid.core.model.MainTab
 import io.github.corebonts.muxgrid.core.model.MediaTrack
 import io.github.corebonts.muxgrid.core.model.PlaybackError
 import io.github.corebonts.muxgrid.core.model.VideoAspectMode
@@ -274,7 +279,7 @@ fun LiveProgressBar(
     val displayProgress = if (animate) {
         animateFloatAsState(
             targetValue = clamped,
-            animationSpec = tween(durationMillis = 220, easing = LinearEasing),
+            animationSpec = tween(durationMillis = MuxGridDurations.Progress, easing = LinearEasing),
             label = "liveProgress",
         ).value
     } else {
@@ -309,17 +314,17 @@ fun MuxGridSwitch(
 ) {
     val trackColor by animateColorAsState(
         targetValue = if (checked) MuxGridColors.Accent else MuxGridColors.TrackBackground,
-        animationSpec = tween(durationMillis = 150),
+        animationSpec = tween(durationMillis = MuxGridDurations.Switch),
         label = "switchTrack",
     )
     val thumbColor by animateColorAsState(
         targetValue = if (checked) MuxGridColors.OnAccent else MuxGridColors.TextSecondary,
-        animationSpec = tween(durationMillis = 150),
+        animationSpec = tween(durationMillis = MuxGridDurations.Switch),
         label = "switchThumb",
     )
     val thumbOffset by animateDpAsState(
         targetValue = if (checked) 19.dp else 3.dp,
-        animationSpec = tween(durationMillis = 150),
+        animationSpec = tween(durationMillis = MuxGridDurations.Switch),
         label = "switchThumbOffset",
     )
     Box(
@@ -352,7 +357,7 @@ fun MuxGridCompactButton(
     borderColor: Color? = null,
     enabled: Boolean = true,
 ) {
-    val alpha = if (enabled) 1f else 0.45f
+    val alpha = if (enabled) 1f else MuxGridAlphas.Disabled
     Row(
         modifier = modifier
             .heightIn(min = 32.dp)
@@ -398,6 +403,7 @@ fun MuxGridSeekBar(
     modifier: Modifier = Modifier,
     activeTrackColor: Color = MuxGridColors.Accent,
     inactiveTrackColor: Color = MuxGridColors.TrackBackground,
+    thumbColor: Color = MuxGridColors.SeekThumb,
 ) {
     var widthPx by remember { mutableIntStateOf(1) }
     var dragging by remember { mutableStateOf(false) }
@@ -406,7 +412,7 @@ fun MuxGridSeekBar(
     val clamped = value.coerceIn(0f, 1f)
     val barHeight by animateDpAsState(
         targetValue = if (dragging) 6.dp else 4.dp,
-        animationSpec = tween(durationMillis = 120),
+        animationSpec = tween(durationMillis = MuxGridDurations.Fast),
         label = "seekBarHeight",
     )
 
@@ -450,7 +456,7 @@ fun MuxGridSeekBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(barHeight)
-                .clip(RoundedCornerShape(2.dp))
+                .clip(MuxGridShapes.SeekTrack)
                 .background(inactiveTrackColor),
         ) {
             if (clamped > 0f) {
@@ -458,7 +464,7 @@ fun MuxGridSeekBar(
                     modifier = Modifier
                         .fillMaxWidth(clamped)
                         .fillMaxHeight()
-                        .clip(RoundedCornerShape(2.dp))
+                        .clip(MuxGridShapes.SeekTrack)
                         .background(activeTrackColor),
                 )
             }
@@ -474,7 +480,7 @@ fun MuxGridSeekBar(
                     }
                     .size(12.dp)
                     .clip(CircleShape)
-                    .background(Color.White),
+                    .background(thumbColor),
             )
         }
     }
@@ -488,6 +494,45 @@ fun connectionStatusDotColor(state: ConnectionState): Color? = when (state) {
     is ConnectionState.Error -> MuxGridColors.CoralLive
     ConnectionState.Disconnected -> MuxGridColors.TextMuted
 }
+
+@Composable
+@ReadOnlyComposable
+fun connectionStatusColor(state: ConnectionState): Color = when (state) {
+    is ConnectionState.Connected -> MuxGridColors.EmeraldOk
+    ConnectionState.Connecting, is ConnectionState.Syncing -> MuxGridColors.AmberWarn
+    is ConnectionState.Error -> MuxGridColors.CoralLive
+    ConnectionState.Disconnected -> MuxGridColors.TextMuted
+}
+
+fun MainTab.label(): String = when (this) {
+    MainTab.LIVE -> "Live"
+    MainTab.GUIDE -> "Guide"
+    MainTab.RECORDINGS -> "Recordings"
+    MainTab.SETTINGS -> "Settings"
+}
+
+fun MainTab.icon(selected: Boolean): ImageVector = when (this) {
+    MainTab.LIVE -> if (selected) MuxGridIcons.LiveFilled else MuxGridIcons.Live
+    MainTab.GUIDE -> if (selected) MuxGridIcons.GuideFilled else MuxGridIcons.Guide
+    MainTab.RECORDINGS -> if (selected) MuxGridIcons.RecordingsFilled else MuxGridIcons.Recordings
+    MainTab.SETTINGS -> if (selected) MuxGridIcons.SettingsFilled else MuxGridIcons.Settings
+}
+
+fun copyTextToClipboard(
+    context: Context,
+    label: String,
+    text: String,
+    toastMessage: String? = null,
+) {
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+    cm.setPrimaryClip(ClipData.newPlainText(label, text))
+    if (!toastMessage.isNullOrEmpty()) {
+        Toast.makeText(context, toastMessage, Toast.LENGTH_SHORT).show()
+    }
+}
+
+fun Context.isDebuggableBuild(): Boolean =
+    (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
 @Composable
 fun ConnectionStatusDot(
@@ -511,15 +556,14 @@ fun PlayerErrorToast(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val isTunerBusy = error is PlaybackError.TunerBusy
-    val title = if (isTunerBusy) "Tuner Busy" else "Playback Error"
+    val title = error.displayTitle()
     Row(
         modifier = modifier
             .clip(MuxGridShapes.Row)
             .background(MuxGridColors.ScrimSurface)
             .border(
                 width = MuxGridBorders.Hairline,
-                color = MuxGridColors.CoralLive.copy(alpha = 0.65f),
+                color = MuxGridColors.CoralLive.copy(alpha = MuxGridAlphas.BorderStrong),
                 shape = MuxGridShapes.Row,
             )
             .clickable(onClick = onDismiss)
@@ -624,7 +668,7 @@ fun TrackAndPresetPanel(
                 Icon(
                     imageVector = MuxGridIcons.Close,
                     contentDescription = "Close",
-                    tint = if (closeFocused) MuxGridColors.CanvasTv else MuxGridColors.TextSecondary,
+                    tint = if (closeFocused) MuxGridColors.OnFocusBorder else MuxGridColors.TextSecondary,
                     modifier = Modifier.size(20.dp),
                 )
             }
@@ -735,7 +779,7 @@ fun TrackAndPresetPanel(
                             Text(
                                 text = mode.label,
                                 color = when {
-                                    modeFocused -> MuxGridColors.CanvasTv
+                                    modeFocused -> MuxGridColors.OnFocusBorder
                                     selected -> MuxGridColors.TextPrimary
                                     else -> MuxGridColors.TextMuted
                                 },
@@ -770,7 +814,7 @@ private fun SelectableOptionRow(
     var focused by remember { mutableStateOf(false) }
     val bg = if (focused) MuxGridColors.FocusBorder else MuxGridColors.CardSurfaceElevated
     val textColor = when {
-        focused -> MuxGridColors.CanvasTv
+        focused -> MuxGridColors.OnFocusBorder
         selected -> MuxGridColors.TextPrimary
         else -> MuxGridColors.TextSecondary
     }
@@ -796,7 +840,7 @@ private fun SelectableOptionRow(
             Icon(
                 imageVector = MuxGridIcons.Check,
                 contentDescription = "Active",
-                tint = if (focused) MuxGridColors.CanvasTv else MuxGridColors.Accent,
+                tint = if (focused) MuxGridColors.OnFocusBorder else MuxGridColors.Accent,
                 modifier = Modifier.size(16.dp),
             )
         }
@@ -836,6 +880,13 @@ fun LiveFilter.label(): String = when (this) {
     is LiveFilter.Tag -> name
 }
 
+fun LiveFilter.icon(): ImageVector? = when (this) {
+    LiveFilter.Tv -> MuxGridIcons.Tv
+    LiveFilter.Radio -> MuxGridIcons.Radio
+    LiveFilter.Favorites -> MuxGridIcons.StarFilled
+    LiveFilter.All, is LiveFilter.Tag -> null
+}
+
 private val TIME_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
 fun formatEpochHm(
@@ -863,7 +914,7 @@ fun DvrStateBadge(
     Row(
         modifier = modifier
             .clip(MuxGridShapes.Badge)
-            .background(color.copy(alpha = 0.16f))
+            .background(color.copy(alpha = MuxGridAlphas.TintFill))
             .padding(horizontal = 7.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -921,7 +972,7 @@ fun TimeshiftNoticeBanner(
         modifier = modifier
             .clip(MuxGridShapes.Sm)
             .background(MuxGridColors.ScrimSurface)
-            .border(MuxGridBorders.Hairline, MuxGridColors.AmberWarn.copy(alpha = 0.55f), MuxGridShapes.Sm)
+            .border(MuxGridBorders.Hairline, MuxGridColors.AmberWarn.copy(alpha = MuxGridAlphas.BorderEmphasis), MuxGridShapes.Sm)
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -955,6 +1006,7 @@ data class DvrConfirmSpec(
     val message: String,
     val confirmLabel: String,
     val isDestructive: Boolean,
+    val failureFallbackMessage: String,
 )
 
 fun dvrConfirmSpec(kind: DvrConfirmKind, entryTitle: String): DvrConfirmSpec = when (kind) {
@@ -963,24 +1015,28 @@ fun dvrConfirmSpec(kind: DvrConfirmKind, entryTitle: String): DvrConfirmSpec = w
         message = "Stop \"$entryTitle\" now and save what has been recorded so far?",
         confirmLabel = "Stop & Save",
         isDestructive = false,
+        failureFallbackMessage = "Failed to stop recording",
     )
     DvrConfirmKind.ABORT_RECORDING -> DvrConfirmSpec(
         title = "Abort Recording?",
         message = "Abort \"$entryTitle\"? The in-progress recording will be cancelled and discarded.",
         confirmLabel = "Abort Recording",
         isDestructive = true,
+        failureFallbackMessage = "Failed to abort recording",
     )
     DvrConfirmKind.CANCEL_TIMER -> DvrConfirmSpec(
         title = "Cancel Scheduled Recording?",
         message = "Cancel the scheduled timer for \"$entryTitle\"?",
         confirmLabel = "Cancel Timer",
         isDestructive = true,
+        failureFallbackMessage = "Failed to cancel timer",
     )
     DvrConfirmKind.DELETE_RECORDING -> DvrConfirmSpec(
         title = "Delete Recording?",
         message = "Delete \"$entryTitle\" from Tvheadend storage? This cannot be undone.",
         confirmLabel = "Delete",
         isDestructive = true,
+        failureFallbackMessage = "Failed to delete recording",
     )
 }
 

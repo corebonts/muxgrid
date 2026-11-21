@@ -1,14 +1,10 @@
 package io.github.corebonts.muxgrid.core.designsystem
 
 import android.app.ActivityManager
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.StatFs
-import android.widget.Toast
 import io.github.corebonts.muxgrid.core.model.AppBuildInfo
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
@@ -60,7 +56,7 @@ fun collectDebugEnvironmentSnapshot(
     backgroundAudioEnabled: Boolean? = null,
     pipEnabled: Boolean? = null,
 ): DebugEnvironmentSnapshot {
-    val isDebuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    val isDebuggable = context.isDebuggableBuild()
     val resolvedBuildType = appInfo.buildType.trim().ifEmpty {
         if (isDebuggable) "debug" else "release"
     }
@@ -216,16 +212,6 @@ internal fun fileOrDirectorySizeBytes(root: File): Long {
     return total
 }
 
-internal fun formatByteCount(bytes: Long): String {
-    val clamped = bytes.coerceAtLeast(0L)
-    return when {
-        clamped < 1024L -> "$clamped B"
-        clamped < 1024L * 1024L -> String.format(Locale.US, "%.0f KB", clamped / 1024.0)
-        clamped < 1024L * 1024L * 1024L -> String.format(Locale.US, "%.1f MB", clamped / (1024.0 * 1024.0))
-        else -> String.format(Locale.US, "%.1f GB", clamped / (1024.0 * 1024.0 * 1024.0))
-    }
-}
-
 fun formatDebugInfoReport(snapshot: DebugEnvironmentSnapshot): String {
     val deviceName = buildString {
         val mfr = snapshot.manufacturer.trim()
@@ -291,13 +277,4 @@ fun formatDebugInfoReport(snapshot: DebugEnvironmentSnapshot): String {
         appendLine("PiP: ${snapshot.pipStatus}")
         append("Server: ${snapshot.serverSoftwareSummary}")
     }
-}
-
-fun copyDebugInfoToClipboard(
-    context: Context,
-    report: String,
-) {
-    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-    cm.setPrimaryClip(ClipData.newPlainText("MuxGrid Debug Info", report))
-    Toast.makeText(context, "Debug info copied", Toast.LENGTH_SHORT).show()
 }

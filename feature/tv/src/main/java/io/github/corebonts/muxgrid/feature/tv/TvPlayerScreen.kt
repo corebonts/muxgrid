@@ -74,16 +74,21 @@ import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridAlphas
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridDurations
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.PlaybackInfoPanel
 import io.github.corebonts.muxgrid.core.designsystem.TimeshiftNoticeBanner
 import io.github.corebonts.muxgrid.core.designsystem.TrackAndPresetPanel
+import io.github.corebonts.muxgrid.core.designsystem.displayDetail
+import io.github.corebonts.muxgrid.core.designsystem.displayTitle
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationSec
 import io.github.corebonts.muxgrid.core.designsystem.rememberStableDurationSec
+import io.github.corebonts.muxgrid.core.designsystem.streamBadgeText
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
@@ -190,7 +195,7 @@ internal fun TvPlayerScreen(
 
     LaunchedEffect(zapOsdTrigger, zapOsdVisible) {
         if (zapOsdVisible) {
-            delay(3_000L)
+            delay(MuxGridDurations.TvZapOsdMs)
             zapOsdVisible = false
         }
     }
@@ -286,7 +291,7 @@ internal fun TvPlayerScreen(
     // Keep the HUD on screen while the progress bar is focused or while navigating HUD controls.
     LaunchedEffect(hudVisible, trackPanelOpen, infoPanelOpen, playbackState.status, progressFocused, hudInteractionNonce) {
         if (hudVisible && !trackPanelOpen && !infoPanelOpen && !progressFocused && playbackState.status == PlaybackStatus.PLAYING) {
-            delay(6_000L)
+            delay(MuxGridDurations.TvHudAutoHideMs)
             hudVisible = false
         }
     }
@@ -502,14 +507,14 @@ internal fun TvPlayerScreen(
                         .fillMaxWidth()
                         .clip(MuxGridShapes.Dialog)
                         .background(MuxGridColors.CardSurfaceElevated)
-                        .border(MuxGridBorders.Hairline, MuxGridColors.CoralLive.copy(alpha = 0.55f), MuxGridShapes.Dialog)
+                        .border(MuxGridBorders.Hairline, MuxGridColors.CoralLive.copy(alpha = MuxGridAlphas.BorderEmphasis), MuxGridShapes.Dialog)
                         .focusProperties { this.onExit = { cancelFocusChange() } }
                         .focusGroup()
                         .padding(22.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
-                        text = if (err is PlaybackError.TunerBusy) "Tuner Busy" else "Playback Error",
+                        text = err.displayTitle(),
                         style = MuxGridType.Title,
                         fontSize = 18.sp,
                         color = MuxGridColors.TextPrimary,
@@ -520,9 +525,9 @@ internal fun TvPlayerScreen(
                         fontSize = 14.sp,
                         color = MuxGridColors.TextSecondary,
                     )
-                    if (err is PlaybackError.TunerBusy) {
+                    err.displayDetail()?.let { detail ->
                         Text(
-                            text = "The single tuner is currently busy recording on another mux.",
+                            text = detail,
                             style = MuxGridType.TabularSmall,
                             color = MuxGridColors.TextMuted,
                         )
@@ -573,14 +578,7 @@ internal fun TvPlayerScreen(
                     Spacer(Modifier.width(14.dp))
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    val primaryTitle = if (playbackState.isRecordingPlayback) {
-                        playbackState.programTitle ?: "Recording"
-                    } else {
-                        listOfNotNull(
-                            playbackState.channelNumber?.takeIf { it != "0" },
-                            playbackState.channelName ?: activeChannel?.name,
-                        ).joinToString(" · ")
-                    }
+                    val primaryTitle = playbackState.displayTitle(fallbackChannelName = activeChannel?.name)
                     Text(
                         text = primaryTitle,
                         color = Color.White,
@@ -780,14 +778,7 @@ internal fun TvPlayerScreen(
                                 Spacer(Modifier.width(12.dp))
                             }
                             Column {
-                                val title = if (playbackState.isRecordingPlayback) {
-                                    playbackState.programTitle ?: "Recording"
-                                } else {
-                                    listOfNotNull(
-                                        playbackState.channelNumber?.takeIf { it != "0" },
-                                        playbackState.channelName ?: activeChannel?.name,
-                                    ).joinToString(" · ")
-                                }
+                                val title = playbackState.displayTitle(fallbackChannelName = activeChannel?.name)
                                 Text(
                                     text = title,
                                     color = Color.White,
@@ -812,9 +803,9 @@ internal fun TvPlayerScreen(
                             if (playbackState.isGrowingRecording) {
                                 DvrStateBadge(state = DvrState.RECORDING)
                             }
-                            if (playbackState.videoWidth > 0) {
+                            playbackState.streamBadgeText(includeDeinterlace = true)?.let { streamBadge ->
                                 Text(
-                                    text = "${playbackState.videoWidth}×${playbackState.videoHeight} · ${playbackState.hwdecCurrent ?: "sw"} · deint=${playbackState.deinterlaceActive}",
+                                    text = streamBadge,
                                     style = MuxGridType.TabularSmall,
                                 )
                             }
@@ -1196,7 +1187,7 @@ private fun TvQuickChannelStrip(
                 isCurrent -> MuxGridColors.CardSurfaceElevated
                 else -> MuxGridColors.CardSurface
             }
-            val contentColor = if (isFocused) MuxGridColors.CanvasTv else MuxGridColors.TextPrimary
+            val contentColor = if (isFocused) MuxGridColors.OnFocusBorder else MuxGridColors.TextPrimary
 
             Row(
                 modifier = Modifier

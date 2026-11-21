@@ -61,6 +61,7 @@ import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrConfirmKind
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridAlphas
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
@@ -282,7 +283,7 @@ internal fun TvRecordingsScreen(
                 Text(
                     text = entry.description!!,
                     style = MuxGridType.CardSubtitle,
-                    color = MuxGridColors.TextPrimary.copy(alpha = 0.85f),
+                    color = MuxGridColors.TextPrimary.copy(alpha = MuxGridAlphas.BodyText),
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -302,8 +303,7 @@ internal fun TvRecordingsScreen(
                             enabled = !actionBusy,
                             onClick = {
                                 selectedEntryId = null
-                                val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
-                                onPlayRecording(entry, ch, startSec)
+                                onPlayRecording(entry, ch, entry.effectiveStartSec)
                             },
                             modifier = Modifier.focusRequester(primaryFocusRequester),
                             shape = tvButtonShape(),
@@ -364,8 +364,7 @@ internal fun TvRecordingsScreen(
                                 enabled = !actionBusy,
                                 onClick = {
                                     selectedEntryId = null
-                                    val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
-                                    onPlayRecording(entry, ch, startSec)
+                                    onPlayRecording(entry, ch, entry.effectiveStartSec)
                                 },
                                 modifier = Modifier.focusRequester(primaryFocusRequester),
                                 shape = tvButtonShape(),
@@ -494,12 +493,7 @@ internal fun TvRecordingsScreen(
                         result
                             .onSuccess { selectedEntryId = null }
                             .onFailure { err ->
-                                actionError = err.message ?: when (kind) {
-                                    DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop"
-                                    DvrConfirmKind.ABORT_RECORDING -> "Failed to abort"
-                                    DvrConfirmKind.CANCEL_TIMER -> "Failed to cancel"
-                                    DvrConfirmKind.DELETE_RECORDING -> "Failed to delete"
-                                }
+                                actionError = err.message ?: spec.failureFallbackMessage
                             }
                     } finally {
                         actionBusy = false
@@ -630,10 +624,8 @@ private fun TvRecordingShelf(
                     }
 
                     if (entry.state == DvrState.RECORDING) {
-                        val dur = entry.durationSec.coerceAtLeast(1L)
-                        val elapsed = (nowEpochSec - entry.startEpochSec).coerceIn(0L, dur)
                         LiveProgressBar(
-                            progress = elapsed.toFloat() / dur.toFloat(),
+                            progress = entry.recordingProgressFraction(nowEpochSec),
                             fillColor = MuxGridColors.CoralLive,
                             modifier = Modifier.fillMaxWidth(),
                         )
