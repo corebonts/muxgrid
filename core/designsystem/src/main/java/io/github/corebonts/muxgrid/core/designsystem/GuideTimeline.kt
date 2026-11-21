@@ -1,6 +1,7 @@
 package io.github.corebonts.muxgrid.core.designsystem
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Box
@@ -159,6 +160,19 @@ class TimelineScrollState(
 @Composable
 fun rememberTimelineScrollState(initialEpochSec: Long): TimelineScrollState =
     remember { TimelineScrollState(initialEpochSec) }
+
+/**
+ * Prevents Compose's `Modifier.scrollable` `ContentInViewNode` from auto-scrolling the horizontal
+ * timeline when Up/Down D-pad or keyboard focus moves between channels; horizontal focus-following
+ * is handled explicitly by Left/Right navigation via [TimelineScrollState.ensureIntervalVisible].
+ */
+val TimelineNoOpBringIntoViewSpec: BringIntoViewSpec = object : BringIntoViewSpec {
+    override fun calculateScrollDistance(
+        offset: Float,
+        size: Float,
+        containerSize: Float,
+    ): Float = 0f
+}
 
 fun computeEnsureVisibleScrollPx(
     startPx: Float,

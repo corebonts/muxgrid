@@ -5,8 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -618,12 +616,7 @@ internal fun TvGuideScreen(
             BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth()
-                    .scrollable(
-                        state = timelineScrollState.scrollableState,
-                        orientation = Orientation.Horizontal,
-                        reverseDirection = true,
-                    ),
+                    .fillMaxWidth(),
             ) {
                 val channelColWidth = 172.dp
                 val trackWidth = (maxWidth - channelColWidth).coerceAtLeast(320.dp)
@@ -882,15 +875,6 @@ internal fun TvGuideScreen(
                                                     if (focused) {
                                                         focusedEventState.value = ev
                                                         focusMemory.guideTarget = TvGuideFocusTarget(channel.id, ev.id)
-                                                        if (!timelineScrollState.scrollableState.isScrollInProgress) {
-                                                            scope.launch {
-                                                                timelineScrollState.ensureIntervalVisible(
-                                                                    startSec = ev.startEpochSec,
-                                                                    stopSec = ev.stopEpochSec,
-                                                                    requireFullVisibility = false,
-                                                                )
-                                                            }
-                                                        }
                                                     }
                                                 }
                                                 .clickable(

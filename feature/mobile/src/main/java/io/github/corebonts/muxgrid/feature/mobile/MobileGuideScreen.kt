@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.Arrangement
@@ -38,6 +39,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -87,6 +89,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridModalSheet
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
+import io.github.corebonts.muxgrid.core.designsystem.TimelineNoOpBringIntoViewSpec
 import io.github.corebonts.muxgrid.core.designsystem.TimelineRowTrack
 import io.github.corebonts.muxgrid.core.designsystem.TimelineRuler
 import io.github.corebonts.muxgrid.core.designsystem.TimelineScrollState
@@ -1029,15 +1032,18 @@ private fun MobileTimelineGrid(
         }
     }
 
-    BoxWithConstraints(
-        modifier = modifier
-            .padding(horizontal = 8.dp)
-            .scrollable(
-                state = scrollState.scrollableState,
-                orientation = Orientation.Horizontal,
-                reverseDirection = true,
-            ),
-    ) {
+    val defaultBringIntoViewSpec = LocalBringIntoViewSpec.current
+    CompositionLocalProvider(LocalBringIntoViewSpec provides TimelineNoOpBringIntoViewSpec) {
+        BoxWithConstraints(
+            modifier = modifier
+                .padding(horizontal = 8.dp)
+                .scrollable(
+                    state = scrollState.scrollableState,
+                    orientation = Orientation.Horizontal,
+                    reverseDirection = true,
+                ),
+        ) {
+            CompositionLocalProvider(LocalBringIntoViewSpec provides defaultBringIntoViewSpec) {
         val trackWidth = (maxWidth - channelColWidth).coerceAtLeast(220.dp)
         val trackWidthPx = with(density) { trackWidth.toPx() }
         SideEffect {
@@ -1263,15 +1269,6 @@ private fun MobileTimelineGrid(
                                         .onFocusChanged { state ->
                                             val focused = state.isFocused
                                             if (evFocused != focused) evFocused = focused
-                                            if (focused && !scrollState.scrollableState.isScrollInProgress) {
-                                                scope.launch {
-                                                    scrollState.ensureIntervalVisible(
-                                                        startSec = ev.startEpochSec,
-                                                        stopSec = ev.stopEpochSec,
-                                                        requireFullVisibility = false,
-                                                    )
-                                                }
-                                            }
                                         }
                                         .clickable { onSelectEvent(ev) }
                                         .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -1310,5 +1307,7 @@ private fun MobileTimelineGrid(
                 }
             }
         }
+        }
+    }
     }
 }
