@@ -95,6 +95,7 @@ import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
 import io.github.corebonts.muxgrid.core.designsystem.scrollItemIntoViewport
 import io.github.corebonts.muxgrid.core.designsystem.searchEpgEvents
 import io.github.corebonts.muxgrid.core.model.Channel
+import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.EpgEvent
@@ -119,6 +120,7 @@ private data class TimelineCell(
 @Composable
 internal fun TvGuideScreen(
     channels: List<Channel>,
+    connectionState: ConnectionState = ConnectionState.Disconnected,
     epgByChannel: Map<Long, List<EpgEvent>>,
     dvrEntries: Map<Long, DvrEntry>,
     nowEpochSec: Long,
@@ -625,7 +627,13 @@ internal fun TvGuideScreen(
             }
         } else if (channels.isEmpty()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("No channels synced yet", style = MuxGridType.CardSubtitle, fontSize = 16.sp)
+                val emptyText = when (connectionState) {
+                    is ConnectionState.Connecting, is ConnectionState.Syncing -> "Syncing channels from Tvheadend…"
+                    is ConnectionState.Disconnected -> "Connecting to Tvheadend…"
+                    is ConnectionState.Error -> connectionState.message
+                    is ConnectionState.Connected -> "No channels synced yet"
+                }
+                Text(emptyText, style = MuxGridType.CardSubtitle, fontSize = 16.sp)
             }
         } else {
             // Sticky time ruler + tight broadcast horizontal timeline rows with red "Now" hairline

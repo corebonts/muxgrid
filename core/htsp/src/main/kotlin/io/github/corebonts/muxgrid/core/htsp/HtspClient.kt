@@ -41,12 +41,16 @@ class HtspClient(
     private val connectTimeoutMs: Int = HtspSession.CONNECT_TIMEOUT_MS,
     private val rpcTimeoutMs: Long = HtspSession.RPC_TIMEOUT_MS,
     private val initialSyncTimeoutMs: Long = INITIAL_SYNC_TIMEOUT_MS,
+    private val awaitConsumerSyncAck: Boolean = false,
 ) {
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     private val eventChannel = Channel<HtspPushEvent>(Channel.UNLIMITED)
     val events: Flow<HtspPushEvent> = eventChannel.receiveAsFlow()
+
+    private val syncAckLock = Any()
+    private val pendingSyncAcks = ArrayDeque<CompletableDeferred<Unit>>()
 
     private val seqGenerator = AtomicLong(1L)
     private val sessionLock = Any()
@@ -375,6 +379,13 @@ class HtspClient(
         }
     }
 
+    fun acknowledgeInitialSync() {
+        val ack = synchronized(syncAckLock) {
+            if (pendingSyncAcks.isEmpty()) null else pendingSyncAcks.removeFirst()
+        }
+        ack?.complete(Unit)
+    }
+
     private fun publishStateIfCurrent(generation: Long, state: ConnectionState) {
         synchronized(sessionLock) {
             if (connectionGeneration.get() == generation) {
@@ -427,6 +438,7 @@ class HtspClient(
         }
 
         val initialSyncDeferred = CompletableDeferred<Unit>()
+        var syncAppliedAck: CompletableDeferred<Unit>? = null
         var negotiatedVersion = CLIENT_HTSP_VERSION
         var serverName = "Tvheadend"
         var serverVersion = ""
@@ -441,9 +453,18 @@ class HtspClient(
                     if (connectionGeneration.get() != generation) return@readLoop
                     val event = HtspMessageParser.parsePushEvent(method, msg)
                     if (event != null) {
-                        eventChannel.trySend(event)
                         if (event is HtspPushEvent.InitialSyncCompleted) {
+                            val ack = if (awaitConsumerSyncAck) CompletableDeferred<Unit>() else null
+                            synchronized(syncAckLock) {
+                                if (ack != null) {
+                                    pendingSyncAcks.addLast(ack)
+                                }
+                                eventChannel.trySend(event)
+                            }
+                            syncAppliedAck = ack
                             initialSyncDeferred.complete(Unit)
+                        } else {
+                            eventChannel.trySend(event)
                         }
                     }
                 }
@@ -488,6 +509,8 @@ class HtspClient(
             withTimeoutOrNull(initialSyncTimeoutMs) {
                 initialSyncDeferred.await()
             } ?: throw HtspException("HTSP initial sync timed out after ${initialSyncTimeoutMs}ms")
+            // Keep state in Syncing until the store has finished applying and publishing the sync batch.
+            syncAppliedAck?.await()
             onSyncCompleted()
 
             var clockOffsetMs = fetchClockOffsetOrZero(session)

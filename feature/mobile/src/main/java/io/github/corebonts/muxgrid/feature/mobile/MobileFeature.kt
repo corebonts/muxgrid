@@ -249,6 +249,7 @@ fun MobileRoot(
                             MobileLiveChannelsTab(
                                 connectionState = connectionState,
                                 channels = filteredChannels,
+                                hasAnyChannels = channels.isNotEmpty(),
                                 filters = remember(tags) { buildLiveFilters(tags) },
                                 activeFilter = activeFilter,
                                 favorites = favorites,
@@ -911,6 +912,7 @@ private fun MobileMiniPlayerBar(
 private fun MobileLiveChannelsTab(
     connectionState: ConnectionState,
     channels: List<Channel>,
+    hasAnyChannels: Boolean,
     filters: List<LiveFilter>,
     activeFilter: LiveFilter,
     favorites: Set<Long>,
@@ -1000,9 +1002,13 @@ private fun MobileLiveChannelsTab(
                             modifier = Modifier.fillParentMaxSize(),
                             contentAlignment = Alignment.Center,
                         ) {
-                            val emptyText = when (connectionState) {
-                                is ConnectionState.Connecting, is ConnectionState.Syncing -> "Syncing channels from Tvheadend…"
-                                else -> "No channels match this filter"
+                            val emptyText = when {
+                                hasAnyChannels -> "No channels match this filter"
+                                connectionState is ConnectionState.Connecting ||
+                                    connectionState is ConnectionState.Syncing -> "Syncing channels from Tvheadend…"
+                                connectionState is ConnectionState.Disconnected -> "Connecting to Tvheadend…"
+                                connectionState is ConnectionState.Error -> connectionState.message
+                                else -> "No channels synced yet"
                             }
                             Text(emptyText, style = MuxGridType.CardSubtitle)
                         }

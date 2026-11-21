@@ -72,6 +72,7 @@ import io.github.corebonts.muxgrid.core.designsystem.formatDurationMs
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochDayHm
 import io.github.corebonts.muxgrid.core.designsystem.formatFileSize
 import io.github.corebonts.muxgrid.core.model.Channel
+import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import kotlinx.coroutines.launch
@@ -81,6 +82,7 @@ import kotlinx.coroutines.launch
 internal fun TvRecordingsScreen(
     dvrEntries: Map<Long, DvrEntry>,
     channels: List<Channel>,
+    connectionState: ConnectionState = ConnectionState.Disconnected,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     listState: LazyListState = rememberLazyListState(),
@@ -196,7 +198,13 @@ internal fun TvRecordingsScreen(
 
     if (shelves.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No recordings or scheduled timers", style = MuxGridType.CardSubtitle, fontSize = 16.sp)
+            val emptyText = when (connectionState) {
+                is ConnectionState.Connecting, is ConnectionState.Syncing -> "Syncing recordings from Tvheadend…"
+                is ConnectionState.Disconnected -> "Connecting to Tvheadend…"
+                is ConnectionState.Error -> connectionState.message
+                is ConnectionState.Connected -> "No recordings or scheduled timers"
+            }
+            Text(emptyText, style = MuxGridType.CardSubtitle, fontSize = 16.sp)
         }
         return
     }

@@ -877,4 +877,83 @@ class HtspClientTest {
             }
         }
     }
+
+    @Test
+    fun `awaitConsumerSyncAck keeps Syncing until consumer calls acknowledgeInitialSync`() = runBlocking {
+        ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
+            val serverTask = async(Dispatchers.IO) {
+                server.accept().use { sock ->
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val hello = HtsMsgCodec.readFrame(input)
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
+                    output.flush()
+                    val sync = HtsMsgCodec.readFrame(input)
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
+                    output.write(
+                        HtsMsgCodec.encodeFrame(
+                            htsMap {
+                                put("method", "channelAdd")
+                                put("channelId", 1L)
+                                put("channelNumber", 1)
+                                put("channelName", "M1 HD")
+                            },
+                        ),
+                    )
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
+                    output.flush()
+
+                    runCatching {
+                        while (true) {
+                            val req = HtsMsgCodec.readFrame(input)
+                            if (req.getString("method") == "getSysTime") {
+                                output.write(
+                                    HtsMsgCodec.encodeFrame(
+                                        htsMap {
+                                            put("seq", req.getLong("seq")!!)
+                                            put("time", System.currentTimeMillis() / 1000L)
+                                        },
+                                    ),
+                                )
+                                output.flush()
+                            }
+                        }
+                    }
+                }
+            }
+
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val client = HtspClient(scope = scope, awaitConsumerSyncAck = true)
+            val syncEventSeen = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val allowAck = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val collector = scope.launch {
+                client.events.collect { event ->
+                    if (event is HtspPushEvent.InitialSyncCompleted) {
+                        syncEventSeen.complete(Unit)
+                        allowAck.await()
+                        client.acknowledgeInitialSync()
+                    }
+                }
+            }
+            try {
+                client.connect(ServerProfile(host = "127.0.0.1", htspPort = server.localPort))
+                withTimeout(5_000) {
+                    syncEventSeen.await()
+                }
+                delay(100L)
+                assertTrue(client.connectionState.value is ConnectionState.Syncing)
+
+                allowAck.complete(Unit)
+                withTimeout(5_000) {
+                    client.connectionState.first { it is ConnectionState.Connected }
+                }
+            } finally {
+                allowAck.complete(Unit)
+                collector.cancel()
+                client.disconnect()
+                scope.cancel()
+                serverTask.await()
+            }
+        }
+    }
 }
