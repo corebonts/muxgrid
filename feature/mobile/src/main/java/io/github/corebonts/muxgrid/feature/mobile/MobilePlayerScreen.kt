@@ -48,6 +48,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -87,6 +88,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridSeekBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
+import io.github.corebonts.muxgrid.core.designsystem.PlaybackInfoPanel
 import io.github.corebonts.muxgrid.core.designsystem.TimeshiftNoticeBanner
 import io.github.corebonts.muxgrid.core.designsystem.TrackAndPresetPanel
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationSec
@@ -156,6 +158,7 @@ internal fun MobilePlayerScreen(
     var hudVisible by remember { mutableStateOf(true) }
     var hudInteractionNonce by remember { mutableIntStateOf(0) }
     var trackPanelOpen by remember { mutableStateOf(false) }
+    var infoPanelOpen by remember { mutableStateOf(false) }
     var quickZapOpen by remember { mutableStateOf(false) }
     var isScrubbing by remember { mutableStateOf(false) }
     var scrubPositionMs by remember { mutableLongStateOf(0L) }
@@ -174,20 +177,30 @@ internal fun MobilePlayerScreen(
     val isAudioStage = playbackState.isRadio || playbackState.isAudioOnly
     val hasError = playbackState.error != null
 
-    BackHandler(enabled = trackPanelOpen || quickZapOpen) {
+    BackHandler(enabled = trackPanelOpen || infoPanelOpen || quickZapOpen) {
         when {
+            infoPanelOpen -> infoPanelOpen = false
             trackPanelOpen -> trackPanelOpen = false
             quickZapOpen -> quickZapOpen = false
         }
     }
 
+    LaunchedEffect(infoPanelOpen) {
+        playbackEngine.setDiagnosticsEnabled(infoPanelOpen)
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            playbackEngine.setDiagnosticsEnabled(false)
+        }
+    }
+
     // Immersive system bars on phone player
-    LaunchedEffect(hudVisible, isInPip, trackPanelOpen, quickZapOpen, hasError) {
+    LaunchedEffect(hudVisible, isInPip, trackPanelOpen, infoPanelOpen, quickZapOpen, hasError) {
         val window = activity?.window ?: return@LaunchedEffect
         val controller = WindowCompat.getInsetsController(window, view)
         controller.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        if (!hudVisible && !isInPip && !trackPanelOpen && !quickZapOpen && !hasError) {
+        if (!hudVisible && !isInPip && !trackPanelOpen && !infoPanelOpen && !quickZapOpen && !hasError) {
             controller.hide(WindowInsetsCompat.Type.systemBars())
         } else {
             controller.show(WindowInsetsCompat.Type.systemBars())
@@ -207,8 +220,8 @@ internal fun MobilePlayerScreen(
         }
     }
 
-    LaunchedEffect(hudVisible, hudInteractionNonce, trackPanelOpen, quickZapOpen, playbackState.status, isScrubbing, isInPip) {
-        if (hudVisible && !trackPanelOpen && !quickZapOpen && !isScrubbing && !isInPip &&
+    LaunchedEffect(hudVisible, hudInteractionNonce, trackPanelOpen, infoPanelOpen, quickZapOpen, playbackState.status, isScrubbing, isInPip) {
+        if (hudVisible && !trackPanelOpen && !infoPanelOpen && !quickZapOpen && !isScrubbing && !isInPip &&
             playbackState.status == PlaybackStatus.PLAYING && !isAudioStage
         ) {
             delay(3_500L)
@@ -234,17 +247,18 @@ internal fun MobilePlayerScreen(
                     Modifier
                 } else {
                     Modifier
-                        .pointerInput(canSeekTimeline, trackPanelOpen, quickZapOpen) {
+                        .pointerInput(canSeekTimeline, trackPanelOpen, infoPanelOpen, quickZapOpen) {
                             detectTapGestures(
                                 onTap = {
                                     when {
+                                        infoPanelOpen -> infoPanelOpen = false
                                         trackPanelOpen -> trackPanelOpen = false
                                         quickZapOpen -> quickZapOpen = false
                                         else -> hudVisible = !hudVisible
                                     }
                                 },
                                 onDoubleTap = { offset ->
-                                    if (!canSeekTimeline || trackPanelOpen || quickZapOpen) return@detectTapGestures
+                                    if (!canSeekTimeline || trackPanelOpen || infoPanelOpen || quickZapOpen) return@detectTapGestures
                                     val isRight = offset.x >= size.width / 2f
                                     val stepSec = if (isRight) 30 else -10
                                     playbackEngine.seekBy(stepSec * 1_000L)
@@ -261,8 +275,8 @@ internal fun MobilePlayerScreen(
                                 },
                             )
                         }
-                        .pointerInput(trackPanelOpen, quickZapOpen, isAudioStage) {
-                            if (trackPanelOpen || quickZapOpen || isAudioStage) return@pointerInput
+                        .pointerInput(trackPanelOpen, infoPanelOpen, quickZapOpen, isAudioStage) {
+                            if (trackPanelOpen || infoPanelOpen || quickZapOpen || isAudioStage) return@pointerInput
                             var isLeftZone = false
                             var isRightZone = false
                             detectVerticalDragGestures(
@@ -695,10 +709,19 @@ internal fun MobilePlayerScreen(
                             } else {
                                 Spacer(Modifier.width(1.dp))
                             }
-                            OptionsHudButton(
-                                showLabel = !isPortrait,
-                                onClick = { trackPanelOpen = !trackPanelOpen },
-                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                PlaybackInfoHudButton(
+                                    showLabel = !isPortrait,
+                                    onClick = { infoPanelOpen = !infoPanelOpen },
+                                )
+                                OptionsHudButton(
+                                    showLabel = !isPortrait,
+                                    onClick = { trackPanelOpen = !trackPanelOpen },
+                                )
+                            }
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             MuxGridSeekBar(
@@ -795,6 +818,10 @@ internal fun MobilePlayerScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
+                                PlaybackInfoHudButton(
+                                    showLabel = !isPortrait,
+                                    onClick = { infoPanelOpen = !infoPanelOpen },
+                                )
                                 OptionsHudButton(
                                     showLabel = !isPortrait,
                                     onClick = { trackPanelOpen = !trackPanelOpen },
@@ -1013,6 +1040,11 @@ internal fun MobilePlayerScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(MuxGridColors.OverlayBackdrop)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { trackPanelOpen = false },
+                    )
                     .statusBarsPadding()
                     .navigationBarsPadding()
                     .padding(20.dp),
@@ -1031,6 +1063,32 @@ internal fun MobilePlayerScreen(
                     onSelectAspectMode = onSelectAspectMode,
                     onClose = { trackPanelOpen = false },
                     modifier = Modifier.widthIn(max = 540.dp).fillMaxWidth(),
+                )
+            }
+        }
+
+        if (infoPanelOpen) {
+            val diagnostics by playbackEngine.diagnostics.collectAsState()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MuxGridColors.OverlayBackdrop)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { infoPanelOpen = false },
+                    )
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(20.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                PlaybackInfoPanel(
+                    playbackState = playbackState,
+                    diagnostics = diagnostics,
+                    hwDecPreset = hwDecPreset,
+                    onClose = { infoPanelOpen = false },
+                    modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth(),
                 )
             }
         }
@@ -1129,6 +1187,40 @@ private fun TopHudIconButton(
             tint = Color.White,
             modifier = Modifier.size(iconSize),
         )
+    }
+}
+
+@Composable
+private fun PlaybackInfoHudButton(
+    showLabel: Boolean,
+    onClick: () -> Unit,
+) {
+    if (showLabel) {
+        MuxGridCompactButton(
+            text = "Playback info",
+            leadingIcon = MuxGridIcons.Info,
+            containerColor = MuxGridColors.ScrimSurface,
+            contentColor = Color.White,
+            borderColor = Color.White.copy(alpha = 0.22f),
+            onClick = onClick,
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(MuxGridShapes.Sm)
+                .background(MuxGridColors.ScrimSurface)
+                .border(MuxGridBorders.Hairline, Color.White.copy(alpha = 0.22f), MuxGridShapes.Sm)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = MuxGridIcons.Info,
+                contentDescription = "Playback info",
+                tint = Color.White,
+                modifier = Modifier.size(16.dp),
+            )
+        }
     }
 }
 

@@ -378,6 +378,16 @@ class LocalMediaProxyTest {
             input.close()
             conn.disconnect()
             assertTrue(closeLatch.await(2, TimeUnit.SECONDS))
+            val stats = proxy.snapshotStreamStats()
+            assertEquals("HTSP VFS (growing)", stats.transportMode)
+            assertEquals("HTSP VFS", stats.upstreamHost)
+            assertEquals("Tail-follow", stats.upstreamStatus)
+            assertEquals(10L, stats.totalBytesRead)
+
+            proxy.resetStreamStats()
+            val cleared = proxy.snapshotStreamStats()
+            assertNull(cleared.transportMode)
+            assertEquals(0L, cleared.totalBytesRead)
         } finally {
             proxy.close()
         }

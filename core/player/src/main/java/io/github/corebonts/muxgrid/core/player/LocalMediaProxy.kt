@@ -21,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -85,6 +86,13 @@ class LocalMediaProxy(
         val headers: Map<String, String>,
     )
 
+    data class ProxyStreamStats(
+        val transportMode: String? = null,
+        val upstreamHost: String? = null,
+        val upstreamStatus: String? = null,
+        val totalBytesRead: Long = 0L,
+    )
+
     val sessionToken: String = UUID.randomUUID().toString().replace("-", "")
 
     private val serverSocket = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
@@ -94,6 +102,10 @@ class LocalMediaProxy(
     private val ticketCache = ConcurrentHashMap<TicketCacheKey, CachedTicket>()
     private val activeLiveUpstream = AtomicReference<ActiveStreamHandle?>(null)
     private val activeDvrUpstreams = ConcurrentHashMap.newKeySet<ActiveStreamHandle>()
+    private val activeStreamBytes = AtomicLong(0L)
+    @Volatile private var activeTransportMode: String? = null
+    @Volatile private var activeUpstreamHost: String? = null
+    @Volatile private var activeUpstreamStatus: String? = null
     private val executor: ExecutorService = Executors.newCachedThreadPool { runnable ->
         Thread(runnable, "muxgrid-media-proxy").apply { isDaemon = true }
     }
@@ -101,6 +113,20 @@ class LocalMediaProxy(
     init {
         executor.submit { acceptLoop() }
     }
+
+    fun resetStreamStats() {
+        activeStreamBytes.set(0L)
+        activeTransportMode = null
+        activeUpstreamHost = null
+        activeUpstreamStatus = null
+    }
+
+    fun snapshotStreamStats(): ProxyStreamStats = ProxyStreamStats(
+        transportMode = activeTransportMode,
+        upstreamHost = activeUpstreamHost,
+        upstreamStatus = activeUpstreamStatus,
+        totalBytesRead = activeStreamBytes.get(),
+    )
 
     fun liveStreamUrl(channelId: Long): String =
         "http://127.0.0.1:$port/$sessionToken/live/$channelId"
@@ -235,6 +261,10 @@ class LocalMediaProxy(
             return
         }
 
+        activeTransportMode = "HTTP MPEG-TS (pass)"
+        activeUpstreamHost = "${endpoint.host}:${endpoint.port}"
+        activeUpstreamStatus = "Connecting"
+
         val key = TicketCacheKey(isDvr = false, id = channelId)
         val httpMethod = if (method == "HEAD") "HEAD" else "GET"
 
@@ -284,12 +314,14 @@ class LocalMediaProxy(
                 runCatching { response.socket.close() }
                 if (!handle.cancelled.get()) {
                     val msg = "Upstream returned HTTP ${response.statusCode}"
+                    activeUpstreamStatus = "HTTP ${response.statusCode}"
                     onLiveOpenFailed(channelId, msg, false)
                     writeHttpError(clientOut, response.statusCode.coerceIn(400, 599), msg)
                 }
                 return
             }
 
+            activeUpstreamStatus = "HTTP ${response.statusCode}"
             val contentType = response.headers["content-type"] ?: "video/mp2t"
             val respHeader = "HTTP/1.1 200 OK\r\nContent-Type: $contentType\r\nConnection: close\r\n\r\n"
             clientOut.write(respHeader.toByteArray(StandardCharsets.US_ASCII))
@@ -326,6 +358,10 @@ class LocalMediaProxy(
             writeHttpError(clientOut, 503, "No server configured")
             return
         }
+
+        activeTransportMode = "HTTP DVR"
+        activeUpstreamHost = "${endpoint.host}:${endpoint.port}"
+        activeUpstreamStatus = "Connecting"
 
         val key = TicketCacheKey(isDvr = true, id = dvrId)
         val httpMethod = if (method == "HEAD") "HEAD" else "GET"
@@ -365,6 +401,7 @@ class LocalMediaProxy(
             if (response.statusCode !in 200..299) {
                 runCatching { response.socket.close() }
                 if (!handle.cancelled.get()) {
+                    activeUpstreamStatus = "HTTP ${response.statusCode}"
                     writeHttpError(
                         clientOut,
                         response.statusCode.coerceIn(400, 599),
@@ -374,6 +411,7 @@ class LocalMediaProxy(
                 return
             }
 
+            activeUpstreamStatus = "HTTP ${response.statusCode}"
             val respHeaders = buildString {
                 append("HTTP/1.1 ${response.statusCode} ${response.statusReason}\r\n")
                 response.headers["content-type"]?.let { append("Content-Type: $it\r\n") }
@@ -441,6 +479,10 @@ class LocalMediaProxy(
             }
             return
         }
+
+        activeTransportMode = "HTSP VFS (growing)"
+        activeUpstreamHost = "HTSP VFS"
+        activeUpstreamStatus = "Tail-follow"
 
         try {
             var currentSize = file.initialSize.coerceAtLeast(0L)
@@ -532,6 +574,7 @@ class LocalMediaProxy(
                 val chunk = runBlocking { file.read(offset, toRead) }
                 if (chunk.isNotEmpty()) {
                     writeHttpChunk(clientOut, chunk)
+                    activeStreamBytes.addAndGet(chunk.size.toLong())
                     offset += chunk.size
                     continue
                 }
@@ -674,6 +717,7 @@ class LocalMediaProxy(
             if (read < 0) break
             if (read > 0) {
                 totalCopied += read
+                activeStreamBytes.addAndGet(read.toLong())
                 output.write(buffer, 0, read)
                 output.flush()
             }

@@ -4,6 +4,7 @@ import android.view.Surface
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
+import io.github.corebonts.muxgrid.core.model.PlaybackDiagnostics
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.model.VideoAspectMode
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
  */
 interface PlaybackEngine {
     val state: StateFlow<PlaybackState>
+    val diagnostics: StateFlow<PlaybackDiagnostics>
 
     fun playChannel(channel: Channel, preset: HwDecPreset)
     fun playDvrEntry(entry: DvrEntry, channel: Channel?, preset: HwDecPreset, startPositionSec: Long = 0L)
@@ -29,6 +31,7 @@ interface PlaybackEngine {
     fun setTimeshiftWindow(window: TimeshiftWindow)
     fun setAudioOnly(audioOnly: Boolean)
     fun setVideoAspectMode(mode: VideoAspectMode)
+    fun setDiagnosticsEnabled(enabled: Boolean)
 
     fun attachSurface(surface: Surface, width: Int, height: Int)
     fun updateSurfaceSize(width: Int, height: Int)
