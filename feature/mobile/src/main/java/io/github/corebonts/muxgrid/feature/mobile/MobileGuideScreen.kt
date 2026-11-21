@@ -108,6 +108,7 @@ import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
 import io.github.corebonts.muxgrid.core.designsystem.rememberTimelineScrollState
 import io.github.corebonts.muxgrid.core.designsystem.scrollItemIntoViewport
 import io.github.corebonts.muxgrid.core.designsystem.searchEpgEvents
+import io.github.corebonts.muxgrid.core.designsystem.timelineStickyTextOffset
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
@@ -1275,7 +1276,9 @@ private fun MobileTimelineGrid(
                                     verticalArrangement = Arrangement.SpaceBetween,
                                 ) {
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .timelineStickyTextOffset(cell.startEpochSec, cell.stopEpochSec, scrollState),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
@@ -1299,6 +1302,7 @@ private fun MobileTimelineGrid(
                                         color = MuxGridColors.TextMuted,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.timelineStickyTextOffset(cell.startEpochSec, cell.stopEpochSec, scrollState),
                                     )
                                 }
                             }

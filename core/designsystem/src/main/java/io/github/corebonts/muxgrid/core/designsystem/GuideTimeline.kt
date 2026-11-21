@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
@@ -417,10 +418,32 @@ fun TimelineRuler(
 }
 
 /**
+ * Draw-phase-only horizontal offset that keeps a program cell's text pinned to the left edge of
+ * the timeline viewport while the cell's start is scrolled off-screen to the left.
+ */
+fun Modifier.timelineStickyTextOffset(
+    cellStartSec: Long,
+    cellStopSec: Long,
+    scrollState: TimelineScrollState,
+): Modifier = graphicsLayer {
+    val origin = scrollState.originEpochSec
+    val pxPerSec = scrollState.pxPerSec
+    val rawLeft = (cellStartSec - origin) * pxPerSec - scrollState.scrollOffsetPx
+    if (rawLeft < 0f) {
+        val cellWidth = (cellStopSec - cellStartSec) * pxPerSec
+        val maxShift = (cellWidth - 96f).coerceAtLeast(0f)
+        translationX = (-rawLeft).coerceAtMost(maxShift)
+    } else {
+        translationX = 0f
+    }
+}
+
+/**
  * Places a channel row's [cells] and live coral "Now" hairline in exact pixel lockstep with
- * [scrollState]. Cells crossing the left or right viewport boundary are clamped to `[0, width]`,
- * which keeps long-program titles pinned at the left edge, keeps focus borders unclipped, and
- * prevents off-screen cells from overlapping the sticky channel column.
+ * [scrollState]. Each cell is measured once at its natural width (without reading
+ * [TimelineScrollState.scrollOffsetPx] during measure), and [scrollState.scrollOffsetPx] is read
+ * strictly during placement (`layout { ... }`) so horizontal scrolling performs zero per-frame
+ * re-measurement or text re-layout.
  */
 @Composable
 fun TimelineRowTrack(
@@ -450,37 +473,34 @@ fun TimelineRowTrack(
         val widthPx = constraints.maxWidth
         val heightPx = constraints.maxHeight
         val gapPx = cellGap.roundToPx()
-        val origin = scrollState.originEpochSec
         val pxPerSec = scrollState.pxPerSec
-        val scrollPx = scrollState.scrollOffsetPx
+        val maxCellWidthPx = (widthPx * 4).coerceAtLeast(widthPx)
 
         val cellMeasurables = measurables.dropLast(1)
-        val placements = ArrayList<Pair<androidx.compose.ui.layout.Placeable, Int>>(cellMeasurables.size)
+        val cellPlaceables = ArrayList<androidx.compose.ui.layout.Placeable>(cellMeasurables.size)
         cellMeasurables.forEachIndexed { idx, measurable ->
             val cell = cells[idx]
-            val rawLeft = ((cell.startEpochSec - origin) * pxPerSec - scrollPx).roundToInt()
-            val rawRight = ((cell.stopEpochSec - origin) * pxPerSec - scrollPx).roundToInt() - gapPx
-            val clampedLeft = rawLeft.coerceAtLeast(0)
-            val clampedRight = rawRight.coerceAtMost(widthPx)
-            val clampedWidth = clampedRight - clampedLeft
-            if (clampedWidth >= 4) {
-                val placeable = measurable.measure(Constraints.fixed(clampedWidth, heightPx))
-                placements.add(placeable to clampedLeft)
-            }
+            val naturalWidthPx = (((cell.stopEpochSec - cell.startEpochSec) * pxPerSec).roundToInt() - gapPx)
+                .coerceIn(4, maxCellWidthPx)
+            cellPlaceables.add(measurable.measure(Constraints.fixed(naturalWidthPx, heightPx)))
         }
 
-        val nowX = ((nowEpochSec - origin) * pxPerSec - scrollPx).roundToInt()
-        val nowPlaceable = if (nowX in 0..widthPx) {
-            measurables.last().measure(Constraints.fixed(2.dp.roundToPx(), heightPx))
-        } else {
-            null
-        }
+        val nowPlaceable = measurables.last().measure(Constraints.fixed(2.dp.roundToPx(), heightPx))
 
         layout(widthPx, heightPx) {
-            placements.forEach { (placeable, x) ->
-                placeable.placeRelative(x = x, y = 0)
+            val origin = scrollState.originEpochSec
+            val scrollPx = scrollState.scrollOffsetPx
+            cellPlaceables.forEachIndexed { idx, placeable ->
+                val cell = cells[idx]
+                val rawLeft = ((cell.startEpochSec - origin) * pxPerSec - scrollPx).roundToInt()
+                if (rawLeft + placeable.width > 0 && rawLeft < widthPx) {
+                    placeable.placeRelative(x = rawLeft, y = 0)
+                }
             }
-            nowPlaceable?.placeRelative(x = nowX, y = 0)
+            val nowX = ((nowEpochSec - origin) * pxPerSec - scrollPx).roundToInt()
+            if (nowX in 0..widthPx) {
+                nowPlaceable.placeRelative(x = nowX, y = 0)
+            }
         }
     }
 }
