@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -35,6 +36,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -62,6 +64,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -93,8 +96,11 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
+import io.github.corebonts.muxgrid.core.designsystem.collectDebugEnvironmentSnapshot
 import io.github.corebonts.muxgrid.core.designsystem.connectionStatusDotColor
+import io.github.corebonts.muxgrid.core.designsystem.copyDebugInfoToClipboard
 import io.github.corebonts.muxgrid.core.designsystem.filterChannels
+import io.github.corebonts.muxgrid.core.designsystem.formatDebugInfoReport
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
 import io.github.corebonts.muxgrid.core.designsystem.label
 import io.github.corebonts.muxgrid.core.designsystem.rememberNowEpochSec
@@ -112,7 +118,9 @@ import io.github.corebonts.muxgrid.core.model.StartScreen
 import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class MobileRoute {
     ONBOARDING,
@@ -1247,6 +1255,8 @@ private fun MobileSettingsTab(
 ) {
     val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var debugReport by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -1602,6 +1612,114 @@ private fun MobileSettingsTab(
                         tint = MuxGridColors.TextMuted,
                         modifier = Modifier.size(18.dp),
                     )
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MuxGridColors.CardSurface)
+                        .clickable {
+                            scope.launch {
+                                debugReport = withContext(Dispatchers.IO) {
+                                    formatDebugInfoReport(
+                                        collectDebugEnvironmentSnapshot(
+                                            context = context,
+                                            appInfo = appInfo,
+                                            isTv = false,
+                                            connectionState = connectionState,
+                                            hwDecPreset = hwDecPreset,
+                                            timeshiftWindow = timeshiftWindow,
+                                            themeMode = themeMode,
+                                            backgroundAudioEnabled = backgroundPlayEnabled,
+                                            pipEnabled = pipEnabled,
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                        .padding(horizontal = 12.dp, vertical = 11.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                        Text(
+                            text = "Debug Info",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MuxGridColors.TextPrimary,
+                        )
+                        Text(
+                            text = "Device, OS, and playback environment",
+                            style = MuxGridType.TabularSmall,
+                            color = MuxGridColors.TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Icon(
+                        imageVector = MuxGridIcons.ChevronRight,
+                        contentDescription = "Show Debug Info",
+                        tint = MuxGridColors.TextMuted,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+
+    debugReport?.let { report ->
+        MuxGridModalSheet(
+            onDismissRequest = { debugReport = null },
+        ) {
+            Text(
+                text = "Debug Info",
+                style = MuxGridType.Title,
+                fontSize = 18.sp,
+            )
+            Text(
+                text = "Non-personal hardware and software environment for issue reports.",
+                style = MuxGridType.CardSubtitle,
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
+                    .clip(MuxGridShapes.Sm)
+                    .background(MuxGridColors.CardSurface)
+                    .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Sm)
+                    .verticalScroll(rememberScrollState())
+                    .padding(12.dp),
+            ) {
+                SelectionContainer {
+                    Text(
+                        text = report,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MuxGridColors.TextPrimary,
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedButton(
+                    onClick = { debugReport = null },
+                    shape = MuxGridShapes.Sm,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Close", color = MuxGridColors.TextPrimary)
+                }
+                Button(
+                    onClick = { copyDebugInfoToClipboard(context, report) },
+                    shape = MuxGridShapes.Sm,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MuxGridColors.Accent,
+                        contentColor = MuxGridColors.OnAccent,
+                    ),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Copy", fontWeight = FontWeight.SemiBold)
                 }
             }
         }
