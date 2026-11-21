@@ -1,5 +1,6 @@
 package io.github.corebonts.muxgrid.core.designsystem
 
+import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.EpgEvent
@@ -205,6 +206,41 @@ fun filterEpgEventsForDay(
     return events.filter { ev ->
         ev.stopEpochSec > dayStartSec && ev.startEpochSec < dayEndSec
     }
+}
+
+const val MAX_EPG_SEARCH_RESULTS = 120
+
+/**
+ * Case-insensitive EPG search across title, subtitle, summary, and description.
+ * Live and upcoming programs appear first in chronological order, followed by past programs
+ * ordered most-recent-first, capped at [limit].
+ */
+fun searchEpgEvents(
+    query: String,
+    channels: List<Channel>,
+    epgByChannel: Map<Long, List<EpgEvent>>,
+    nowEpochSec: Long,
+    limit: Int = MAX_EPG_SEARCH_RESULTS,
+): List<Pair<EpgEvent, Channel>> {
+    val trimmed = query.trim()
+    if (trimmed.isEmpty() || limit <= 0) return emptyList()
+    val results = ArrayList<Pair<EpgEvent, Channel>>()
+    for (ch in channels) {
+        val list = epgByChannel[ch.id].orEmpty()
+        for (ev in list) {
+            if (ev.title.contains(trimmed, ignoreCase = true) ||
+                (ev.subtitle?.contains(trimmed, ignoreCase = true) == true) ||
+                (ev.summary?.contains(trimmed, ignoreCase = true) == true) ||
+                (ev.description?.contains(trimmed, ignoreCase = true) == true)
+            ) {
+                results.add(ev to ch)
+            }
+        }
+    }
+    return results.sortedWith(
+        compareBy<Pair<EpgEvent, Channel>> { it.first.stopEpochSec < nowEpochSec }
+            .thenBy { if (it.first.stopEpochSec < nowEpochSec) -it.first.startEpochSec else it.first.startEpochSec },
+    ).take(limit)
 }
 
 private val DAY_SHORT_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE, MMM d")

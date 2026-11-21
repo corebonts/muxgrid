@@ -1,7 +1,6 @@
 package io.github.corebonts.muxgrid.feature.tv
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -43,6 +42,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -68,12 +68,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Border
 import androidx.tv.material3.Button
-import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.FilterChip
 import androidx.tv.material3.FilterChipDefaults
 import androidx.tv.material3.Icon
-import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
@@ -90,17 +88,19 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.buildAvailableGuideDays
 import io.github.corebonts.muxgrid.core.designsystem.computeGuideEventBounds
-import io.github.corebonts.muxgrid.core.designsystem.findMatchingDvrEntry
 import io.github.corebonts.muxgrid.core.designsystem.formatDayLabel
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochDayHm
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
 import io.github.corebonts.muxgrid.core.designsystem.scrollItemIntoViewport
+import io.github.corebonts.muxgrid.core.designsystem.searchEpgEvents
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.EpgEvent
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
 
@@ -279,33 +279,25 @@ internal fun TvGuideScreen(
     }
     val searchQuery = searchState.text.toString()
     val trimmedQuery = searchQuery.trim()
-    val searchResults: List<Pair<EpgEvent, Channel>> = remember(
+    val searchResults by produceState<List<Pair<EpgEvent, Channel>>>(
+        initialValue = emptyList(),
         searchOpen,
         trimmedQuery,
         epgByChannel,
         channels,
         nowEpochSec / 60L,
     ) {
-        if (!searchOpen || trimmedQuery.isEmpty()) {
+        value = if (!searchOpen || trimmedQuery.isEmpty()) {
             emptyList()
         } else {
-            val results = ArrayList<Pair<EpgEvent, Channel>>()
-            for (ch in channels) {
-                val list = epgByChannel[ch.id].orEmpty()
-                for (ev in list) {
-                    if (ev.title.contains(trimmedQuery, ignoreCase = true) ||
-                        (ev.subtitle?.contains(trimmedQuery, ignoreCase = true) == true) ||
-                        (ev.summary?.contains(trimmedQuery, ignoreCase = true) == true) ||
-                        (ev.description?.contains(trimmedQuery, ignoreCase = true) == true)
-                    ) {
-                        results.add(ev to ch)
-                    }
-                }
+            withContext(Dispatchers.Default) {
+                searchEpgEvents(
+                    query = trimmedQuery,
+                    channels = channels,
+                    epgByChannel = epgByChannel,
+                    nowEpochSec = nowEpochSec,
+                )
             }
-            results.sortedWith(
-                compareBy<Pair<EpgEvent, Channel>> { it.first.stopEpochSec < nowEpochSec }
-                    .thenBy { if (it.first.stopEpochSec < nowEpochSec) -it.first.startEpochSec else it.first.startEpochSec },
-            ).take(120)
         }
     }
 
@@ -332,28 +324,6 @@ internal fun TvGuideScreen(
             null
         }
     }
-
-    val channelShape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm)
-    val channelBorder = ClickableSurfaceDefaults.border(
-        border = Border.None,
-        focusedBorder = Border(
-            border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-            shape = MuxGridShapes.Sm,
-        ),
-    )
-    val cellColorsLive = ClickableSurfaceDefaults.colors(
-        containerColor = MuxGridColors.CardSurfaceElevated,
-        contentColor = MuxGridColors.TextPrimary,
-        focusedContainerColor = MuxGridColors.Accent.copy(alpha = 0.22f),
-        focusedContentColor = MuxGridColors.TextPrimary,
-    )
-    val cellColorsEven = ClickableSurfaceDefaults.colors(
-        containerColor = MuxGridColors.CardSurface,
-        contentColor = MuxGridColors.TextPrimary,
-        focusedContainerColor = MuxGridColors.Accent.copy(alpha = 0.22f),
-        focusedContentColor = MuxGridColors.TextPrimary,
-    )
-    val cellScale = ClickableSurfaceDefaults.scale(focusedScale = 1.015f)
 
     Column(
         modifier = Modifier
@@ -570,58 +540,84 @@ internal fun TvGuideScreen(
                     ) { (ev, ch) ->
                         val isLiveNow = nowEpochSec in ev.startEpochSec until ev.stopEpochSec
                         val linkedDvr = dvrIndex.findMatch(ev)
-                        Surface(
-                            onClick = {
-                                actionError = null
-                                actionEventKey = ev.channelId to ev.id
-                            },
+                        var rowFocused by remember(ev.id) { mutableStateOf(false) }
+                        val rowBg = when {
+                            rowFocused -> MuxGridColors.Accent.copy(alpha = 0.22f)
+                            isLiveNow -> MuxGridColors.CardSurfaceElevated
+                            else -> MuxGridColors.CardSurface
+                        }
+                        val rowDescription = remember(ev.id, ch.name, ev.title) {
+                            "${ev.title}, ${ch.name}"
+                        }
+                        // Lightweight focusable row avoids tv.material3.Surface's SurfaceGlowNode and scale animations
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .onFocusChanged { if (it.isFocused) focusedEventState.value = ev },
-                            shape = channelShape,
-                            colors = if (isLiveNow) cellColorsLive else cellColorsEven,
-                            border = channelBorder,
-                            scale = cellScale,
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                ChannelPiconBadge(
-                                    channelNumber = ch.formattedNumber,
-                                    channelName = ch.name,
-                                    piconModel = ch.icon?.let { PiconModel(ch.id, it) },
-                                    imageLoader = imageLoader,
-                                    size = 34.dp,
+                                .clip(MuxGridShapes.Sm)
+                                .background(rowBg)
+                                .then(
+                                    if (rowFocused) {
+                                        Modifier.border(
+                                            MuxGridBorders.Focused,
+                                            MuxGridColors.FocusBorder,
+                                            MuxGridShapes.Sm,
+                                        )
+                                    } else {
+                                        Modifier
+                                    },
                                 )
-                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text(
-                                        text = ev.title,
-                                        style = MuxGridType.CardTitle,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        text = "${ch.name} · ${formatEpochDayHm(ev.startEpochSec, nowEpochSec)}–${formatEpochHm(ev.stopEpochSec)} (${formatDurationMinutes(ev.startEpochSec, ev.stopEpochSec)})",
-                                        style = MuxGridType.TabularSmall,
-                                        color = MuxGridColors.AccentSoft,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
+                                .onFocusChanged { state ->
+                                    val focused = state.isFocused
+                                    if (rowFocused != focused) rowFocused = focused
+                                    if (focused) focusedEventState.value = ev
                                 }
-                                if (linkedDvr != null) {
-                                    DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
-                                } else if (isLiveNow) {
-                                    Text(
-                                        text = "ON NOW",
-                                        color = MuxGridColors.CoralLive,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                    )
+                                .clickable(
+                                    interactionSource = remember(ev.id) { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = {
+                                        actionError = null
+                                        actionEventKey = ev.channelId to ev.id
+                                    },
+                                )
+                                .clearAndSetSemantics {
+                                    role = Role.Button
+                                    contentDescription = rowDescription
                                 }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            ChannelPiconBadge(
+                                channelNumber = ch.formattedNumber,
+                                channelName = ch.name,
+                                piconModel = ch.icon?.let { PiconModel(ch.id, it) },
+                                imageLoader = imageLoader,
+                                size = 34.dp,
+                            )
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = ev.title,
+                                    style = MuxGridType.CardTitle,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = "${ch.name} · ${formatEpochDayHm(ev.startEpochSec, nowEpochSec)}–${formatEpochHm(ev.stopEpochSec)} (${formatDurationMinutes(ev.startEpochSec, ev.stopEpochSec)})",
+                                    style = MuxGridType.TabularSmall,
+                                    color = MuxGridColors.AccentSoft,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (linkedDvr != null) {
+                                DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
+                            } else if (isLiveNow) {
+                                Text(
+                                    text = "ON NOW",
+                                    color = MuxGridColors.CoralLive,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
                             }
                         }
                     }
@@ -952,7 +948,7 @@ internal fun TvGuideScreen(
     }
     actionEvent?.let { ev ->
         val ch = channelById[ev.channelId]
-        val linkedDvr = findMatchingDvrEntry(ev, dvrEntries)
+        val linkedDvr = dvrIndex.findMatch(ev)
         val isLiveNow = nowEpochSec in ev.startEpochSec until ev.stopEpochSec
         val isPast = ev.stopEpochSec <= nowEpochSec
         val primaryFocusRequester = remember { FocusRequester() }
