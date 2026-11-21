@@ -43,10 +43,10 @@ Built as a **single unified codebase** producing ABI-split APKs for Android phon
   - Server-side resume position (`playposition`) and watched state (`playcount`) synced across devices, with local fallback for read-only users.
 - **Background Audio & Picture-in-Picture (Phone & Tablet):**
   - Media3 `MediaSessionService` foreground playback with lock-screen controls, Bluetooth/headset media keys, audio focus handling, headphone-disconnect pause, and Wi-Fi/partial wake locks.
-  - Persistent mini-player bar, `vid=no` audio-only backgrounding for radio and live TV, and automatic/manual Picture-in-Picture (PiP).
+  - Persistent mini-player bar and unified **Background Playback** selector (`Off`, `Audio` with `vid=no` backgrounding, or `PiP`) in Settings, with automatic radio backgrounding.
 - **Tailored Mobile & 10-ft TV Controls:**
-  - **Mobile:** Double-tap seek (`-10s` / `+30s`), vertical edge drags for brightness and volume, aspect ratio selector, Quick-Zap channel drawer, adaptive tablet/landscape layout, and Haze backdrop blur on non-video chrome.
-  - **Android TV:** Collapsible left Navigation Rail (`androidx.tv:tv-material`), instant `Ch+`/`Ch-` / D-pad Up/Down zapping with minimal OSD, progressive D-pad seeking (`10s → 30s → 1m → 5m → 10m` tap ladder with gear-locked continuous hold capped at `30s`), and an overlay Quick Channel Strip.
+  - **Mobile:** Double-tap seek (`-10s` / `+30s`), vertical edge drags for brightness and volume, aspect ratio selector, in-player **Playback Info** diagnostics, persisted subtitle preferences, Quick-Zap channel drawer, adaptive tablet/landscape layout, **Auto / Light / Dark** themes, configurable **Start Screen**, and Haze backdrop blur on non-video chrome.
+  - **Android TV:** Collapsible left Navigation Rail (`androidx.tv:tv-material`), instant `Ch+`/`Ch-` / D-pad Up/Down zapping with minimal OSD, progressive D-pad seeking (`10s → 30s → 1m → 5m → 10m` tap ladder with gear-locked continuous hold capped at `30s`), in-player **Playback Info** panel, **Auto / Light / Dark** themes, configurable **Start Screen**, and an overlay Quick Channel Strip.
 
 ## Server Setup (Tvheadend)
 
