@@ -352,8 +352,12 @@ private fun TvContent(
     // Hoisted scroll states & non-reactive focus memory survive MAIN <-> PLAYER and MAIN <-> ONBOARDING
     val liveGridState = rememberLazyGridState()
     val guideListState = rememberLazyListState()
-    var guideWindowStartEpochSec by remember {
-        mutableLongStateOf((((System.currentTimeMillis() + offsetMs) / 1000L) / 1800L) * 1800L)
+    var guideWindowStartEpochSec by remember { mutableLongStateOf(0L) }
+    var hasUserAdjustedGuideWindow by remember { mutableStateOf(false) }
+    LaunchedEffect(activeTab, offsetMs) {
+        if (activeTab == MainTab.GUIDE && !hasUserAdjustedGuideWindow) {
+            guideWindowStartEpochSec = (((System.currentTimeMillis() + offsetMs) / 1000L) / 1800L) * 1800L
+        }
     }
     val recordingsListState = rememberLazyListState()
     val recordingShelfStates = remember { mutableMapOf<String, LazyListState>() }
@@ -427,7 +431,6 @@ private fun TvContent(
                 contentFocusRequestNonce++
             }
             var isRefreshing by remember { mutableStateOf(false) }
-            val railFocusRequester = remember { FocusRequester() }
             val statusDotColor = connectionStatusDotColor(connectionState)
 
             Box(
@@ -589,8 +592,11 @@ private fun TvContent(
                                     nowEpochSec = nowEpochSec,
                                     imageLoader = repository.imageLoader,
                                     listState = guideListState,
-                                    windowStartEpochSec = guideWindowStartEpochSec,
-                                    onWindowStartChange = { guideWindowStartEpochSec = it },
+                                    windowStartEpochSec = guideWindowStartEpochSec.takeIf { it > 0L } ?: ((nowEpochSec / 1800L) * 1800L),
+                                    onWindowStartChange = {
+                                        hasUserAdjustedGuideWindow = true
+                                        guideWindowStartEpochSec = it
+                                    },
                                     focusMemory = focusMemory,
                                     focusRequestNonce = contentFocusRequestNonce,
                                     searchOpen = isGuideSearchOpen,
@@ -691,7 +697,6 @@ private fun TvContent(
                     activeTab = activeTab,
                     expanded = railHasFocus,
                     settingsStatusDotColor = statusDotColor,
-                    railFocusRequester = railFocusRequester,
                     onRailFocusChanged = { railHasFocus = it },
                     onSelectTab = { tab ->
                         hasDeliveredInitialContentFocus = true
@@ -715,67 +720,54 @@ private fun TvContent(
             val activeNowNext = activeChannel?.let { nowNextMap[it.id] }
 
             MuxGridTheme(isTv = true, darkTheme = true) {
-                TvMaterialTheme(
-                    colorScheme = tvDarkColorScheme(
-                        primary = MuxGridColors.Accent,
-                        onPrimary = MuxGridColors.OnAccent,
-                        background = MuxGridColors.CanvasTv,
-                        onBackground = MuxGridColors.TextPrimary,
-                        surface = MuxGridColors.CardSurface,
-                        onSurface = MuxGridColors.TextPrimary,
-                        surfaceVariant = MuxGridColors.CardSurfaceElevated,
-                        onSurfaceVariant = MuxGridColors.TextSecondary,
-                    ),
-                ) {
-                    TvPlayerScreen(
-                        playbackEngine = playbackEngine,
-                        playbackState = playbackState,
-                        activeChannel = activeChannel,
-                        nowNext = activeNowNext,
-                        channels = zapList,
-                        nowNextMap = nowNextMap,
-                        nowEpochSec = nowEpochSec,
-                        hwDecPreset = hwDecPreset,
-                        imageLoader = repository.imageLoader,
-                        canZap = zapList.size > 1,
-                        onSelectChannel = { channel ->
-                            playbackEngine.playChannel(channel, hwDecPreset)
-                        },
-                        onZapDelta = { delta ->
-                            if (zapList.isNotEmpty()) {
-                                val idx = zapList.indexOfFirst { it.id == playbackState.channelId }
-                                val nextIdx = if (idx < 0) 0 else (idx + delta + zapList.size) % zapList.size
-                                playbackEngine.playChannel(zapList[nextIdx], hwDecPreset)
+                TvPlayerScreen(
+                    playbackEngine = playbackEngine,
+                    playbackState = playbackState,
+                    activeChannel = activeChannel,
+                    nowNext = activeNowNext,
+                    channels = zapList,
+                    nowNextMap = nowNextMap,
+                    nowEpochSec = nowEpochSec,
+                    hwDecPreset = hwDecPreset,
+                    imageLoader = repository.imageLoader,
+                    canZap = zapList.size > 1,
+                    onSelectChannel = { channel ->
+                        playbackEngine.playChannel(channel, hwDecPreset)
+                    },
+                    onZapDelta = { delta ->
+                        if (zapList.isNotEmpty()) {
+                            val idx = zapList.indexOfFirst { it.id == playbackState.channelId }
+                            val nextIdx = if (idx < 0) 0 else (idx + delta + zapList.size) % zapList.size
+                            playbackEngine.playChannel(zapList[nextIdx], hwDecPreset)
+                        }
+                    },
+                    onSelectPreset = { preset ->
+                        scope.launch { repository.setHwDecPreset(preset) }
+                        playbackEngine.applyPreset(preset)
+                    },
+                    onSelectAspectMode = { mode ->
+                        playbackEngine.setVideoAspectMode(mode)
+                    },
+                    onExit = {
+                        val finalChannelId = playbackState.channelId
+                        val finalDvrId = playbackState.dvrEntryId
+                        when (activeTab) {
+                            MainTab.LIVE -> if (finalChannelId != null) {
+                                focusMemory.liveChannelId = finalChannelId
                             }
-                        },
-                        onSelectPreset = { preset ->
-                            scope.launch { repository.setHwDecPreset(preset) }
-                            playbackEngine.applyPreset(preset)
-                        },
-                        onSelectAspectMode = { mode ->
-                            playbackEngine.setVideoAspectMode(mode)
-                        },
-                        onExit = {
-                            val finalChannelId = playbackState.channelId
-                            val finalDvrId = playbackState.dvrEntryId
-                            when (activeTab) {
-                                MainTab.LIVE -> if (finalChannelId != null) {
-                                    focusMemory.liveChannelId = finalChannelId
-                                }
-                                MainTab.GUIDE -> if (finalChannelId != null && finalChannelId != focusMemory.guideTarget?.channelId) {
-                                    focusMemory.guideTarget = TvGuideFocusTarget(channelId = finalChannelId)
-                                }
-                                MainTab.RECORDINGS -> if (finalDvrId != null && finalDvrId != focusMemory.recordingTarget?.entryId) {
-                                    focusMemory.recordingTarget = TvRecordingFocusTarget(shelfKey = "", entryId = finalDvrId)
-                                }
-                                MainTab.SETTINGS -> Unit
+                            MainTab.GUIDE -> if (finalChannelId != null && finalChannelId != focusMemory.guideTarget?.channelId) {
+                                focusMemory.guideTarget = TvGuideFocusTarget(channelId = finalChannelId)
                             }
-                            playbackEngine.stop()
-                            route = TvRoute.MAIN
-                            contentFocusRequestNonce++
-                        },
-                    )
-                }
+                            MainTab.RECORDINGS -> if (finalDvrId != null && finalDvrId != focusMemory.recordingTarget?.entryId) {
+                                focusMemory.recordingTarget = TvRecordingFocusTarget(shelfKey = "", entryId = finalDvrId)
+                            }
+                            MainTab.SETTINGS -> Unit
+                        }
+                        playbackEngine.stop()
+                        route = TvRoute.MAIN
+                        contentFocusRequestNonce++
+                    },
+                )
             }
         }
     }
@@ -787,7 +779,6 @@ private fun TvNavigationRail(
     activeTab: MainTab,
     expanded: Boolean,
     settingsStatusDotColor: Color?,
-    railFocusRequester: FocusRequester,
     onRailFocusChanged: (Boolean) -> Unit,
     onSelectTab: (MainTab) -> Unit,
     modifier: Modifier = Modifier,
@@ -822,11 +813,7 @@ private fun TvNavigationRail(
                     Triple(MainTab.RECORDINGS, MuxGridIcons.Recordings to MuxGridIcons.RecordingsFilled, "Recordings"),
                 ).forEach { (tab, icons, label) ->
                     val selected = tab == activeTab
-                    val itemModifier = when {
-                        selected && tab == MainTab.LIVE -> Modifier.focusRequester(railFocusRequester).focusRequester(activeFocusRequester)
-                        selected -> Modifier.focusRequester(activeFocusRequester)
-                        else -> Modifier
-                    }
+                    val itemModifier = if (selected) Modifier.focusRequester(activeFocusRequester) else Modifier
                     TvRailItem(
                         icon = if (selected) icons.second else icons.first,
                         label = label,

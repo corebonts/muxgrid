@@ -938,10 +938,13 @@ private fun MobileLiveChannelsTab(
             scope.launch {
                 isRefreshing = true
                 refreshError = null
-                onRefresh().onFailure {
-                    refreshError = it.message ?: "Failed to refresh channels"
+                try {
+                    onRefresh().onFailure {
+                        refreshError = it.message ?: "Failed to refresh channels"
+                    }
+                } finally {
+                    isRefreshing = false
                 }
-                isRefreshing = false
             }
         }
     }
@@ -1136,10 +1139,13 @@ private fun MobileLiveChannelsTab(
                         scope.launch {
                             actionBusy = true
                             actionMessage = null
-                            onRecordEvent(nowEvent.id)
-                                .onSuccess { actionChannelId = null }
-                                .onFailure { actionMessage = it.message ?: "Failed to record" }
-                            actionBusy = false
+                            try {
+                                onRecordEvent(nowEvent.id)
+                                    .onSuccess { actionChannelId = null }
+                                    .onFailure { actionMessage = it.message ?: "Failed to record" }
+                            } finally {
+                                actionBusy = false
+                            }
                         }
                     },
                     shape = MuxGridShapes.Sm,

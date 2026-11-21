@@ -1121,10 +1121,13 @@ internal fun TvGuideScreen(
                                 scope.launch {
                                     actionBusy = true
                                     actionError = null
-                                    onScheduleRecording(ev.id)
-                                        .onSuccess { actionEventKey = null }
-                                        .onFailure { actionError = it.message ?: "Failed to schedule" }
-                                    actionBusy = false
+                                    try {
+                                        onScheduleRecording(ev.id)
+                                            .onSuccess { actionEventKey = null }
+                                            .onFailure { actionError = it.message ?: "Failed to schedule" }
+                                    } finally {
+                                        actionBusy = false
+                                    }
                                 }
                             },
                             modifier = recordButtonModifier,
@@ -1166,21 +1169,24 @@ internal fun TvGuideScreen(
                 scope.launch {
                     actionBusy = true
                     actionError = null
-                    val result = when (kind) {
-                        DvrConfirmKind.STOP_AND_SAVE -> onStopRecording(entry.id)
-                        DvrConfirmKind.CANCEL_TIMER -> onCancelRecording(entry.id)
-                        else -> Result.success(Unit)
-                    }
-                    result
-                        .onSuccess { actionEventKey = null }
-                        .onFailure { err ->
-                            actionError = err.message ?: when (kind) {
-                                DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop"
-                                DvrConfirmKind.CANCEL_TIMER -> "Failed to cancel"
-                                else -> "Action failed"
-                            }
+                    try {
+                        val result = when (kind) {
+                            DvrConfirmKind.STOP_AND_SAVE -> onStopRecording(entry.id)
+                            DvrConfirmKind.CANCEL_TIMER -> onCancelRecording(entry.id)
+                            else -> Result.success(Unit)
                         }
-                    actionBusy = false
+                        result
+                            .onSuccess { actionEventKey = null }
+                            .onFailure { err ->
+                                actionError = err.message ?: when (kind) {
+                                    DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop"
+                                    DvrConfirmKind.CANCEL_TIMER -> "Failed to cancel"
+                                    else -> "Action failed"
+                                }
+                            }
+                    } finally {
+                        actionBusy = false
+                    }
                 }
             },
         )

@@ -74,4 +74,20 @@ class DebugInfoReportTest {
         assertEquals(500L, fileOrDirectorySizeBytes(root))
         assertEquals(380L, fileOrDirectorySizeBytes(File(nested, "b.bin")))
     }
+
+    @Test
+    fun `measureCacheDirectorySizes sums subcaches and epg file without double counting`(@TempDir tempDir: Path) {
+        val cacheDir = File(tempDir.toFile(), "cache").apply { mkdirs() }
+        val filesDir = File(tempDir.toFile(), "files").apply { mkdirs() }
+        File(cacheDir, "picon_cache").apply { mkdirs() }.let { File(it, "1.png").writeBytes(ByteArray(100)) }
+        File(cacheDir, "mpv-cache").apply { mkdirs() }.let { File(it, "buf.bin").writeBytes(ByteArray(250)) }
+        File(cacheDir, "misc.tmp").writeBytes(ByteArray(50))
+        val epgFile = File(filesDir, "epg_cache.dat").apply { writeBytes(ByteArray(300)) }
+
+        val breakdown = measureCacheDirectorySizes(cacheDir, epgFile)
+        assertEquals(100L, breakdown.piconCacheBytes)
+        assertEquals(250L, breakdown.timeshiftCacheBytes)
+        assertEquals(300L, breakdown.epgCacheBytes)
+        assertEquals(700L, breakdown.totalCacheBytes)
+    }
 }

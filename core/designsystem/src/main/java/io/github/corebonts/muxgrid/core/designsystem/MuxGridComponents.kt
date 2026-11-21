@@ -44,10 +44,13 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -242,15 +245,21 @@ fun rememberNowEpochSec(
     return nowState.longValue
 }
 
+internal fun stableDurationSec(ms: Long, previousSec: Long): Long {
+    val clampedMs = ms.coerceAtLeast(0L)
+    val diffMs = clampedMs - (previousSec * 1000L)
+    return if (abs(diffMs) >= 700L) (clampedMs + 500L) / 1000L else previousSec
+}
+
 @Composable
 fun rememberStableDurationSec(ms: Long, resetKey: Any? = null): Long {
     val clampedMs = ms.coerceAtLeast(0L)
-    val shownSec = remember(resetKey) { mutableLongStateOf((clampedMs + 500L) / 1000L) }
-    val diffMs = clampedMs - (shownSec.longValue * 1000L)
-    if (abs(diffMs) >= 700L) {
-        shownSec.longValue = (clampedMs + 500L) / 1000L
+    val lastShownSec = remember(resetKey) { LongArray(1) { (clampedMs + 500L) / 1000L } }
+    val nextSec = stableDurationSec(clampedMs, lastShownSec[0])
+    SideEffect {
+        lastShownSec[0] = nextSec
     }
-    return shownSec.longValue
+    return nextSec
 }
 
 @Composable
@@ -390,8 +399,10 @@ fun MuxGridSeekBar(
     activeTrackColor: Color = MuxGridColors.Accent,
     inactiveTrackColor: Color = MuxGridColors.TrackBackground,
 ) {
-    var widthPx by remember { mutableStateOf(1) }
+    var widthPx by remember { mutableIntStateOf(1) }
     var dragging by remember { mutableStateOf(false) }
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
     val clamped = value.coerceIn(0f, 1f)
     val barHeight by animateDpAsState(
         targetValue = if (dragging) 6.dp else 4.dp,
@@ -407,8 +418,8 @@ fun MuxGridSeekBar(
             .pointerInput(Unit) {
                 detectTapGestures { offset ->
                     val frac = (offset.x / widthPx.toFloat()).coerceIn(0f, 1f)
-                    onValueChange(frac)
-                    onValueChangeFinished()
+                    currentOnValueChange(frac)
+                    currentOnValueChangeFinished()
                 }
             }
             .pointerInput(Unit) {
@@ -416,20 +427,20 @@ fun MuxGridSeekBar(
                     onDragStart = { offset ->
                         dragging = true
                         val frac = (offset.x / widthPx.toFloat()).coerceIn(0f, 1f)
-                        onValueChange(frac)
+                        currentOnValueChange(frac)
                     },
                     onHorizontalDrag = { change, _ ->
                         change.consume()
                         val frac = (change.position.x / widthPx.toFloat()).coerceIn(0f, 1f)
-                        onValueChange(frac)
+                        currentOnValueChange(frac)
                     },
                     onDragEnd = {
                         dragging = false
-                        onValueChangeFinished()
+                        currentOnValueChangeFinished()
                     },
                     onDragCancel = {
                         dragging = false
-                        onValueChangeFinished()
+                        currentOnValueChangeFinished()
                     },
                 )
             },
@@ -635,8 +646,9 @@ fun TrackAndPresetPanel(
                         .background(MuxGridColors.CanvasPhone),
                     verticalArrangement = Arrangement.spacedBy(1.dp),
                 ) {
+                    val effectiveAudioId = selectedAudioId ?: audioTracks.firstOrNull { it.isSelected }?.id
                     audioTracks.forEachIndexed { idx, track ->
-                        val selected = track.id == selectedAudioId || track.isSelected
+                        val selected = track.id == effectiveAudioId
                         SelectableOptionRow(
                             label = track.displayLabel,
                             selected = selected,
@@ -664,7 +676,7 @@ fun TrackAndPresetPanel(
                     modifier = if (audioTracks.isEmpty()) Modifier.focusRequester(firstOptionFocusRequester) else Modifier,
                 )
                 subtitleTracks.forEach { track ->
-                    val selected = track.id == selectedSubtitleId || track.isSelected
+                    val selected = track.id == selectedSubtitleId
                     SelectableOptionRow(
                         label = track.displayLabel,
                         selected = selected,
@@ -826,9 +838,12 @@ fun LiveFilter.label(): String = when (this) {
 
 private val TIME_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
-fun formatEpochHm(epochSec: Long): String =
+fun formatEpochHm(
+    epochSec: Long,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): String =
     Instant.ofEpochSecond(epochSec)
-        .atZone(ZoneId.systemDefault())
+        .atZone(zoneId)
         .format(TIME_FMT)
 
 @Composable

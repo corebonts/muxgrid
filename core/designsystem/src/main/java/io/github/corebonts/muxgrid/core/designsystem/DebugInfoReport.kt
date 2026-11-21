@@ -76,15 +76,11 @@ fun collectDebugEnvironmentSnapshot(
     }.getOrNull()
 
     val cacheDir = context.cacheDir
-    val piconCacheBytes = runCatching { fileOrDirectorySizeBytes(File(cacheDir, "picon_cache")) }.getOrNull()
-    val timeshiftCacheBytes = runCatching { fileOrDirectorySizeBytes(File(cacheDir, "mpv-cache")) }.getOrNull()
-    val epgCacheBytes = runCatching { fileOrDirectorySizeBytes(File(context.filesDir, "epg_cache.dat")) }.getOrNull()
-    val cacheDirTotal = runCatching { fileOrDirectorySizeBytes(cacheDir) }.getOrNull()
-    val cacheUsedBytes = when {
-        cacheDirTotal != null && epgCacheBytes != null -> cacheDirTotal + epgCacheBytes
-        cacheDirTotal != null -> cacheDirTotal
-        else -> epgCacheBytes
-    }
+    val cacheSizes = measureCacheDirectorySizes(cacheDir, File(context.filesDir, "epg_cache.dat"))
+    val piconCacheBytes = cacheSizes.piconCacheBytes
+    val timeshiftCacheBytes = cacheSizes.timeshiftCacheBytes
+    val epgCacheBytes = cacheSizes.epgCacheBytes
+    val cacheUsedBytes = cacheSizes.totalCacheBytes
     val storageStats = runCatching {
         val target = cacheDir.apply { mkdirs() }
         val stat = StatFs(target.absolutePath)
@@ -149,6 +145,53 @@ fun collectDebugEnvironmentSnapshot(
         backgroundAudioEnabled = backgroundAudioEnabled,
         pipStatus = pipStatus,
         serverSoftwareSummary = serverSummary,
+    )
+}
+
+internal data class CacheDirectorySizes(
+    val piconCacheBytes: Long?,
+    val timeshiftCacheBytes: Long?,
+    val epgCacheBytes: Long?,
+    val totalCacheBytes: Long?,
+)
+
+internal fun measureCacheDirectorySizes(
+    cacheDir: File,
+    epgCacheFile: File,
+): CacheDirectorySizes {
+    val piconCacheBytes = runCatching { fileOrDirectorySizeBytes(File(cacheDir, "picon_cache")) }.getOrNull()
+    val timeshiftCacheBytes = runCatching { fileOrDirectorySizeBytes(File(cacheDir, "mpv-cache")) }.getOrNull()
+    val epgCacheBytes = runCatching { fileOrDirectorySizeBytes(epgCacheFile) }.getOrNull()
+    val otherCacheBytes = runCatching {
+        if (!cacheDir.exists() || Files.isSymbolicLink(cacheDir.toPath()) || !cacheDir.isDirectory) {
+            0L
+        } else {
+            var other = 0L
+            val children = cacheDir.listFiles().orEmpty()
+            for (child in children) {
+                if (Files.isSymbolicLink(child.toPath())) continue
+                if (child.name == "picon_cache" || child.name == "mpv-cache") continue
+                other += fileOrDirectorySizeBytes(child)
+            }
+            other
+        }
+    }.getOrNull()
+
+    val cacheDirTotal = if (piconCacheBytes != null || timeshiftCacheBytes != null || otherCacheBytes != null) {
+        (piconCacheBytes ?: 0L) + (timeshiftCacheBytes ?: 0L) + (otherCacheBytes ?: 0L)
+    } else {
+        null
+    }
+    val totalCacheBytes = when {
+        cacheDirTotal != null && epgCacheBytes != null -> cacheDirTotal + epgCacheBytes
+        cacheDirTotal != null -> cacheDirTotal
+        else -> epgCacheBytes
+    }
+    return CacheDirectorySizes(
+        piconCacheBytes = piconCacheBytes,
+        timeshiftCacheBytes = timeshiftCacheBytes,
+        epgCacheBytes = epgCacheBytes,
+        totalCacheBytes = totalCacheBytes,
     )
 }
 

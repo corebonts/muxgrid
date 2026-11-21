@@ -627,6 +627,7 @@ internal fun MobileGuideScreen(
                     ) {
                         if (detailChannel != null) {
                             Button(
+                                enabled = !actionBusy,
                                 onClick = {
                                     selectedEventKey = null
                                     onWatchChannel(detailChannel)
@@ -686,6 +687,7 @@ internal fun MobileGuideScreen(
                     ) {
                         if (detailChannel != null) {
                             Button(
+                                enabled = !actionBusy,
                                 onClick = {
                                     selectedEventKey = null
                                     onWatchChannel(detailChannel)
@@ -746,10 +748,13 @@ internal fun MobileGuideScreen(
                                         scope.launch {
                                             actionBusy = true
                                             actionError = null
-                                            onScheduleRecording(detailEvent.id)
-                                                .onSuccess { selectedEventKey = null }
-                                                .onFailure { actionError = it.message ?: "Failed to schedule recording" }
-                                            actionBusy = false
+                                            try {
+                                                onScheduleRecording(detailEvent.id)
+                                                    .onSuccess { selectedEventKey = null }
+                                                    .onFailure { actionError = it.message ?: "Failed to schedule recording" }
+                                            } finally {
+                                                actionBusy = false
+                                            }
                                         }
                                     },
                                     modifier = Modifier.weight(1f),
@@ -783,21 +788,24 @@ internal fun MobileGuideScreen(
                 scope.launch {
                     actionBusy = true
                     actionError = null
-                    val result = when (kind) {
-                        DvrConfirmKind.STOP_AND_SAVE -> onStopRecording(entry.id)
-                        DvrConfirmKind.CANCEL_TIMER -> onCancelRecording(entry.id)
-                        else -> Result.success(Unit)
-                    }
-                    result
-                        .onSuccess { selectedEventKey = null }
-                        .onFailure {
-                            actionError = it.message ?: when (kind) {
-                                DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop recording"
-                                DvrConfirmKind.CANCEL_TIMER -> "Failed to cancel timer"
-                                else -> "Action failed"
-                            }
+                    try {
+                        val result = when (kind) {
+                            DvrConfirmKind.STOP_AND_SAVE -> onStopRecording(entry.id)
+                            DvrConfirmKind.CANCEL_TIMER -> onCancelRecording(entry.id)
+                            else -> Result.success(Unit)
                         }
-                    actionBusy = false
+                        result
+                            .onSuccess { selectedEventKey = null }
+                            .onFailure {
+                                actionError = it.message ?: when (kind) {
+                                    DvrConfirmKind.STOP_AND_SAVE -> "Failed to stop recording"
+                                    DvrConfirmKind.CANCEL_TIMER -> "Failed to cancel timer"
+                                    else -> "Action failed"
+                                }
+                            }
+                    } finally {
+                        actionBusy = false
+                    }
                 }
             },
         )

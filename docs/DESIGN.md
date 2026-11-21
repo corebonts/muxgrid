@@ -27,7 +27,8 @@ MuxGrid uses a low-glare **Broadcast Monitor** dark visual language (`Carbon & S
   - Snappy transitions (~180–250ms) and subtle `2dp` focus borders + mild scale on TV cards without jumpy layouts.
 - **Dialogs, Sheets & Confirmations:**
   - Modal sheets and action/confirmation dialogs use `CardSurfaceElevated` (`#1D1D22`), `12dp` corners (`MuxGridShapes.Dialog` / `MuxGridShapes.SheetTop`), and `1dp` `HairlineBorder` (or `CoralLive` at 55% alpha for playback errors); settings/options panels (**Server Setup**, **Display Options**) use `CardSurface` (`#141417`) with `CardSurfaceElevated` (`#1D1D22`) inner controls and `0.5dp` `HairlineBorder`.
-  - Player overlays (**Display Options**, **Playback Error**, **Quick Zap**) render in-window over `OverlayBackdrop` (`#99000000`) rather than separate `Dialog` windows over `SurfaceView`, trap D-pad focus inside modal panels (**Display Options** focuses the first content option on open), and always intercept `Back` to close the overlay first.
+  - Player overlays (**Display Options**, **Playback Error**, **Quick Zap**) render in-window over `OverlayBackdrop` (`#99000000`) rather than separate `Dialog` windows over `SurfaceView`, trap D-pad focus inside modal panels (**Display Options** focuses the first content option on open and uses `selectedAudioId`/`selectedSubtitleId` as the single source of truth), and always intercept `Back` to close the overlay first.
+  - **Server Setup** validates hostnames, IPv4, and IPv6 literals (rejecting schemes, paths, spaces, and port suffixes) and preserves unsaved form input across configuration changes.
   - Disruptive or irreversible DVR actions (**Stop & Save**, **Abort Recording**, **Cancel Timer**, **Delete Recording**) always require confirmation on both Mobile and TV, with TV destructive confirmations defaulting initial focus to **Cancel**.
 
 ---
@@ -92,7 +93,7 @@ Designed strictly for **10-foot viewing** and a standard TV remote (`D-pad`, `OK
 
 ### Screen Layouts
 - **Live Screen:** Multi-column grid of large legible channel cards + focusable filter chips above the grid.
-- **Guide (EPG) Screen:** Horizontal timeline grid (sticky channel column, time slots horizontally, red vertical "Now" hairline) with top-bar search across upcoming programs, paired with a fixed-height bottom details bar showing title, air time, and synopsis of the currently focused program.
+- **Guide (EPG) Screen:** Horizontal timeline grid (sticky channel column, time slots horizontally, red vertical "Now" hairline, initialized to the server-clock-adjusted current half-hour upon entering Guide) with top-bar search across upcoming programs, paired with a fixed-height bottom details bar showing title, air time, and synopsis of the currently focused program.
 - **Recordings Screen:** Horizontal shelves (`Recording Now`, `Continue Watching`, `All Recordings`, `Scheduled`).
 
 ### TV Fullscreen Player (Zero-Friction Remote Controls)

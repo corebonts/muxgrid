@@ -268,9 +268,9 @@ fun formatEpochDayHm(
     val date = Instant.ofEpochSecond(epochSec).atZone(zoneId).toLocalDate()
     val today = Instant.ofEpochSecond(nowEpochSec).atZone(zoneId).toLocalDate()
     return when (date) {
-        today -> "Today · ${formatEpochHm(epochSec)}"
-        today.plusDays(1) -> "Tomorrow · ${formatEpochHm(epochSec)}"
-        today.minusDays(1) -> "Yesterday · ${formatEpochHm(epochSec)}"
+        today -> "Today · ${formatEpochHm(epochSec, zoneId)}"
+        today.plusDays(1) -> "Tomorrow · ${formatEpochHm(epochSec, zoneId)}"
+        today.minusDays(1) -> "Yesterday · ${formatEpochHm(epochSec, zoneId)}"
         else -> Instant.ofEpochSecond(epochSec).atZone(zoneId).format(DATE_TIME_FMT)
     }
 }

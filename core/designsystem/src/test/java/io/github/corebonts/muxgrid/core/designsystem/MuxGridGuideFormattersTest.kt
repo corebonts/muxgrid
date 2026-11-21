@@ -119,4 +119,21 @@ class MuxGridGuideFormattersTest {
         val capped = searchEpgEvents("match", listOf(ch), epg, nowSec, limit = 2)
         assertEquals(listOf(3L, 4L), capped.map { it.first.id })
     }
+
+    @Test
+    fun `formatEpochDayHm forwards zoneId to time formatting`() {
+        val plusFive = ZoneOffset.ofHours(5)
+        val utcEpoch = today.atStartOfDay(zone).toEpochSecond() + 12L * 3600L
+        assertEquals("Today · 12:00", formatEpochDayHm(utcEpoch, utcEpoch, zone))
+        assertEquals("Today · 17:00", formatEpochDayHm(utcEpoch, utcEpoch, plusFive))
+    }
+
+    @Test
+    fun `stableDurationSec applies 700ms hysteresis around displayed second`() {
+        assertEquals(10L, stableDurationSec(10_400L, 10L))
+        assertEquals(10L, stableDurationSec(9_500L, 10L))
+        assertEquals(11L, stableDurationSec(10_700L, 10L))
+        assertEquals(9L, stableDurationSec(9_300L, 10L))
+        assertEquals(0L, stableDurationSec(-500L, 0L))
+    }
 }
