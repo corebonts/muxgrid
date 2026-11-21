@@ -59,9 +59,9 @@ Navigation stays minimal and consistent across both form factors:
   - Channel rows/cards: picon badge, tabular channel number, channel name, **Now** title + thin progress bar + remaining minutes, subtle **Next** preview.
   - Long-press a channel to Favorite, open its Guide, or jump straight into playback.
 - **Guide (EPG) Screen:**
-  - Vertical channel agenda with day underline tabs paired with an icon-only **Search** button on the right; tapping Search expands a full-width search bar (with Back/Clear dismissal) in place of the day chooser.
-  - Compact borderless channel strip below the day chooser (hidden while a search query is active).
-  - Tap any program to open a modal bottom sheet with full description, time, channel, and **Watch Live** / **Record** / **Cancel Recording** actions.
+  - **Portrait Phone:** Vertical per-channel agenda with day underline tabs paired with an icon-only **Search** button on the right (tapping expands a full-width search bar in place of the day chooser) and a compact borderless channel strip below (hidden while searching).
+  - **Landscape / Tablet (`>= 600dp`):** Horizontal multi-channel timeline grid with sticky channel column (tap to tune), half-hour time ruler, live coral "Now" hairline, compact time-step (`-1h`/`-2h`, `Now`, `+1h`/`+2h`) controls plus horizontal swipe-to-step, and the same top-bar day tabs and expandable program search.
+  - Tap any program in either layout to open a modal bottom sheet with full description, time, channel, and **Watch Live** / **Record** / **Cancel Recording** actions.
 - **Recordings Screen:**
   - Underline filter tabs (`All`, `Completed`, `Scheduled`) and stacked sections for **Recording Now** (coral badge, live elapsed duration, **Chase Play** / **Stop** / overflow sheet), **Completed** (grouped by series/title with episode count, resume progress bar, watched badge, Play/Resume/Delete), and **Scheduled** (Cancel).
 

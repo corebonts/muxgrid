@@ -88,6 +88,8 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.buildAvailableGuideDays
+import io.github.corebonts.muxgrid.core.designsystem.buildRowTimelineCells
+import io.github.corebonts.muxgrid.core.designsystem.computeDayJumpWindowStart
 import io.github.corebonts.muxgrid.core.designsystem.computeGuideEventBounds
 import io.github.corebonts.muxgrid.core.designsystem.floorToHalfHour
 import io.github.corebonts.muxgrid.core.designsystem.formatDayLabel
@@ -109,14 +111,6 @@ import java.time.ZoneId
 
 private const val TIMELINE_WINDOW_SEC = 3L * 3600L // 3-hour horizontal viewport
 private const val TIMELINE_STEP_SEC = 2L * 3600L
-
-private data class TimelineCell(
-    val key: String,
-    val weight: Float,
-    val event: EpgEvent?,
-    val startEpochSec: Long,
-    val stopEpochSec: Long,
-)
 
 @OptIn(ExperimentalTvMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -467,36 +461,14 @@ internal fun TvGuideScreen(
                         FilterChip(
                             selected = selected,
                             onClick = {
-                                val targetWindow = if (dayDate == todayDate) {
-                                    todayStartHalfHour
-                                } else {
-                                    val dayStartSec = dayDate.atStartOfDay(activeZone).toEpochSecond()
-                                    val dayEndSec = dayDate.plusDays(1).atStartOfDay(activeZone).toEpochSecond()
-                                    val primeTime = dayStartSec + 18L * 3600L
-                                    var hasPrimeTimeEvent = false
-                                    var dayEarliestStart = Long.MAX_VALUE
-                                    var dayLatestStop = Long.MIN_VALUE
-                                    for (list in epgByChannel.values) {
-                                        for (ev in list) {
-                                            if (ev.stopEpochSec <= dayStartSec || ev.startEpochSec >= dayEndSec) continue
-                                            val cs = maxOf(ev.startEpochSec, dayStartSec)
-                                            val ce = minOf(ev.stopEpochSec, dayEndSec)
-                                            if (cs < dayEarliestStart) dayEarliestStart = cs
-                                            if (ce > dayLatestStop) dayLatestStop = ce
-                                            if (ev.stopEpochSec > primeTime && ev.startEpochSec < primeTime + TIMELINE_WINDOW_SEC) {
-                                                hasPrimeTimeEvent = true
-                                            }
-                                        }
-                                    }
-                                    when {
-                                        hasPrimeTimeEvent -> primeTime
-                                        dayEarliestStart <= dayLatestStop && dayLatestStop <= primeTime ->
-                                            floorToHalfHour(dayLatestStop - TIMELINE_WINDOW_SEC).coerceAtLeast(dayStartSec)
-                                        dayEarliestStart <= dayLatestStop ->
-                                            floorToHalfHour(dayEarliestStart)
-                                        else -> primeTime
-                                    }
-                                }
+                                val targetWindow = computeDayJumpWindowStart(
+                                    dayDate = dayDate,
+                                    todayDate = todayDate,
+                                    todayStartHalfHour = todayStartHalfHour,
+                                    epgByChannel = epgByChannel,
+                                    windowDurationSec = TIMELINE_WINDOW_SEC,
+                                    zoneId = activeZone,
+                                )
                                 onWindowStartChange(targetWindow.coerceIn(minWindowStartSec, maxWindowStartSec))
                             },
                             shape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm),
@@ -1268,82 +1240,4 @@ private fun TvGuidePreviewBar(
             }
         }
     }
-}
-
-private fun buildRowTimelineCells(
-    channelId: Long,
-    events: List<EpgEvent>,
-    windowStart: Long,
-    windowEnd: Long,
-): List<TimelineCell> {
-    if (events.isEmpty()) {
-        return listOf(
-            TimelineCell(
-                key = "empty_${channelId}_$windowStart",
-                weight = 1f,
-                event = null,
-                startEpochSec = windowStart,
-                stopEpochSec = windowEnd,
-            ),
-        )
-    }
-
-    // Events in TvheadendStore are already sorted by startEpochSec; scan directly without re-sorting
-    val cells = ArrayList<TimelineCell>()
-    var cursor = windowStart
-    for (ev in events) {
-        if (ev.startEpochSec >= windowEnd) break
-        if (ev.stopEpochSec <= windowStart) continue
-        val clampedStart = maxOf(ev.startEpochSec, cursor)
-        val clampedEnd = minOf(ev.stopEpochSec, windowEnd)
-        if (clampedEnd <= clampedStart) continue
-        if (clampedStart > cursor) {
-            val gapSec = clampedStart - cursor
-            if (gapSec >= 300L) {
-                cells.add(
-                    TimelineCell(
-                        key = "gap_${channelId}_$cursor",
-                        weight = gapSec.toFloat().coerceAtLeast(300f),
-                        event = null,
-                        startEpochSec = cursor,
-                        stopEpochSec = clampedStart,
-                    ),
-                )
-            }
-        }
-        val spanSec = (clampedEnd - clampedStart).coerceAtLeast(300L)
-        cells.add(
-            TimelineCell(
-                key = "ev_${ev.id}",
-                weight = spanSec.toFloat(),
-                event = ev,
-                startEpochSec = clampedStart,
-                stopEpochSec = clampedEnd,
-            ),
-        )
-        cursor = clampedEnd
-    }
-    if (cells.isEmpty()) {
-        return listOf(
-            TimelineCell(
-                key = "empty_${channelId}_$windowStart",
-                weight = 1f,
-                event = null,
-                startEpochSec = windowStart,
-                stopEpochSec = windowEnd,
-            ),
-        )
-    }
-    if (cursor < windowEnd && (windowEnd - cursor) >= 300L) {
-        cells.add(
-            TimelineCell(
-                key = "tail_${channelId}_$cursor",
-                weight = (windowEnd - cursor).toFloat(),
-                event = null,
-                startEpochSec = cursor,
-                stopEpochSec = windowEnd,
-            ),
-        )
-    }
-    return cells
 }
