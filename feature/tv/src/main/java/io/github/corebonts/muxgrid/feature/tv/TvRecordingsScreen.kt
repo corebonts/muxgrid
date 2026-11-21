@@ -3,6 +3,7 @@ package io.github.corebonts.muxgrid.feature.tv
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,20 +20,28 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -64,13 +73,19 @@ import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalComposeUiApi::class)
 @Composable
 internal fun TvRecordingsScreen(
     dvrEntries: Map<Long, DvrEntry>,
     channels: List<Channel>,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
+    listState: LazyListState = rememberLazyListState(),
+    shelfStateFor: (String) -> LazyListState = { LazyListState() },
+    lastFocusTarget: TvRecordingFocusTarget? = null,
+    onFocusTargetChanged: (TvRecordingFocusTarget) -> Unit = {},
+    focusRequestNonce: Int = 0,
+    initialContentFocusRequester: FocusRequester = remember { FocusRequester() },
     onWatchLiveChannel: (Channel) -> Unit,
     onPlayRecording: (DvrEntry, Channel?, Long) -> Unit,
     onStopRecording: suspend (Long) -> Result<Unit>,
@@ -96,12 +111,99 @@ internal fun TvRecordingsScreen(
         allEntries.filter { it.state == DvrState.SCHEDULED }.sortedBy { it.startEpochSec }
     }
 
+    val shelves = remember(recordingNow, continueWatching, completed, scheduled) {
+        buildList {
+            if (recordingNow.isNotEmpty()) add(Triple("tv_rec_now", "RECORDING NOW", recordingNow))
+            if (continueWatching.isNotEmpty()) add(Triple("tv_continue", "CONTINUE WATCHING", continueWatching))
+            if (completed.isNotEmpty()) add(Triple("tv_completed", "ALL RECORDINGS", completed))
+            if (scheduled.isNotEmpty()) add(Triple("tv_scheduled", "SCHEDULED TIMERS", scheduled))
+        }
+    }
+
     var selectedEntryId by remember { mutableStateOf<Long?>(null) }
+    var wasDialogOpen by remember { mutableStateOf(false) }
     var pendingConfirm by remember { mutableStateOf<Pair<DvrConfirmKind, DvrEntry>?>(null) }
     var actionBusy by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
+    var localFocusRestoreNonce by remember { mutableIntStateOf(0) }
+    val cardFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
 
-    if (recordingNow.isEmpty() && completed.isEmpty() && scheduled.isEmpty()) {
+    LaunchedEffect(selectedEntryId) {
+        val isOpen = selectedEntryId != null
+        if (!isOpen && wasDialogOpen) {
+            localFocusRestoreNonce++
+        }
+        wasDialogOpen = isOpen
+    }
+
+    val resolvedTarget = remember(shelves, lastFocusTarget) {
+        if (shelves.isEmpty()) return@remember null
+        // 1. Exact shelf + entry match
+        if (lastFocusTarget != null) {
+            val exactShelfIdx = shelves.indexOfFirst { it.first == lastFocusTarget.shelfKey }
+            if (exactShelfIdx >= 0) {
+                val entryIdx = shelves[exactShelfIdx].third.indexOfFirst { it.id == lastFocusTarget.entryId }
+                if (entryIdx >= 0) {
+                    return@remember Triple(exactShelfIdx, shelves[exactShelfIdx].first, entryIdx)
+                }
+            }
+            // 2. Entry moved to another shelf (e.g. finished watching -> left Continue Watching)
+            shelves.forEachIndexed { shelfIdx, (shelfKey, _, entries) ->
+                val entryIdx = entries.indexOfFirst { it.id == lastFocusTarget.entryId }
+                if (entryIdx >= 0) {
+                    return@remember Triple(shelfIdx, shelfKey, entryIdx)
+                }
+            }
+            // 3. Entry was deleted -> stay on the same shelf if it still has items
+            if (exactShelfIdx >= 0 && shelves[exactShelfIdx].third.isNotEmpty()) {
+                return@remember Triple(exactShelfIdx, shelves[exactShelfIdx].first, 0)
+            }
+        }
+        // 4. First card of first shelf
+        Triple(0, shelves[0].first, 0)
+    }
+
+    val resolvedFocusKey = remember(resolvedTarget, shelves) {
+        resolvedTarget?.let { (shelfIdx, shelfKey, entryIdx) ->
+            shelves.getOrNull(shelfIdx)?.third?.getOrNull(entryIdx)?.let { "${shelfKey}_${it.id}" }
+        }
+    }
+
+    LaunchedEffect(focusRequestNonce, localFocusRestoreNonce) {
+        if (focusRequestNonce == 0 && localFocusRestoreNonce == 0) return@LaunchedEffect
+        val target = resolvedTarget ?: return@LaunchedEffect
+        val (shelfIdx, shelfKey, entryIdx) = target
+        val targetEntry = shelves.getOrNull(shelfIdx)?.third?.getOrNull(entryIdx) ?: return@LaunchedEffect
+        val focusKey = "${shelfKey}_${targetEntry.id}"
+
+        val isShelfVisible = listState.layoutInfo.visibleItemsInfo.any { it.key == shelfKey }
+        if (!isShelfVisible) {
+            runCatching { listState.scrollToItem(shelfIdx) }
+            withFrameNanos { }
+        }
+        val rowState = shelfStateFor(shelfKey)
+        val isCardVisible = rowState.layoutInfo.visibleItemsInfo.any { it.key == targetEntry.id }
+        if (!isCardVisible) {
+            runCatching { rowState.scrollToItem(entryIdx) }
+        }
+        repeat(2) {
+            withFrameNanos { }
+            val requester = cardFocusRequesters[focusKey]
+            if (requester != null && runCatching { requester.requestFocus() }.isSuccess) {
+                return@LaunchedEffect
+            }
+        }
+        // Safe fallback: any visible card in the first visible shelf
+        val firstVisibleShelfKey = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key as? String
+        if (firstVisibleShelfKey != null) {
+            val firstCardId = shelfStateFor(firstVisibleShelfKey).layoutInfo.visibleItemsInfo.firstOrNull()?.key as? Long
+            if (firstCardId != null) {
+                cardFocusRequesters["${firstVisibleShelfKey}_$firstCardId"]?.let { runCatching { it.requestFocus() } }
+            }
+        }
+    }
+
+    if (shelves.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("No recordings or scheduled timers", style = MuxGridType.CardSubtitle, fontSize = 16.sp)
         }
@@ -109,67 +211,29 @@ internal fun TvRecordingsScreen(
     }
 
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 6.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        if (recordingNow.isNotEmpty()) {
-            item(key = "tv_rec_now") {
+        shelves.forEach { (shelfKey, shelfTitle, shelfEntries) ->
+            item(key = shelfKey) {
                 TvRecordingShelf(
-                    title = "RECORDING NOW",
-                    entries = recordingNow,
+                    shelfKey = shelfKey,
+                    title = shelfTitle,
+                    entries = shelfEntries,
+                    rowState = shelfStateFor(shelfKey),
                     channelById = channelById,
                     nowEpochSec = nowEpochSec,
                     imageLoader = imageLoader,
-                    onClickEntry = { entry ->
-                        actionError = null
-                        selectedEntryId = entry.id
+                    cardFocusRequesters = cardFocusRequesters,
+                    primaryContentFocusKey = resolvedFocusKey,
+                    initialContentFocusRequester = initialContentFocusRequester,
+                    onFocusEntry = { entry ->
+                        onFocusTargetChanged(TvRecordingFocusTarget(shelfKey, entry.id))
                     },
-                )
-            }
-        }
-
-        if (continueWatching.isNotEmpty()) {
-            item(key = "tv_continue") {
-                TvRecordingShelf(
-                    title = "CONTINUE WATCHING",
-                    entries = continueWatching,
-                    channelById = channelById,
-                    nowEpochSec = nowEpochSec,
-                    imageLoader = imageLoader,
                     onClickEntry = { entry ->
-                        actionError = null
-                        selectedEntryId = entry.id
-                    },
-                )
-            }
-        }
-
-        if (completed.isNotEmpty()) {
-            item(key = "tv_completed") {
-                TvRecordingShelf(
-                    title = "ALL RECORDINGS",
-                    entries = completed,
-                    channelById = channelById,
-                    nowEpochSec = nowEpochSec,
-                    imageLoader = imageLoader,
-                    onClickEntry = { entry ->
-                        actionError = null
-                        selectedEntryId = entry.id
-                    },
-                )
-            }
-        }
-
-        if (scheduled.isNotEmpty()) {
-            item(key = "tv_scheduled") {
-                TvRecordingShelf(
-                    title = "SCHEDULED TIMERS",
-                    entries = scheduled,
-                    channelById = channelById,
-                    nowEpochSec = nowEpochSec,
-                    imageLoader = imageLoader,
-                    onClickEntry = { entry ->
+                        onFocusTargetChanged(TvRecordingFocusTarget(shelfKey, entry.id))
                         actionError = null
                         selectedEntryId = entry.id
                     },
@@ -182,8 +246,10 @@ internal fun TvRecordingsScreen(
     selectedEntry?.let { entry ->
         val ch = channelById[entry.channelId]
         val primaryFocusRequester = remember { FocusRequester() }
-        LaunchedEffect(entry.id) {
-            runCatching { primaryFocusRequester.requestFocus() }
+        LaunchedEffect(entry.id, pendingConfirm == null) {
+            if (pendingConfirm == null) {
+                runCatching { primaryFocusRequester.requestFocus() }
+            }
         }
 
         TvModalDialog(
@@ -440,13 +506,20 @@ internal fun TvRecordingsScreen(
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun TvRecordingShelf(
+    shelfKey: String,
     title: String,
     entries: List<DvrEntry>,
+    rowState: LazyListState,
     channelById: Map<Long, Channel>,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
+    cardFocusRequesters: MutableMap<String, FocusRequester>,
+    primaryContentFocusKey: String?,
+    initialContentFocusRequester: FocusRequester,
+    onFocusEntry: (DvrEntry) -> Unit,
     onClickEntry: (DvrEntry) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -456,14 +529,33 @@ private fun TvRecordingShelf(
             modifier = Modifier.padding(horizontal = 4.dp),
         )
         LazyRow(
+            state = rowState,
+            modifier = Modifier
+                .focusGroup()
+                .focusRestorer(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
         ) {
             items(entries, key = { it.id }) { entry ->
                 val ch = channelById[entry.channelId]
+                val focusKey = "${shelfKey}_${entry.id}"
+                val cardFocusRequester = remember(focusKey) { FocusRequester() }
+                DisposableEffect(focusKey) {
+                    cardFocusRequesters[focusKey] = cardFocusRequester
+                    onDispose {
+                        if (cardFocusRequesters[focusKey] === cardFocusRequester) {
+                            cardFocusRequesters.remove(focusKey)
+                        }
+                    }
+                }
+                val isPrimaryContentTarget = focusKey == primaryContentFocusKey
                 Surface(
                     onClick = { onClickEntry(entry) },
-                    modifier = Modifier.width(292.dp),
+                    modifier = Modifier
+                        .width(292.dp)
+                        .focusRequester(cardFocusRequester)
+                        .then(if (isPrimaryContentTarget) Modifier.focusRequester(initialContentFocusRequester) else Modifier)
+                        .onFocusChanged { if (it.isFocused) onFocusEntry(entry) },
                     shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Card),
                     colors = ClickableSurfaceDefaults.colors(
                         containerColor = MuxGridColors.CardSurface,

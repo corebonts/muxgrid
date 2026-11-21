@@ -81,8 +81,10 @@ Navigation stays minimal and consistent across both form factors:
 
 Designed strictly for **10-foot viewing** and a standard TV remote (`D-pad`, `OK/Select`, `Back`, `Ch+/Ch-`, `Play/Pause`).
 
-### Navigation Chrome
-- Collapsible left **Navigation Rail** (`Live`, `Guide`, `Recordings`, `Settings`) with focus restoration, a server status indicator dot on **Settings** when not connected, and clean left/right traversal into screen content without focus traps.
+### Navigation Chrome & D-Pad Focus Management
+- Collapsible left **Navigation Rail** (`Live`, `Guide`, `Recordings`, `Settings`) with focus restoration, a server status indicator dot on **Settings** when not connected, and clean left/right traversal into screen content without focus traps. Selecting a rail tab moves focus directly into that tab's primary content.
+- **Initial Focus & Restoration:** Opening the app lands focus directly on the first channel card in **Live** (waiting safely for initial sync). Scroll positions and focus targets are hoisted across `MAIN ↔ PLAYER` and `MAIN ↔ ONBOARDING` transitions so closing the player restores focus to the last-played or zapped channel, EPG program cell, or recording card (with safe fallbacks if an item moved shelves or was deleted), and closing Server Setup restores focus to **Edit Server**.
+- **Back Key Hierarchy:** Dismisses open search/dialogs first; on non-Live tabs returns to **Live** with channel focus restored; when the rail is expanded on **Live**, collapses the rail back to the channel grid before exiting the app.
 - Compact top header retains the tab title, a D-pad-focusable **Search** button on the Guide tab, and the **Refresh** action.
 
 ### Screen Layouts

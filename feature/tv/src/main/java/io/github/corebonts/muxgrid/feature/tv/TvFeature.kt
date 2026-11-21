@@ -22,20 +22,28 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -100,6 +108,21 @@ private enum class TvRoute {
     MAIN,
     PLAYER,
 }
+
+internal enum class TvSettingsFocusTarget {
+    PRIMARY,
+    EDIT_SERVER,
+}
+
+internal data class TvGuideFocusTarget(
+    val channelId: Long,
+    val eventId: Long? = null,
+)
+
+internal data class TvRecordingFocusTarget(
+    val shelfKey: String,
+    val entryId: Long,
+)
 
 @Composable
 internal fun tvPrimaryButtonColors() = ButtonDefaults.colors(
@@ -291,10 +314,26 @@ private fun TvContent(
     val offsetMs = (connectionState as? ConnectionState.Connected)?.serverClockOffsetMs ?: 0L
     val nowEpochSec = rememberNowEpochSec(offsetMs)
 
+    // Hoisted scroll states & focus memory survive MAIN <-> PLAYER and MAIN <-> ONBOARDING transitions
+    val liveGridState = rememberLazyGridState()
+    val guideListState = rememberLazyListState()
+    var guideWindowStartEpochSec by remember { mutableLongStateOf((nowEpochSec / 1800L) * 1800L) }
+    val recordingsListState = rememberLazyListState()
+    val recordingShelfStates = remember { mutableMapOf<String, LazyListState>() }
+
+    var lastLiveChannelId by remember { mutableStateOf<Long?>(null) }
+    var lastGuideTarget by remember { mutableStateOf<TvGuideFocusTarget?>(null) }
+    var lastRecordingTarget by remember { mutableStateOf<TvRecordingFocusTarget?>(null) }
+    var lastSettingsTarget by remember { mutableStateOf(TvSettingsFocusTarget.PRIMARY) }
+    var hasDeliveredInitialLiveFocus by remember { mutableStateOf(false) }
+    var contentFocusRequestNonce by remember { mutableIntStateOf(0) }
+    var isGuideSearchOpen by remember { mutableStateOf(false) }
+
     when (route) {
         TvRoute.ONBOARDING -> {
             BackHandler(enabled = currentProfile.isConfigured) {
                 route = TvRoute.MAIN
+                contentFocusRequestNonce++
             }
             OnboardingServerScreen(
                 initialProfile = currentProfile,
@@ -304,21 +343,34 @@ private fun TvContent(
                 onSaveAndConnect = { updated ->
                     repository.saveAndConnect(updated)
                     route = TvRoute.MAIN
+                    contentFocusRequestNonce++
                 },
-                onCancel = { route = TvRoute.MAIN },
+                onCancel = {
+                    route = TvRoute.MAIN
+                    contentFocusRequestNonce++
+                },
             )
         }
         TvRoute.MAIN -> {
-            var isGuideSearchOpen by remember { mutableStateOf(false) }
             LaunchedEffect(activeTab) {
                 if (activeTab != MainTab.GUIDE) {
                     isGuideSearchOpen = false
                 }
             }
-            BackHandler(enabled = activeTab != MainTab.LIVE && !isGuideSearchOpen) {
-                activeTab = MainTab.LIVE
+            LaunchedEffect(activeTab, filteredChannels.isNotEmpty(), hasDeliveredInitialLiveFocus) {
+                if (activeTab == MainTab.LIVE && !hasDeliveredInitialLiveFocus && filteredChannels.isNotEmpty()) {
+                    hasDeliveredInitialLiveFocus = true
+                    contentFocusRequestNonce++
+                }
             }
             var railHasFocus by remember { mutableStateOf(false) }
+            BackHandler(enabled = activeTab != MainTab.LIVE && !isGuideSearchOpen) {
+                activeTab = MainTab.LIVE
+                contentFocusRequestNonce++
+            }
+            BackHandler(enabled = activeTab == MainTab.LIVE && railHasFocus) {
+                contentFocusRequestNonce++
+            }
             var isRefreshing by remember { mutableStateOf(false) }
             val railFocusRequester = remember { FocusRequester() }
             val contentFocusRequester = remember { FocusRequester() }
@@ -335,7 +387,11 @@ private fun TvContent(
                     settingsStatusDotColor = statusDotColor,
                     railFocusRequester = railFocusRequester,
                     onRailFocusChanged = { railHasFocus = it },
-                    onSelectTab = { activeTab = it },
+                    onSelectTab = { tab ->
+                        hasDeliveredInitialLiveFocus = true
+                        activeTab = tab
+                        contentFocusRequestNonce++
+                    },
                 )
 
                 Column(
@@ -462,9 +518,15 @@ private fun TvContent(
                                     nowNextMap = nowNextMap,
                                     nowEpochSec = nowEpochSec,
                                     imageLoader = repository.imageLoader,
+                                    gridState = liveGridState,
+                                    lastFocusedChannelId = lastLiveChannelId,
+                                    focusRequestNonce = contentFocusRequestNonce,
                                     initialContentFocusRequester = contentFocusRequester,
+                                    onChannelFocused = { channel -> lastLiveChannelId = channel.id },
                                     onSelectFilter = { activeFilter = it },
                                     onChannelClick = { channel ->
+                                        lastLiveChannelId = channel.id
+                                        hasDeliveredInitialLiveFocus = true
                                         playbackEngine.playChannel(channel, hwDecPreset)
                                         route = TvRoute.PLAYER
                                     },
@@ -480,13 +542,32 @@ private fun TvContent(
                                     dvrEntries = dvrEntries,
                                     nowEpochSec = nowEpochSec,
                                     imageLoader = repository.imageLoader,
+                                    listState = guideListState,
+                                    windowStartEpochSec = guideWindowStartEpochSec,
+                                    onWindowStartChange = { guideWindowStartEpochSec = it },
+                                    lastFocusTarget = lastGuideTarget,
+                                    onFocusTargetChanged = { lastGuideTarget = it },
+                                    focusRequestNonce = contentFocusRequestNonce,
+                                    initialContentFocusRequester = contentFocusRequester,
                                     searchOpen = isGuideSearchOpen,
                                     onCloseSearch = { isGuideSearchOpen = false },
                                     onWatchChannel = { channel ->
+                                        lastGuideTarget = TvGuideFocusTarget(
+                                            channelId = channel.id,
+                                            eventId = lastGuideTarget?.takeIf { it.channelId == channel.id }?.eventId,
+                                        )
+                                        isGuideSearchOpen = false
                                         playbackEngine.playChannel(channel, hwDecPreset)
                                         route = TvRoute.PLAYER
                                     },
                                     onPlayRecording = { entry, channel, startSec ->
+                                        channel?.let { ch ->
+                                            lastGuideTarget = TvGuideFocusTarget(
+                                                channelId = ch.id,
+                                                eventId = lastGuideTarget?.takeIf { it.channelId == ch.id }?.eventId,
+                                            )
+                                        }
+                                        isGuideSearchOpen = false
                                         playbackEngine.playDvrEntry(entry, channel, hwDecPreset, startSec)
                                         route = TvRoute.PLAYER
                                     },
@@ -501,6 +582,12 @@ private fun TvContent(
                                     channels = channels,
                                     nowEpochSec = nowEpochSec,
                                     imageLoader = repository.imageLoader,
+                                    listState = recordingsListState,
+                                    shelfStateFor = { key -> recordingShelfStates.getOrPut(key) { LazyListState() } },
+                                    lastFocusTarget = lastRecordingTarget,
+                                    onFocusTargetChanged = { lastRecordingTarget = it },
+                                    focusRequestNonce = contentFocusRequestNonce,
+                                    initialContentFocusRequester = contentFocusRequester,
                                     onWatchLiveChannel = { channel ->
                                         playbackEngine.playChannel(channel, hwDecPreset)
                                         route = TvRoute.PLAYER
@@ -521,6 +608,9 @@ private fun TvContent(
                                     connectionState = connectionState,
                                     hwDecPreset = hwDecPreset,
                                     timeshiftWindow = timeshiftWindow,
+                                    focusTarget = lastSettingsTarget,
+                                    focusRequestNonce = contentFocusRequestNonce,
+                                    initialContentFocusRequester = contentFocusRequester,
                                     onSelectPreset = { preset ->
                                         scope.launch { repository.setHwDecPreset(preset) }
                                         playbackEngine.applyPreset(preset)
@@ -529,9 +619,11 @@ private fun TvContent(
                                         scope.launch { repository.setTimeshiftWindow(window) }
                                     },
                                     onRetryConnect = {
+                                        lastSettingsTarget = TvSettingsFocusTarget.PRIMARY
                                         repository.reconnect()
                                     },
                                     onOpenServerSetup = {
+                                        lastSettingsTarget = TvSettingsFocusTarget.EDIT_SERVER
                                         route = TvRoute.ONBOARDING
                                     },
                                 )
@@ -575,8 +667,23 @@ private fun TvContent(
                     playbackEngine.setVideoAspectMode(mode)
                 },
                 onExit = {
+                    val finalChannelId = playbackState.channelId
+                    val finalDvrId = playbackState.dvrEntryId
+                    when (activeTab) {
+                        MainTab.LIVE -> if (finalChannelId != null) {
+                            lastLiveChannelId = finalChannelId
+                        }
+                        MainTab.GUIDE -> if (finalChannelId != null && finalChannelId != lastGuideTarget?.channelId) {
+                            lastGuideTarget = TvGuideFocusTarget(channelId = finalChannelId)
+                        }
+                        MainTab.RECORDINGS -> if (finalDvrId != null && finalDvrId != lastRecordingTarget?.entryId) {
+                            lastRecordingTarget = TvRecordingFocusTarget(shelfKey = "", entryId = finalDvrId)
+                        }
+                        MainTab.SETTINGS -> Unit
+                    }
                     playbackEngine.stop()
                     route = TvRoute.MAIN
+                    contentFocusRequestNonce++
                 },
             )
         }
@@ -728,7 +835,7 @@ private fun TvRailItem(
     }
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class)
+@OptIn(ExperimentalTvMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 private fun TvLiveChannelsTab(
     connectionState: ConnectionState,
@@ -739,15 +846,59 @@ private fun TvLiveChannelsTab(
     nowNextMap: Map<Long, NowNextProgram>,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
+    gridState: LazyGridState,
+    lastFocusedChannelId: Long?,
+    focusRequestNonce: Int,
     initialContentFocusRequester: FocusRequester,
+    onChannelFocused: (Channel) -> Unit,
     onSelectFilter: (LiveFilter) -> Unit,
     onChannelClick: (Channel) -> Unit,
     onToggleFavorite: (Channel) -> Unit,
 ) {
+    val activeFilterFocusRequester = remember { FocusRequester() }
+    val channelFocusRequesters = remember { mutableMapOf<Long, FocusRequester>() }
+    val targetChannelId = remember(channels, lastFocusedChannelId) {
+        lastFocusedChannelId?.takeIf { id -> channels.any { it.id == id } }
+            ?: channels.firstOrNull()?.id
+    }
+
+    LaunchedEffect(focusRequestNonce) {
+        if (focusRequestNonce == 0) return@LaunchedEffect
+        if (channels.isEmpty()) {
+            runCatching { activeFilterFocusRequester.requestFocus() }
+            return@LaunchedEffect
+        }
+        val targetIndex = lastFocusedChannelId
+            ?.let { id -> channels.indexOfFirst { it.id == id } }
+            ?.takeIf { it >= 0 }
+            ?: 0
+        val resolvedChannelId = channels.getOrNull(targetIndex)?.id ?: return@LaunchedEffect
+        val isVisible = gridState.layoutInfo.visibleItemsInfo.any { it.key == resolvedChannelId }
+        if (!isVisible) {
+            runCatching { gridState.scrollToItem(targetIndex) }
+        }
+        repeat(2) {
+            withFrameNanos { }
+            val requester = channelFocusRequesters[resolvedChannelId]
+            if (requester != null && runCatching { requester.requestFocus() }.isSuccess) {
+                return@LaunchedEffect
+            }
+        }
+        val firstVisibleId = gridState.layoutInfo.visibleItemsInfo.firstOrNull()?.key as? Long
+        val fallbackRequester = firstVisibleId?.let { channelFocusRequesters[it] }
+        if (fallbackRequester != null) {
+            runCatching { fallbackRequester.requestFocus() }
+        } else {
+            runCatching { activeFilterFocusRequester.requestFocus() }
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .focusGroup()
+                .focusRestorer(activeFilterFocusRequester)
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -760,10 +911,19 @@ private fun TvLiveChannelsTab(
                     LiveFilter.Favorites -> MuxGridIcons.StarFilled
                     else -> null
                 }
+                val isFallbackFilterTarget = selected || (idx == 0 && filters.none { it == activeFilter })
                 FilterChip(
                     selected = selected,
                     onClick = { onSelectFilter(filter) },
-                    modifier = if (idx == 0) Modifier.focusRequester(initialContentFocusRequester) else Modifier,
+                    modifier = Modifier
+                        .then(if (isFallbackFilterTarget) Modifier.focusRequester(activeFilterFocusRequester) else Modifier)
+                        .then(
+                            if (channels.isEmpty() && isFallbackFilterTarget) {
+                                Modifier.focusRequester(initialContentFocusRequester)
+                            } else {
+                                Modifier
+                            },
+                        ),
                     shape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm),
                     leadingIcon = filterIcon?.let { icon ->
                         {
@@ -814,6 +974,7 @@ private fun TvLiveChannelsTab(
             }
         } else {
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Fixed(3),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 24.dp),
@@ -821,6 +982,16 @@ private fun TvLiveChannelsTab(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(channels, key = { it.id }) { channel ->
+                    val cardFocusRequester = remember(channel.id) { FocusRequester() }
+                    DisposableEffect(channel.id) {
+                        channelFocusRequesters[channel.id] = cardFocusRequester
+                        onDispose {
+                            if (channelFocusRequesters[channel.id] === cardFocusRequester) {
+                                channelFocusRequesters.remove(channel.id)
+                            }
+                        }
+                    }
+                    val isInitialTarget = channel.id == targetChannelId
                     TvChannelCard(
                         channel = channel,
                         nowNext = nowNextMap[channel.id],
@@ -829,6 +1000,10 @@ private fun TvLiveChannelsTab(
                         imageLoader = imageLoader,
                         onClick = { onChannelClick(channel) },
                         onLongClick = { onToggleFavorite(channel) },
+                        modifier = Modifier
+                            .focusRequester(cardFocusRequester)
+                            .then(if (isInitialTarget) Modifier.focusRequester(initialContentFocusRequester) else Modifier)
+                            .onFocusChanged { if (it.isFocused) onChannelFocused(channel) },
                     )
                 }
             }
@@ -845,10 +1020,12 @@ private fun TvChannelCard(
     imageLoader: ImageLoader,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
         onClick = onClick,
         onLongClick = onLongClick,
+        modifier = modifier,
         shape = ClickableSurfaceDefaults.shape(shape = MuxGridShapes.Card),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = MuxGridColors.CardSurface,
@@ -954,18 +1131,39 @@ private fun TvChannelCard(
     }
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class)
+@OptIn(ExperimentalTvMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 private fun TvSettingsTab(
     profile: ServerProfile,
     connectionState: ConnectionState,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
+    focusTarget: TvSettingsFocusTarget,
+    focusRequestNonce: Int,
+    initialContentFocusRequester: FocusRequester,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
     onRetryConnect: () -> Unit,
     onOpenServerSetup: () -> Unit,
 ) {
+    val isServerError = connectionState is ConnectionState.Error
+    val canRetryConnect = isServerError || connectionState is ConnectionState.Disconnected
+    val reconnectFocusRequester = remember { FocusRequester() }
+    val editServerFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(focusRequestNonce) {
+        if (focusRequestNonce == 0) return@LaunchedEffect
+        withFrameNanos { }
+        val primary = when {
+            focusTarget == TvSettingsFocusTarget.EDIT_SERVER -> editServerFocusRequester
+            canRetryConnect -> reconnectFocusRequester
+            else -> editServerFocusRequester
+        }
+        if (runCatching { primary.requestFocus() }.isFailure) {
+            runCatching { editServerFocusRequester.requestFocus() }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -973,8 +1171,6 @@ private fun TvSettingsTab(
             .padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        val isServerError = connectionState is ConnectionState.Error
-        val canRetryConnect = isServerError || connectionState is ConnectionState.Disconnected
         Column(
             modifier = Modifier
                 .widthIn(max = 760.dp)
@@ -1040,6 +1236,15 @@ private fun TvSettingsTab(
                     if (canRetryConnect) {
                         Surface(
                             onClick = onRetryConnect,
+                            modifier = Modifier
+                                .focusRequester(reconnectFocusRequester)
+                                .then(
+                                    if (focusTarget != TvSettingsFocusTarget.EDIT_SERVER) {
+                                        Modifier.focusRequester(initialContentFocusRequester)
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
                             shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
                             colors = ClickableSurfaceDefaults.colors(
                                 containerColor = MuxGridColors.CardSurfaceElevated,
@@ -1070,6 +1275,15 @@ private fun TvSettingsTab(
                     }
                     Surface(
                         onClick = onOpenServerSetup,
+                        modifier = Modifier
+                            .focusRequester(editServerFocusRequester)
+                            .then(
+                                if (!canRetryConnect || focusTarget == TvSettingsFocusTarget.EDIT_SERVER) {
+                                    Modifier.focusRequester(initialContentFocusRequester)
+                                } else {
+                                    Modifier
+                                },
+                            ),
                         shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
                         colors = ClickableSurfaceDefaults.colors(
                             containerColor = MuxGridColors.CardSurfaceElevated,
@@ -1122,7 +1336,12 @@ private fun TvSettingsTab(
                     style = MuxGridType.CardSubtitle,
                     fontSize = 13.sp,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    modifier = Modifier
+                        .focusGroup()
+                        .focusRestorer(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
                     listOf(
                         HwDecPreset.MEDIACODEC_ZERO_COPY to "Zero-Copy (TV Default)",
                         HwDecPreset.MEDIACODEC_COPY_BWDIF to "Copy + bwdif",
@@ -1145,7 +1364,10 @@ private fun TvSettingsTab(
                     fontSize = 13.sp,
                 )
                 Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    modifier = Modifier
+                        .focusGroup()
+                        .focusRestorer()
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     TimeshiftWindow.entries.forEach { option ->

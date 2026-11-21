@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -36,11 +37,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -88,6 +91,7 @@ import kotlinx.coroutines.delay
 private val PROGRESSIVE_SEEK_STEPS_MS = listOf(10_000L, 30_000L, 60_000L, 300_000L)
 private val PROGRESSIVE_SEEK_LABELS = listOf("10s", "30s", "1m", "5m")
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 internal fun TvPlayerScreen(
     playbackEngine: PlaybackEngine,
@@ -127,6 +131,11 @@ internal fun TvPlayerScreen(
     val playerFocusRequester = remember { FocusRequester() }
     val playPauseFocusRequester = remember { FocusRequester() }
     val progressFocusRequester = remember { FocusRequester() }
+    val trackButtonFocusRequester = remember { FocusRequester() }
+    val activeChannelChipFocusRequester = remember { FocusRequester() }
+    val quickStripState = rememberLazyListState()
+    var wasTrackPanelOpen by remember { mutableStateOf(false) }
+    var backToLiveFocused by remember { mutableStateOf(false) }
     val canSeekTimeline = playbackState.isRecordingPlayback || playbackState.isTimeshiftSeekable
 
     LaunchedEffect(playbackState.isCompleted) {
@@ -170,13 +179,37 @@ internal fun TvPlayerScreen(
 
     LaunchedEffect(hudVisible, trackPanelOpen) {
         if (hudVisible) {
-            if (!trackPanelOpen && !progressFocused) {
-                runCatching { playPauseFocusRequester.requestFocus() }
+            if (!trackPanelOpen) {
+                if (wasTrackPanelOpen) {
+                    runCatching { trackButtonFocusRequester.requestFocus() }
+                } else if (!progressFocused) {
+                    runCatching { playPauseFocusRequester.requestFocus() }
+                }
             }
         } else {
             progressFocused = false
+            backToLiveFocused = false
             seekOsdVisible = false
             runCatching { playerFocusRequester.requestFocus() }
+        }
+        wasTrackPanelOpen = trackPanelOpen
+    }
+
+    LaunchedEffect(hudVisible, playbackState.channelId, channels.size) {
+        if (hudVisible && !playbackState.isRecordingPlayback && channels.size > 1) {
+            val activeIdx = channels.indexOfFirst { it.id == playbackState.channelId }
+            if (activeIdx >= 0) {
+                runCatching { quickStripState.scrollToItem(activeIdx) }
+            }
+        }
+    }
+
+    LaunchedEffect(playbackState.isBehindLive) {
+        if (!playbackState.isBehindLive && backToLiveFocused) {
+            backToLiveFocused = false
+            if (hudVisible && !trackPanelOpen) {
+                runCatching { playPauseFocusRequester.requestFocus() }
+            }
         }
     }
 
@@ -834,6 +867,7 @@ internal fun TvPlayerScreen(
                         if (playbackState.isBehindLive) {
                             Button(
                                 onClick = { playbackEngine.seekToLiveEdge() },
+                                modifier = Modifier.onFocusChanged { backToLiveFocused = it.isFocused },
                                 shape = tvButtonShape(),
                                 colors = tvPrimaryButtonColors(),
                             ) {
@@ -876,6 +910,7 @@ internal fun TvPlayerScreen(
                         }
                         Button(
                             onClick = { trackPanelOpen = !trackPanelOpen },
+                            modifier = Modifier.focusRequester(trackButtonFocusRequester),
                             shape = tvButtonShape(),
                             colors = tvSecondaryButtonColors(),
                         ) {
@@ -902,19 +937,33 @@ internal fun TvPlayerScreen(
 
                     // Horizontal Quick Channel Strip underneath transport controls
                     if (!playbackState.isRecordingPlayback && channels.size > 1) {
+                        val hasCurrentInStrip = channels.any { it.id == playbackState.channelId }
                         LazyRow(
+                            state = quickStripState,
+                            modifier = Modifier
+                                .focusGroup()
+                                .focusRestorer(activeChannelChipFocusRequester),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             contentPadding = PaddingValues(vertical = 2.dp),
                         ) {
                             items(channels, key = { it.id }) { ch ->
                                 val isCurrent = ch.id == playbackState.channelId
+                                val isStripTarget = isCurrent || (!hasCurrentInStrip && ch.id == channels.firstOrNull()?.id)
                                 val chNow = nowNextMap[ch.id]
                                 Surface(
                                     onClick = {
                                         onSelectChannel(ch)
                                         hudVisible = false
                                     },
-                                    modifier = Modifier.width(210.dp),
+                                    modifier = Modifier
+                                        .width(210.dp)
+                                        .then(
+                                            if (isStripTarget) {
+                                                Modifier.focusRequester(activeChannelChipFocusRequester)
+                                            } else {
+                                                Modifier
+                                            },
+                                        ),
                                     shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
                                     colors = ClickableSurfaceDefaults.colors(
                                         containerColor = if (isCurrent) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface,

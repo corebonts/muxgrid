@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,26 +25,33 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -98,7 +106,7 @@ private data class TimelineCell(
     val stopEpochSec: Long,
 )
 
-@OptIn(ExperimentalTvMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalTvMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalComposeUiApi::class)
 @Composable
 internal fun TvGuideScreen(
     channels: List<Channel>,
@@ -106,6 +114,13 @@ internal fun TvGuideScreen(
     dvrEntries: Map<Long, DvrEntry>,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
+    listState: LazyListState = rememberLazyListState(),
+    windowStartEpochSec: Long = floorToHalfHour(nowEpochSec),
+    onWindowStartChange: (Long) -> Unit = {},
+    lastFocusTarget: TvGuideFocusTarget? = null,
+    onFocusTargetChanged: (TvGuideFocusTarget) -> Unit = {},
+    focusRequestNonce: Int = 0,
+    initialContentFocusRequester: FocusRequester = remember { FocusRequester() },
     searchOpen: Boolean = false,
     onCloseSearch: () -> Unit = {},
     onWatchChannel: (Channel) -> Unit,
@@ -116,13 +131,15 @@ internal fun TvGuideScreen(
 ) {
     val scope = rememberCoroutineScope()
     val days = remember(nowEpochSec / 3600L) { buildUpcomingDays(nowEpochSec, count = 7) }
-    val initialWindowStart = remember { floorToHalfHour(nowEpochSec) }
-    var windowStartEpochSec by remember { mutableLongStateOf(initialWindowStart) }
     val windowEndEpochSec = windowStartEpochSec + TIMELINE_WINDOW_SEC
 
     val searchState = rememberTextFieldState()
     val searchFocusRequester = remember { FocusRequester() }
+    val nowButtonFocusRequester = remember { FocusRequester() }
+    val cellFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
     var searchFieldFocused by remember { mutableStateOf(false) }
+    var localFocusRestoreNonce by remember { mutableIntStateOf(0) }
+    var wasSearchOpen by remember { mutableStateOf(searchOpen) }
 
     BackHandler(enabled = searchOpen) {
         searchState.clearText()
@@ -134,16 +151,80 @@ internal fun TvGuideScreen(
             runCatching { searchFocusRequester.requestFocus() }
         } else {
             searchState.clearText()
+            if (wasSearchOpen) {
+                localFocusRestoreNonce++
+            }
         }
+        wasSearchOpen = searchOpen
     }
 
     var focusedEvent by remember { mutableStateOf<EpgEvent?>(null) }
     var actionEventKey by remember { mutableStateOf<Pair<Long, Long>?>(null) }
+    var wasActionDialogOpen by remember { mutableStateOf(false) }
     var pendingConfirm by remember { mutableStateOf<Pair<DvrConfirmKind, DvrEntry>?>(null) }
     var actionBusy by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
 
     val channelById = remember(channels) { channels.associateBy { it.id } }
+
+    LaunchedEffect(actionEventKey) {
+        val isOpen = actionEventKey != null
+        if (!isOpen && wasActionDialogOpen && !searchOpen) {
+            localFocusRestoreNonce++
+        }
+        wasActionDialogOpen = isOpen
+    }
+
+    val effectiveTargetChannelId = remember(channels, lastFocusTarget) {
+        lastFocusTarget?.channelId?.takeIf { id -> channels.any { it.id == id } }
+            ?: channels.firstOrNull()?.id
+    }
+
+    LaunchedEffect(focusRequestNonce, localFocusRestoreNonce) {
+        if (focusRequestNonce == 0 && localFocusRestoreNonce == 0) return@LaunchedEffect
+        if (searchOpen) {
+            runCatching { searchFocusRequester.requestFocus() }
+            return@LaunchedEffect
+        }
+        if (channels.isEmpty()) {
+            runCatching { nowButtonFocusRequester.requestFocus() }
+            return@LaunchedEffect
+        }
+        val targetRowIndex = lastFocusTarget?.channelId
+            ?.let { id -> channels.indexOfFirst { it.id == id } }
+            ?.takeIf { it >= 0 }
+            ?: 0
+        val targetChannel = channels.getOrNull(targetRowIndex) ?: return@LaunchedEffect
+        val isRowVisible = listState.layoutInfo.visibleItemsInfo.any { it.key == targetChannel.id }
+        if (!isRowVisible) {
+            runCatching { listState.scrollToItem(targetRowIndex) }
+        }
+        val targetEventId = lastFocusTarget?.takeIf { it.channelId == targetChannel.id }?.eventId
+        val rowFirstEventId = epgByChannel[targetChannel.id]
+            ?.firstOrNull { it.stopEpochSec > windowStartEpochSec && it.startEpochSec < windowEndEpochSec }
+            ?.id
+        val candidateKeys = buildList {
+            if (targetEventId != null) add("ev_${targetChannel.id}_$targetEventId")
+            if (rowFirstEventId != null) add("ev_${targetChannel.id}_$rowFirstEventId")
+            add("ch_${targetChannel.id}")
+        }
+        repeat(2) {
+            withFrameNanos { }
+            for (key in candidateKeys) {
+                val requester = cellFocusRequesters[key]
+                if (requester != null && runCatching { requester.requestFocus() }.isSuccess) {
+                    return@LaunchedEffect
+                }
+            }
+        }
+        val fallbackChannelId = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key as? Long
+        val fallbackRequester = fallbackChannelId?.let { cellFocusRequesters["ch_$it"] }
+        if (fallbackRequester != null) {
+            runCatching { fallbackRequester.requestFocus() }
+        } else {
+            runCatching { nowButtonFocusRequester.requestFocus() }
+        }
+    }
     val searchQuery = searchState.text.toString()
     val trimmedQuery = searchQuery.trim()
     val searchResults: List<Pair<EpgEvent, Channel>> = remember(
@@ -276,12 +357,16 @@ internal fun TvGuideScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .focusGroup()
+                    .focusRestorer()
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Button(
-                    onClick = { windowStartEpochSec = (windowStartEpochSec - TIMELINE_STEP_SEC).coerceAtLeast(floorToHalfHour(nowEpochSec) - 3600L) },
+                    onClick = {
+                        onWindowStartChange((windowStartEpochSec - TIMELINE_STEP_SEC).coerceAtLeast(floorToHalfHour(nowEpochSec) - 3600L))
+                    },
                     shape = tvButtonShape(),
                     colors = tvSecondaryButtonColors(),
                 ) {
@@ -290,7 +375,10 @@ internal fun TvGuideScreen(
                     Text("-2h", fontSize = 12.sp)
                 }
                 Button(
-                    onClick = { windowStartEpochSec = floorToHalfHour(nowEpochSec) },
+                    onClick = { onWindowStartChange(floorToHalfHour(nowEpochSec)) },
+                    modifier = Modifier
+                        .focusRequester(nowButtonFocusRequester)
+                        .then(if (channels.isEmpty()) Modifier.focusRequester(initialContentFocusRequester) else Modifier),
                     shape = tvButtonShape(),
                     colors = tvPrimaryButtonColors(),
                 ) {
@@ -299,7 +387,7 @@ internal fun TvGuideScreen(
                     Text("Now", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Button(
-                    onClick = { windowStartEpochSec += TIMELINE_STEP_SEC },
+                    onClick = { onWindowStartChange(windowStartEpochSec + TIMELINE_STEP_SEC) },
                     shape = tvButtonShape(),
                     colors = tvSecondaryButtonColors(),
                 ) {
@@ -318,11 +406,13 @@ internal fun TvGuideScreen(
                         onClick = {
                             val todayStart = floorToHalfHour(nowEpochSec)
                             val targetMidnight = dayDate.atStartOfDay(activeZone).toEpochSecond()
-                            windowStartEpochSec = if (dayDate == todayDate) {
-                                todayStart
-                            } else {
-                                targetMidnight + 18L * 3600L // Prime time 18:00 on future days
-                            }
+                            onWindowStartChange(
+                                if (dayDate == todayDate) {
+                                    todayStart
+                                } else {
+                                    targetMidnight + 18L * 3600L // Prime time 18:00 on future days
+                                },
+                            )
                         },
                         shape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm),
                         colors = FilterChipDefaults.colors(
@@ -483,6 +573,7 @@ internal fun TvGuideScreen(
 
                     // Channel rows
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 6.dp),
                         verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -501,6 +592,25 @@ internal fun TvGuideScreen(
                                 )
                             }
                             val baseCellBg = if (rowIndex % 2 == 0) MuxGridColors.CardSurface else MuxGridColors.CardSurfaceAlt
+                            val isTargetRow = channel.id == effectiveTargetChannelId
+                            val firstRowEventId = remember(rowCells) { rowCells.firstNotNullOfOrNull { it.event?.id } }
+                            val targetEventIdForRow = if (isTargetRow) {
+                                lastFocusTarget?.takeIf { it.channelId == channel.id }?.eventId
+                                    ?.takeIf { id -> rowCells.any { it.event?.id == id } }
+                                    ?: firstRowEventId
+                            } else {
+                                null
+                            }
+                            val chFocusKey = "ch_${channel.id}"
+                            val chFocusRequester = remember(chFocusKey) { FocusRequester() }
+                            DisposableEffect(chFocusKey) {
+                                cellFocusRequesters[chFocusKey] = chFocusRequester
+                                onDispose {
+                                    if (cellFocusRequesters[chFocusKey] === chFocusRequester) {
+                                        cellFocusRequesters.remove(chFocusKey)
+                                    }
+                                }
+                            }
 
                             Row(
                                 modifier = Modifier
@@ -510,11 +620,27 @@ internal fun TvGuideScreen(
                             ) {
                                 // Sticky channel column
                                 Surface(
-                                    onClick = { onWatchChannel(channel) },
+                                    onClick = {
+                                        onFocusTargetChanged(TvGuideFocusTarget(channelId = channel.id))
+                                        onWatchChannel(channel)
+                                    },
                                     modifier = Modifier
                                         .width(channelColWidth)
                                         .fillMaxHeight()
-                                        .padding(end = 4.dp),
+                                        .padding(end = 4.dp)
+                                        .focusRequester(chFocusRequester)
+                                        .then(
+                                            if (isTargetRow && targetEventIdForRow == null) {
+                                                Modifier.focusRequester(initialContentFocusRequester)
+                                            } else {
+                                                Modifier
+                                            },
+                                        )
+                                        .onFocusChanged {
+                                            if (it.isFocused) {
+                                                onFocusTargetChanged(TvGuideFocusTarget(channelId = channel.id))
+                                            }
+                                        },
                                     shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
                                     colors = ClickableSurfaceDefaults.colors(
                                         containerColor = baseCellBg,
@@ -597,8 +723,20 @@ internal fun TvGuideScreen(
                                             } else {
                                                 val isLiveNow = nowEpochSec in ev.startEpochSec until ev.stopEpochSec
                                                 val linkedDvr = findMatchingDvrEntry(ev, dvrEntries)
+                                                val evFocusKey = "ev_${channel.id}_${ev.id}"
+                                                val evFocusRequester = remember(evFocusKey) { FocusRequester() }
+                                                DisposableEffect(evFocusKey) {
+                                                    cellFocusRequesters[evFocusKey] = evFocusRequester
+                                                    onDispose {
+                                                        if (cellFocusRequesters[evFocusKey] === evFocusRequester) {
+                                                            cellFocusRequesters.remove(evFocusKey)
+                                                        }
+                                                    }
+                                                }
+                                                val isPrimaryTargetCell = isTargetRow && ev.id == targetEventIdForRow
                                                 Surface(
                                                     onClick = {
+                                                        onFocusTargetChanged(TvGuideFocusTarget(channel.id, ev.id))
                                                         if (isLiveNow && linkedDvr == null) {
                                                             onWatchChannel(channel)
                                                         } else {
@@ -609,7 +747,20 @@ internal fun TvGuideScreen(
                                                     modifier = Modifier
                                                         .weight(cell.weight)
                                                         .fillMaxHeight()
-                                                        .onFocusChanged { if (it.isFocused) focusedEvent = ev },
+                                                        .focusRequester(evFocusRequester)
+                                                        .then(
+                                                            if (isPrimaryTargetCell) {
+                                                                Modifier.focusRequester(initialContentFocusRequester)
+                                                            } else {
+                                                                Modifier
+                                                            },
+                                                        )
+                                                        .onFocusChanged {
+                                                            if (it.isFocused) {
+                                                                focusedEvent = ev
+                                                                onFocusTargetChanged(TvGuideFocusTarget(channel.id, ev.id))
+                                                            }
+                                                        },
                                                     shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Xs),
                                                     colors = ClickableSurfaceDefaults.colors(
                                                         containerColor = if (isLiveNow) MuxGridColors.CardSurfaceElevated else baseCellBg,
@@ -764,8 +915,10 @@ internal fun TvGuideScreen(
         val isLiveNow = nowEpochSec in ev.startEpochSec until ev.stopEpochSec
         val primaryFocusRequester = remember { FocusRequester() }
 
-        LaunchedEffect(ev.id) {
-            runCatching { primaryFocusRequester.requestFocus() }
+        LaunchedEffect(ev.id, pendingConfirm == null) {
+            if (pendingConfirm == null) {
+                runCatching { primaryFocusRequester.requestFocus() }
+            }
         }
 
         TvModalDialog(
