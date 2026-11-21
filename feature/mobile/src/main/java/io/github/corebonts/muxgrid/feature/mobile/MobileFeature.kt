@@ -155,7 +155,6 @@ fun MobileRoot(
     var activeTab by remember { mutableStateOf(MainTab.LIVE) }
     var activeFilter by remember { mutableStateOf<LiveFilter>(LiveFilter.All) }
     var guideChannelId by remember { mutableStateOf<Long?>(null) }
-    var settingsOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(route) {
         onPlayerScreenActiveChanged(route == MobileRoute.PLAYER)
@@ -228,7 +227,6 @@ fun MobileRoot(
                     nowEpochSec = nowEpochSec,
                     imageLoader = repository.imageLoader,
                     onSelectTab = { activeTab = it },
-                    onOpenSettings = { settingsOpen = true },
                     onOpenServerSetup = { route = MobileRoute.ONBOARDING },
                     onRetryConnect = { repository.reconnect() },
                     onExpandMiniPlayer = {
@@ -313,37 +311,35 @@ fun MobileRoot(
                                 onRefresh = { repository.refresh() },
                             )
                         }
+                        MainTab.SETTINGS -> {
+                            MobileSettingsTab(
+                                profile = currentProfile,
+                                connectionState = connectionState,
+                                hwDecPreset = hwDecPreset,
+                                timeshiftWindow = timeshiftWindow,
+                                backgroundPlayEnabled = backgroundPlayEnabled,
+                                pipEnabled = pipEnabled,
+                                bottomContentPadding = bottomPad,
+                                onSelectPreset = { preset ->
+                                    scope.launch { repository.setHwDecPreset(preset) }
+                                    playbackEngine.applyPreset(preset)
+                                },
+                                onSelectTimeshiftWindow = { window ->
+                                    scope.launch { repository.setTimeshiftWindow(window) }
+                                },
+                                onToggleBackgroundPlay = { enabled ->
+                                    scope.launch { repository.setBackgroundPlayEnabled(enabled) }
+                                },
+                                onTogglePip = { enabled ->
+                                    scope.launch { repository.setPipEnabled(enabled) }
+                                },
+                                onOpenServerSetup = {
+                                    route = MobileRoute.ONBOARDING
+                                },
+                            )
+                        }
                     }
                 }
-            }
-
-            if (settingsOpen) {
-                MobileSettingsSheet(
-                    profile = currentProfile,
-                    connectionState = connectionState,
-                    hwDecPreset = hwDecPreset,
-                    timeshiftWindow = timeshiftWindow,
-                    backgroundPlayEnabled = backgroundPlayEnabled,
-                    pipEnabled = pipEnabled,
-                    onSelectPreset = { preset ->
-                        scope.launch { repository.setHwDecPreset(preset) }
-                        playbackEngine.applyPreset(preset)
-                    },
-                    onSelectTimeshiftWindow = { window ->
-                        scope.launch { repository.setTimeshiftWindow(window) }
-                    },
-                    onToggleBackgroundPlay = { enabled ->
-                        scope.launch { repository.setBackgroundPlayEnabled(enabled) }
-                    },
-                    onTogglePip = { enabled ->
-                        scope.launch { repository.setPipEnabled(enabled) }
-                    },
-                    onOpenServerSetup = {
-                        settingsOpen = false
-                        route = MobileRoute.ONBOARDING
-                    },
-                    onDismiss = { settingsOpen = false },
-                )
             }
         }
         MobileRoute.PLAYER -> {
@@ -445,7 +441,6 @@ private fun MobileMainScaffold(
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     onSelectTab: (MainTab) -> Unit,
-    onOpenSettings: () -> Unit,
     onOpenServerSetup: () -> Unit,
     onRetryConnect: () -> Unit,
     onExpandMiniPlayer: () -> Unit,
@@ -489,7 +484,6 @@ private fun MobileMainScaffold(
                 hazeState = hazeState,
                 glassStyle = glassStyle,
                 onSelectTab = onSelectTab,
-                onOpenSettings = onOpenSettings,
             )
         }
 
@@ -513,32 +507,12 @@ private fun MobileMainScaffold(
                             MainTab.LIVE -> "Live"
                             MainTab.GUIDE -> "Guide"
                             MainTab.RECORDINGS -> "Recordings"
+                            MainTab.SETTINGS -> "Settings"
                         },
                         style = MuxGridType.ScreenTitle,
                     )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        if (connectionState !is ConnectionState.Connected) {
-                            ConnectionStatusBadge(state = connectionState)
-                        }
-                        if (!useNavigationRail) {
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(MuxGridShapes.Sm)
-                                    .clickable(onClick = onOpenSettings),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    imageVector = MuxGridIcons.Settings,
-                                    contentDescription = "Settings",
-                                    tint = MuxGridColors.TextSecondary,
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-                        }
+                    if (connectionState !is ConnectionState.Connected) {
+                        ConnectionStatusBadge(state = connectionState)
                     }
                 }
 
@@ -643,6 +617,7 @@ private fun MobileMainScaffold(
                                 Triple(MainTab.LIVE, "Live", MuxGridIcons.Live to MuxGridIcons.LiveFilled),
                                 Triple(MainTab.GUIDE, "Guide", MuxGridIcons.Guide to MuxGridIcons.GuideFilled),
                                 Triple(MainTab.RECORDINGS, "Recordings", MuxGridIcons.Recordings to MuxGridIcons.RecordingsFilled),
+                                Triple(MainTab.SETTINGS, "Settings", MuxGridIcons.Settings to MuxGridIcons.SettingsFilled),
                             ).forEach { (tab, label, icons) ->
                                 val selected = tab == activeTab
                                 val contentColor = if (selected) MuxGridColors.Accent else MuxGridColors.TextMuted
@@ -684,7 +659,6 @@ private fun MobileNavigationRail(
     hazeState: HazeState,
     glassStyle: HazeBlurStyle,
     onSelectTab: (MainTab) -> Unit,
-    onOpenSettings: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxHeight(),
@@ -705,53 +679,22 @@ private fun MobileNavigationRail(
                     Triple(MainTab.GUIDE, "Guide", MuxGridIcons.Guide to MuxGridIcons.GuideFilled),
                     Triple(MainTab.RECORDINGS, "Recordings", MuxGridIcons.Recordings to MuxGridIcons.RecordingsFilled),
                 ).forEach { (tab, label, icons) ->
-                    val selected = tab == activeTab
-                    val contentColor = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextMuted
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(MuxGridShapes.Sm)
-                            .background(if (selected) MuxGridColors.CardSurfaceElevated else Color.Transparent)
-                            .clickable { onSelectTab(tab) }
-                            .padding(vertical = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(3.dp)
-                                .height(18.dp)
-                                .background(if (selected) MuxGridColors.Accent else Color.Transparent),
-                        )
-                        Box(
-                            modifier = Modifier.weight(1f),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = if (selected) icons.second else icons.first,
-                                contentDescription = label,
-                                tint = contentColor,
-                                modifier = Modifier.size(22.dp),
-                            )
-                        }
-                    }
+                    MobileRailItem(
+                        icon = if (tab == activeTab) icons.second else icons.first,
+                        label = label,
+                        selected = tab == activeTab,
+                        onClick = { onSelectTab(tab) },
+                    )
                 }
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MuxGridShapes.Sm)
-                    .clickable(onClick = onOpenSettings)
-                    .padding(vertical = 11.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = MuxGridIcons.Settings,
-                    contentDescription = "Settings",
-                    tint = MuxGridColors.TextSecondary,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
+            val settingsSelected = activeTab == MainTab.SETTINGS
+            MobileRailItem(
+                icon = if (settingsSelected) MuxGridIcons.SettingsFilled else MuxGridIcons.Settings,
+                label = "Settings",
+                selected = settingsSelected,
+                onClick = { onSelectTab(MainTab.SETTINGS) },
+            )
         }
         Box(
             modifier = Modifier
@@ -759,6 +702,43 @@ private fun MobileNavigationRail(
                 .fillMaxHeight()
                 .background(MuxGridColors.Divider),
         )
+    }
+}
+
+@Composable
+private fun MobileRailItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val contentColor = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextMuted
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MuxGridShapes.Sm)
+            .background(if (selected) MuxGridColors.CardSurfaceElevated else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(18.dp)
+                .background(if (selected) MuxGridColors.Accent else Color.Transparent),
+        )
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = contentColor,
+                modifier = Modifier.size(22.dp),
+            )
+        }
     }
 }
 
@@ -1235,192 +1215,200 @@ private fun MobileChannelCard(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MobileSettingsSheet(
+private fun MobileSettingsTab(
     profile: ServerProfile,
     connectionState: ConnectionState,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
     backgroundPlayEnabled: Boolean,
     pipEnabled: Boolean,
+    bottomContentPadding: Dp,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
     onToggleBackgroundPlay: (Boolean) -> Unit,
     onTogglePip: (Boolean) -> Unit,
     onOpenServerSetup: () -> Unit,
-    onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = MuxGridShapes.SheetTop,
-        containerColor = MuxGridColors.CardSurface,
-        contentColor = MuxGridColors.TextPrimary,
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottomContentPadding),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 6.dp)
-                .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.widthIn(max = 680.dp).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text("Settings", style = MuxGridType.Title, modifier = Modifier.padding(horizontal = 2.dp))
-
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("TVHEADEND SERVER", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
-                Row(
+            Text("TVHEADEND SERVER", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MuxGridShapes.Card)
+                    .background(MuxGridColors.CardSurface)
+                    .padding(horizontal = 12.dp, vertical = 11.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MuxGridShapes.Card)
-                        .background(MuxGridColors.CardSurfaceElevated)
-                        .padding(horizontal = 12.dp, vertical = 11.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                        .weight(1f)
+                        .padding(end = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(end = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        val serverHeadline = if (connectionState is ConnectionState.Connected) {
-                            "${connectionState.serverName} · ${profile.host}:${profile.htspPort}"
-                        } else {
-                            "${profile.host}:${profile.htspPort}"
-                        }
-                        Text(
-                            text = serverHeadline,
-                            style = MuxGridType.TabularNumber,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        val (statusText, statusColor) = when (connectionState) {
-                            is ConnectionState.Connected -> {
-                                "Connected · ${connectionState.serverVersion} · HTSP v${connectionState.htspVersion}" to MuxGridColors.EmeraldOk
-                            }
-                            ConnectionState.Connecting -> "Connecting…" to MuxGridColors.AmberWarn
-                            is ConnectionState.Syncing -> "Syncing…" to MuxGridColors.AmberWarn
-                            is ConnectionState.Error -> connectionState.message to MuxGridColors.CoralLive
-                            ConnectionState.Disconnected -> "Disconnected · HTTP ${profile.httpPort}" to MuxGridColors.TextMuted
-                        }
-                        Text(
-                            text = statusText,
-                            style = MuxGridType.TabularSmall,
-                            color = statusColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                    val serverHeadline = if (connectionState is ConnectionState.Connected) {
+                        "${connectionState.serverName} · ${profile.host}:${profile.htspPort}"
+                    } else {
+                        "${profile.host}:${profile.htspPort}"
                     }
-                    MuxGridCompactButton(
-                        text = "Edit",
-                        leadingIcon = MuxGridIcons.Edit,
-                        containerColor = MuxGridColors.CardSurface,
-                        contentColor = MuxGridColors.TextPrimary,
-                        onClick = onOpenServerSetup,
+                    Text(
+                        text = serverHeadline,
+                        style = MuxGridType.TabularNumber,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
-                }
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("PLAYBACK & BACKGROUND", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MuxGridShapes.Card)
-                        .background(MuxGridColors.CanvasPhone),
-                    verticalArrangement = Arrangement.spacedBy(1.dp),
-                ) {
-                    SettingToggleRow(
-                        title = "Auto Picture-in-Picture",
-                        subtitle = "Shrink live TV & recordings into PiP when leaving",
-                        checked = pipEnabled,
-                        onCheckedChange = onTogglePip,
-                    )
-                    SettingToggleRow(
-                        title = "Background Audio",
-                        subtitle = "Keep live TV audio playing when minimized (Radio always on)",
-                        checked = backgroundPlayEnabled,
-                        onCheckedChange = onToggleBackgroundPlay,
-                    )
-                }
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("DECODER PRESET", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MuxGridShapes.Card)
-                        .background(MuxGridColors.CanvasPhone),
-                    verticalArrangement = Arrangement.spacedBy(1.dp),
-                ) {
-                    listOf(
-                        HwDecPreset.MEDIACODEC_COPY_BWDIF to "HW Copy + bwdif Deinterlace",
-                        HwDecPreset.MEDIACODEC_ZERO_COPY to "Hardware Zero-Copy (mediacodec)",
-                    ).forEach { (preset, label) ->
-                        val selected = preset == hwDecPreset
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(MuxGridColors.CardSurfaceElevated)
-                                .clickable { onSelectPreset(preset) }
-                                .padding(horizontal = 12.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = label,
-                                fontSize = 13.sp,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                color = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextSecondary,
-                                modifier = Modifier.weight(1f),
-                            )
-                            if (selected) {
-                                Spacer(Modifier.width(8.dp))
-                                Icon(
-                                    imageVector = MuxGridIcons.Check,
-                                    contentDescription = "Active",
-                                    tint = MuxGridColors.Accent,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            }
+                    val (statusText, statusColor) = when (connectionState) {
+                        is ConnectionState.Connected -> {
+                            "Connected · ${connectionState.serverVersion} · HTSP v${connectionState.htspVersion}" to MuxGridColors.EmeraldOk
                         }
+                        ConnectionState.Connecting -> "Connecting…" to MuxGridColors.AmberWarn
+                        is ConnectionState.Syncing -> "Syncing…" to MuxGridColors.AmberWarn
+                        is ConnectionState.Error -> connectionState.message to MuxGridColors.CoralLive
+                        ConnectionState.Disconnected -> "Disconnected · HTTP ${profile.httpPort}" to MuxGridColors.TextMuted
                     }
+                    Text(
+                        text = statusText,
+                        style = MuxGridType.TabularSmall,
+                        color = statusColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(MuxGridShapes.Sm)
+                        .background(MuxGridColors.CardSurfaceElevated)
+                        .clickable(onClick = onOpenServerSetup),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = MuxGridIcons.Edit,
+                        contentDescription = "Edit Server",
+                        tint = MuxGridColors.TextPrimary,
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
             }
+        }
 
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("LIVE TIMESHIFT CACHE LIMIT", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MuxGridShapes.Card)
-                        .background(MuxGridColors.CardSurfaceElevated)
-                        .padding(horizontal = 12.dp, vertical = 11.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
+        Column(
+            modifier = Modifier.widthIn(max = 680.dp).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text("PLAYBACK & BACKGROUND", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MuxGridShapes.Card)
+                    .background(MuxGridColors.Divider),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                SettingToggleRow(
+                    title = "Auto Picture-in-Picture",
+                    subtitle = "Shrink live TV & recordings into PiP when leaving",
+                    checked = pipEnabled,
+                    onCheckedChange = onTogglePip,
+                )
+                SettingToggleRow(
+                    title = "Background Audio",
+                    subtitle = "Keep live TV audio playing when minimized (Radio always on)",
+                    checked = backgroundPlayEnabled,
+                    onCheckedChange = onToggleBackgroundPlay,
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier.widthIn(max = 680.dp).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text("DECODER PRESET", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MuxGridShapes.Card)
+                    .background(MuxGridColors.Divider),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                listOf(
+                    HwDecPreset.MEDIACODEC_COPY_BWDIF to "HW Copy + bwdif Deinterlace",
+                    HwDecPreset.MEDIACODEC_ZERO_COPY to "Hardware Zero-Copy (mediacodec)",
+                ).forEach { (preset, label) ->
+                    val selected = preset == hwDecPreset
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(18.dp),
+                            .background(MuxGridColors.CardSurface)
+                            .clickable { onSelectPreset(preset) }
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        TimeshiftWindow.entries.forEach { option ->
-                            BroadcastUnderlineTab(
-                                label = option.shortLabel,
-                                selected = option == timeshiftWindow,
-                                onClick = { onSelectTimeshiftWindow(option) },
+                        Text(
+                            text = label,
+                            fontSize = 13.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextSecondary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (selected) {
+                            Spacer(Modifier.width(8.dp))
+                            Icon(
+                                imageVector = MuxGridIcons.Check,
+                                contentDescription = "Active",
+                                tint = MuxGridColors.Accent,
+                                modifier = Modifier.size(16.dp),
                             )
                         }
                     }
-                    Text(
-                        text = "${timeshiftWindow.description} · split pause/rewind · applies on next tune",
-                        style = MuxGridType.TabularSmall,
-                        color = MuxGridColors.TextSecondary,
-                    )
                 }
+            }
+        }
+
+        Column(
+            modifier = Modifier.widthIn(max = 680.dp).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text("LIVE TIMESHIFT CACHE LIMIT", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MuxGridShapes.Card)
+                    .background(MuxGridColors.CardSurface)
+                    .padding(horizontal = 12.dp, vertical = 11.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    TimeshiftWindow.entries.forEach { option ->
+                        BroadcastUnderlineTab(
+                            label = option.shortLabel,
+                            selected = option == timeshiftWindow,
+                            onClick = { onSelectTimeshiftWindow(option) },
+                        )
+                    }
+                }
+                Text(
+                    text = "${timeshiftWindow.description} · split pause/rewind · applies on next tune",
+                    style = MuxGridType.TabularSmall,
+                    color = MuxGridColors.TextSecondary,
+                )
             }
         }
     }
@@ -1436,7 +1424,7 @@ private fun SettingToggleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MuxGridColors.CardSurfaceElevated)
+            .background(MuxGridColors.CardSurface)
             .clickable { onCheckedChange(!checked) }
             .padding(horizontal = 12.dp, vertical = 11.dp),
         horizontalArrangement = Arrangement.SpaceBetween,

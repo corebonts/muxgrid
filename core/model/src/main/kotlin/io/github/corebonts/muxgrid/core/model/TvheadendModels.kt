@@ -116,6 +116,7 @@ enum class MainTab {
     LIVE,
     GUIDE,
     RECORDINGS,
+    SETTINGS,
 }
 
 sealed interface LiveFilter {

@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,8 +49,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -185,7 +184,6 @@ private fun TvContent(
     }
     var activeTab by remember { mutableStateOf(MainTab.LIVE) }
     var activeFilter by remember { mutableStateOf<LiveFilter>(LiveFilter.All) }
-    var settingsOpen by remember { mutableStateOf(false) }
 
     val filteredChannels = remember(channels, activeFilter, favorites) {
         filterChannels(channels, activeFilter, favorites)
@@ -246,7 +244,6 @@ private fun TvContent(
                     railFocusRequester = railFocusRequester,
                     onRailFocusChanged = { railHasFocus = it },
                     onSelectTab = { activeTab = it },
-                    onOpenSettings = { settingsOpen = true },
                 )
 
                 Column(
@@ -269,6 +266,7 @@ private fun TvContent(
                                 MainTab.LIVE -> "Live"
                                 MainTab.GUIDE -> "Guide"
                                 MainTab.RECORDINGS -> "Recordings"
+                                MainTab.SETTINGS -> "Settings"
                             },
                             style = MuxGridType.ScreenTitle,
                         )
@@ -419,30 +417,27 @@ private fun TvContent(
                                     onToggleWatched = { dvrId, watched -> repository.markRecordingWatched(dvrId, watched) },
                                 )
                             }
+                            MainTab.SETTINGS -> {
+                                TvSettingsTab(
+                                    profile = currentProfile,
+                                    connectionState = connectionState,
+                                    hwDecPreset = hwDecPreset,
+                                    timeshiftWindow = timeshiftWindow,
+                                    onSelectPreset = { preset ->
+                                        scope.launch { repository.setHwDecPreset(preset) }
+                                        playbackEngine.applyPreset(preset)
+                                    },
+                                    onSelectTimeshiftWindow = { window ->
+                                        scope.launch { repository.setTimeshiftWindow(window) }
+                                    },
+                                    onOpenServerSetup = {
+                                        route = TvRoute.ONBOARDING
+                                    },
+                                )
+                            }
                         }
                     }
                 }
-            }
-
-            if (settingsOpen) {
-                TvSettingsDialog(
-                    profile = currentProfile,
-                    connectionState = connectionState,
-                    hwDecPreset = hwDecPreset,
-                    timeshiftWindow = timeshiftWindow,
-                    onSelectPreset = { preset ->
-                        scope.launch { repository.setHwDecPreset(preset) }
-                        playbackEngine.applyPreset(preset)
-                    },
-                    onSelectTimeshiftWindow = { window ->
-                        scope.launch { repository.setTimeshiftWindow(window) }
-                    },
-                    onOpenServerSetup = {
-                        settingsOpen = false
-                        route = TvRoute.ONBOARDING
-                    },
-                    onDismiss = { settingsOpen = false },
-                )
             }
         }
         TvRoute.PLAYER -> {
@@ -495,7 +490,6 @@ private fun TvNavigationRail(
     railFocusRequester: FocusRequester,
     onRailFocusChanged: (Boolean) -> Unit,
     onSelectTab: (MainTab) -> Unit,
-    onOpenSettings: () -> Unit,
 ) {
     val railWidth by animateDpAsState(targetValue = if (expanded) 186.dp else 68.dp, label = "tvRailWidth")
     val activeFocusRequester = remember { FocusRequester() }
@@ -539,12 +533,14 @@ private fun TvNavigationRail(
                 }
             }
 
+            val settingsSelected = activeTab == MainTab.SETTINGS
             TvRailItem(
-                icon = MuxGridIcons.Settings,
+                icon = if (settingsSelected) MuxGridIcons.SettingsFilled else MuxGridIcons.Settings,
                 label = "Settings",
                 expanded = expanded,
-                selected = false,
-                onClick = onOpenSettings,
+                selected = settingsSelected,
+                onClick = { onSelectTab(MainTab.SETTINGS) },
+                modifier = if (settingsSelected) Modifier.focusRequester(activeFocusRequester) else Modifier,
             )
         }
         Box(
@@ -847,7 +843,7 @@ private fun TvChannelCard(
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-private fun TvSettingsDialog(
+private fun TvSettingsTab(
     profile: ServerProfile,
     connectionState: ConnectionState,
     hwDecPreset: HwDecPreset,
@@ -855,32 +851,120 @@ private fun TvSettingsDialog(
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
     onOpenServerSetup: () -> Unit,
-    onDismiss: () -> Unit,
 ) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Column(
             modifier = Modifier
-                .widthIn(min = 500.dp, max = 660.dp)
-                .clip(MuxGridShapes.Dialog)
-                .background(MuxGridColors.CardSurfaceElevated)
-                .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
-                .padding(22.dp),
+                .widthIn(max = 760.dp)
+                .fillMaxWidth()
+                .clip(MuxGridShapes.Card)
+                .background(MuxGridColors.CardSurface)
+                .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "TVHEADEND SERVER",
+                style = MuxGridType.Eyebrow,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    val serverHeadline = if (connectionState is ConnectionState.Connected) {
+                        "${connectionState.serverName} · ${profile.host}:${profile.htspPort}"
+                    } else {
+                        "${profile.host}:${profile.htspPort}"
+                    }
+                    Text(
+                        text = serverHeadline,
+                        style = MuxGridType.TabularNumber,
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val (statusText, statusColor) = when (connectionState) {
+                        is ConnectionState.Connected -> {
+                            "Connected · ${connectionState.serverVersion} · HTSP v${connectionState.htspVersion}" to MuxGridColors.EmeraldOk
+                        }
+                        ConnectionState.Connecting -> "Connecting…" to MuxGridColors.AmberWarn
+                        is ConnectionState.Syncing -> "Syncing…" to MuxGridColors.AmberWarn
+                        is ConnectionState.Error -> connectionState.message to MuxGridColors.CoralLive
+                        ConnectionState.Disconnected -> "Disconnected · HTTP ${profile.httpPort}" to MuxGridColors.TextMuted
+                    }
+                    Text(
+                        text = statusText,
+                        style = MuxGridType.TabularSmall,
+                        color = statusColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Surface(
+                    onClick = onOpenServerSetup,
+                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
+                    colors = ClickableSurfaceDefaults.colors(
+                        containerColor = MuxGridColors.CardSurfaceElevated,
+                        contentColor = MuxGridColors.TextPrimary,
+                        focusedContainerColor = MuxGridColors.FocusBorder,
+                        focusedContentColor = MuxGridColors.CanvasTv,
+                    ),
+                    border = ClickableSurfaceDefaults.border(
+                        border = Border.None,
+                        focusedBorder = Border(
+                            border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
+                            shape = MuxGridShapes.Sm,
+                        ),
+                    ),
+                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+                ) {
+                    Box(
+                        modifier = Modifier.size(44.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = MuxGridIcons.Edit,
+                            contentDescription = "Edit Server",
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .widthIn(max = 760.dp)
+                .fillMaxWidth()
+                .clip(MuxGridShapes.Card)
+                .background(MuxGridColors.CardSurface)
+                .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
+                .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                text = "Video Decoder & Timeshift",
-                style = MuxGridType.Title,
-                fontSize = 19.sp,
+                text = "VIDEO DECODER & TIMESHIFT",
+                style = MuxGridType.Eyebrow,
             )
 
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     text = "Hardware Decode Preset",
                     style = MuxGridType.CardSubtitle,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     listOf(
@@ -896,11 +980,13 @@ private fun TvSettingsDialog(
                 }
             }
 
+            MuxGridDivider()
+
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     text = "Live Timeshift Cache Limit",
                     style = MuxGridType.CardSubtitle,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                 )
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -919,51 +1005,6 @@ private fun TvSettingsDialog(
                     style = MuxGridType.TabularSmall,
                     color = MuxGridColors.TextMuted,
                 )
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                MuxGridDivider()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val connSuffix = when (connectionState) {
-                        is ConnectionState.Connected -> "Connected"
-                        ConnectionState.Connecting -> "Connecting…"
-                        is ConnectionState.Syncing -> "Syncing…"
-                        is ConnectionState.Error -> "Error"
-                        ConnectionState.Disconnected -> "Offline"
-                    }
-                    Text(
-                        text = "Server: ${profile.host}:${profile.htspPort} · $connSuffix",
-                        style = MuxGridType.TabularSmall,
-                        color = MuxGridColors.TextSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(end = 12.dp),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
-                            onClick = onOpenServerSetup,
-                            shape = tvButtonShape(),
-                            colors = tvPrimaryButtonColors(),
-                        ) {
-                            Icon(MuxGridIcons.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Edit Server", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
-                        }
-                        Button(
-                            onClick = onDismiss,
-                            shape = tvButtonShape(),
-                            colors = tvDialogSecondaryButtonColors(),
-                        ) {
-                            Text("Close", maxLines = 1, softWrap = false)
-                        }
-                    }
-                }
             }
         }
     }
