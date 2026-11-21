@@ -94,7 +94,6 @@ fun findMatchingDvrEntry(
     return best
 }
 
-const val EPG_PAST_DAYS = 5L
 const val EPG_FUTURE_WEEKS = 2L
 const val EPG_FUTURE_DAYS = EPG_FUTURE_WEEKS * 7L
 
@@ -108,7 +107,7 @@ fun buildUpcomingDays(
 }
 
 /**
- * Returns chronologically sorted dates within `[today - 5 days, today + 2 weeks]` that have
+ * Returns chronologically sorted dates within `[today, today + 2 weeks]` that have
  * at least one overlapping EPG event, always including `today`.
  */
 fun buildAvailableGuideDays(
@@ -132,13 +131,12 @@ private fun buildAvailableGuideDaysInternal(
     zoneId: ZoneId,
 ): List<LocalDate> {
     val today = Instant.ofEpochSecond(nowEpochSec).atZone(zoneId).toLocalDate()
-    val minDate = today.minusDays(EPG_PAST_DAYS)
-    val totalDays = (EPG_PAST_DAYS + 1L + EPG_FUTURE_DAYS).toInt()
+    val totalDays = (1L + EPG_FUTURE_DAYS).toInt()
     val dayStarts = LongArray(totalDays + 1) { idx ->
-        minDate.plusDays(idx.toLong()).atStartOfDay(zoneId).toEpochSecond()
+        today.plusDays(idx.toLong()).atStartOfDay(zoneId).toEpochSecond()
     }
     val hasEvents = BooleanArray(totalDays)
-    hasEvents[EPG_PAST_DAYS.toInt()] = true
+    hasEvents[0] = true
 
     val windowMin = dayStarts[0]
     val windowMax = dayStarts[totalDays]
@@ -168,14 +166,14 @@ private fun buildAvailableGuideDaysInternal(
     val result = ArrayList<LocalDate>(totalDays)
     for (i in 0 until totalDays) {
         if (hasEvents[i]) {
-            result.add(minDate.plusDays(i.toLong()))
+            result.add(today.plusDays(i.toLong()))
         }
     }
     return result
 }
 
 /**
- * Returns `(earliestStartEpochSec, latestStopEpochSec)` clamped to `[today - 5 days, today + 2 weeks]`,
+ * Returns `(earliestStartEpochSec, latestStopEpochSec)` clamped to `[today, today + 2 weeks]`,
  * or `null` if no events fall within that range.
  */
 fun computeGuideEventBounds(
@@ -184,7 +182,7 @@ fun computeGuideEventBounds(
     zoneId: ZoneId = ZoneId.systemDefault(),
 ): Pair<Long, Long>? {
     val today = Instant.ofEpochSecond(nowEpochSec).atZone(zoneId).toLocalDate()
-    val minEpoch = today.minusDays(EPG_PAST_DAYS).atStartOfDay(zoneId).toEpochSecond()
+    val minEpoch = today.atStartOfDay(zoneId).toEpochSecond()
     val maxEpoch = today.plusDays(EPG_FUTURE_DAYS + 1L).atStartOfDay(zoneId).toEpochSecond()
     var earliest = Long.MAX_VALUE
     var latest = Long.MIN_VALUE

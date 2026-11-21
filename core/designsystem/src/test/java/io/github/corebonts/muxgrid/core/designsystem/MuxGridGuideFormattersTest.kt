@@ -32,21 +32,18 @@ class MuxGridGuideFormattersTest {
     }
 
     @Test
-    fun `buildAvailableGuideDays includes only days with events within -5d to +2w plus today`() {
+    fun `buildAvailableGuideDays includes only days with events within today to +2w plus today`() {
         val events = listOf(
-            ev(1L, -7L), // outside -5d
-            ev(2L, -5L), // included
-            ev(3L, -1L), // yesterday
-            ev(4L, 2L),  // +2d
-            ev(5L, 14L), // +2w
-            ev(6L, 20L), // outside +2w
+            ev(1L, -5L), // past day excluded
+            ev(2L, -1L), // yesterday excluded
+            ev(3L, 2L),  // +2d
+            ev(4L, 14L), // +2w
+            ev(5L, 20L), // outside +2w
         )
 
         val days = buildAvailableGuideDays(events, nowSec, zone)
         assertEquals(
             listOf(
-                today.minusDays(5),
-                today.minusDays(1),
                 today,
                 today.plusDays(2),
                 today.plusDays(14),

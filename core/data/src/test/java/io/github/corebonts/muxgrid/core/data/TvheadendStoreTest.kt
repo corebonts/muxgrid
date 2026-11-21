@@ -12,6 +12,7 @@ import io.github.corebonts.muxgrid.core.model.LocalDvrProgress
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class TvheadendStoreTest {
@@ -195,7 +196,7 @@ class TvheadendStoreTest {
     }
 
     @Test
-    fun `eventDelete retains past events within 5-day retention window and deletes future ones`() {
+    fun `eventDelete removes both past and future events`() {
         val nowSec = 1_000_000L
         val store = TvheadendStore(epochSecondsProvider = { nowSec })
         store.applyEvent(HtspPushEvent.SyncStarting)
@@ -219,27 +220,15 @@ class TvheadendStoreTest {
             ),
         )
 
-        val remaining = store.epgByChannel.value[1L].orEmpty()
-        assertEquals(listOf(10L), remaining.map { it.id })
+        assertEquals(emptyList<Long>(), store.epgByChannel.value[1L].orEmpty().map { it.id })
     }
 
     @Test
-    fun `shadow resync preserves non-overlapping recent past events and prunes events older than 5 days`() {
+    fun `shadow resync replaces EPG with fresh server snapshot without retaining omitted past events`() {
         val nowSec = 2_000_000L
         val store = TvheadendStore(epochSecondsProvider = { nowSec })
         store.applyEvent(HtspPushEvent.SyncStarting)
         store.applyEvent(HtspPushEvent.ChannelAdd(Channel(id = 1L, number = 1, name = "M1 HD")))
-        store.applyEvent(
-            HtspPushEvent.EventAdd(
-                EpgEvent(
-                    id = 1L,
-                    channelId = 1L,
-                    startEpochSec = nowSec - 6L * 86_400L,
-                    stopEpochSec = nowSec - 5L * 86_400L - 10L,
-                    title = "Too Old",
-                ),
-            ),
-        )
         store.applyEvent(
             HtspPushEvent.EventAdd(
                 EpgEvent(
@@ -251,25 +240,15 @@ class TvheadendStoreTest {
                 ),
             ),
         )
-        store.applyEvent(
-            HtspPushEvent.EventAdd(
-                EpgEvent(
-                    id = 3L,
-                    channelId = 1L,
-                    startEpochSec = nowSec - 1_800L,
-                    stopEpochSec = nowSec,
-                    title = "Just Ended Old",
-                ),
-            ),
-        )
         store.applyEvent(HtspPushEvent.InitialSyncCompleted)
+        assertEquals(listOf(2L), store.epgByChannel.value[1L].orEmpty().map { it.id })
 
-        // Resync omits past event 2, replaces slot 3 with corrected event 30, and adds future event 4
+        // Resync omits past event 2 and provides current/future events
         store.applyEvent(HtspPushEvent.SyncStarting)
         store.applyEvent(HtspPushEvent.ChannelAdd(Channel(id = 1L, number = 1, name = "M1 HD")))
         store.applyEvent(
             HtspPushEvent.EventAdd(
-                EpgEvent(id = 30L, channelId = 1L, startEpochSec = nowSec - 1_800L, stopEpochSec = nowSec + 1_800L, title = "Corrected"),
+                EpgEvent(id = 30L, channelId = 1L, startEpochSec = nowSec - 1_800L, stopEpochSec = nowSec + 1_800L, title = "Current"),
             ),
         )
         store.applyEvent(
@@ -279,32 +258,39 @@ class TvheadendStoreTest {
         )
         store.applyEvent(HtspPushEvent.InitialSyncCompleted)
 
-        assertEquals(listOf(2L, 30L, 4L), store.epgByChannel.value[1L].orEmpty().map { it.id })
+        assertEquals(listOf(30L, 4L), store.epgByChannel.value[1L].orEmpty().map { it.id })
     }
 
     @Test
-    fun `refreshNowNext prunes expired past events older than retention window`() {
-        var nowSec = 1_000_000L
-        val store = TvheadendStore(epochSecondsProvider = { nowSec }, pastRetentionSeconds = 100L)
+    fun `clear empties channels, EPG, nowNext, and DVR entries`() {
+        val nowSec = 1_000_000L
+        val store = TvheadendStore(epochSecondsProvider = { nowSec })
         store.applyEvent(HtspPushEvent.SyncStarting)
         store.applyEvent(HtspPushEvent.ChannelAdd(Channel(id = 1L, number = 1, name = "M1 HD")))
         store.applyEvent(
             HtspPushEvent.EventAdd(
-                EpgEvent(id = 1L, channelId = 1L, startEpochSec = nowSec - 90L, stopEpochSec = nowSec - 50L, title = "Old"),
+                EpgEvent(id = 10L, channelId = 1L, startEpochSec = nowSec - 600L, stopEpochSec = nowSec + 600L, title = "Live"),
             ),
         )
         store.applyEvent(
-            HtspPushEvent.EventAdd(
-                EpgEvent(id = 2L, channelId = 1L, startEpochSec = nowSec + 10L, stopEpochSec = nowSec + 200L, title = "Later"),
+            HtspPushEvent.DvrEntryAdd(
+                DvrEntry(id = 5L, channelId = 1L, startEpochSec = nowSec, stopEpochSec = nowSec + 600L, title = "Rec", state = DvrState.RECORDING),
             ),
         )
         store.applyEvent(HtspPushEvent.InitialSyncCompleted)
-        assertEquals(listOf(1L, 2L), store.epgByChannel.value[1L].orEmpty().map { it.id })
 
-        // Advance past Old's stopEpochSec + pastRetentionSeconds (nowSec - 50 < nowSec_new - 100)
-        nowSec += 60L
-        store.refreshNowNext()
-        assertEquals(listOf(2L), store.epgByChannel.value[1L].orEmpty().map { it.id })
+        assertEquals(1, store.channels.value.size)
+        assertEquals(1, store.epgByChannel.value.size)
+        assertEquals(1, store.nowNextByChannel.value.size)
+        assertEquals(1, store.dvrEntries.value.size)
+
+        store.clear()
+
+        assertTrue(store.channels.value.isEmpty())
+        assertTrue(store.tags.value.isEmpty())
+        assertTrue(store.epgByChannel.value.isEmpty())
+        assertTrue(store.nowNextByChannel.value.isEmpty())
+        assertTrue(store.dvrEntries.value.isEmpty())
     }
 
     @Test
