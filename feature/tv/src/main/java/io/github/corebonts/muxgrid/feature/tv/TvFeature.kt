@@ -109,6 +109,7 @@ import io.github.corebonts.muxgrid.core.model.LiveFilter
 import io.github.corebonts.muxgrid.core.model.MainTab
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.ServerProfile
+import io.github.corebonts.muxgrid.core.model.StartScreen
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
 import kotlinx.coroutines.launch
@@ -297,12 +298,14 @@ private fun TvContent(
 ) {
     val scope = rememberCoroutineScope()
     val profile by repository.serverProfile.collectAsState()
+    val startScreen by repository.startScreen.collectAsState()
     val connectionState by repository.connectionState.collectAsState()
     val channels by repository.channels.collectAsState()
     val favorites by repository.favoriteChannelIds.collectAsState()
 
     val currentProfile = profile
-    if (currentProfile == null) {
+    val currentStartScreen = startScreen
+    if (currentProfile == null || currentStartScreen == null) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -317,8 +320,8 @@ private fun TvContent(
     var route by remember(currentProfile.isConfigured) {
         mutableStateOf(if (currentProfile.isConfigured) TvRoute.MAIN else TvRoute.ONBOARDING)
     }
-    var activeTab by remember { mutableStateOf(MainTab.LIVE) }
-    var activeFilter by remember { mutableStateOf<LiveFilter>(LiveFilter.All) }
+    var activeTab by remember { mutableStateOf(currentStartScreen.tab) }
+    var activeFilter by remember { mutableStateOf(currentStartScreen.liveFilter) }
 
     val filteredChannels = remember(channels, activeFilter, favorites) {
         filterChannels(channels, activeFilter, favorites)
@@ -336,7 +339,7 @@ private fun TvContent(
     val recordingShelfStates = remember { mutableMapOf<String, LazyListState>() }
 
     val focusMemory = remember { TvFocusMemory() }
-    var hasDeliveredInitialLiveFocus by remember { mutableStateOf(false) }
+    var hasDeliveredInitialContentFocus by remember { mutableStateOf(false) }
     var contentFocusRequestNonce by remember { mutableIntStateOf(0) }
     var isGuideSearchOpen by remember { mutableStateOf(false) }
 
@@ -368,18 +371,39 @@ private fun TvContent(
                     isGuideSearchOpen = false
                 }
             }
-            LaunchedEffect(activeTab, filteredChannels.isNotEmpty(), hasDeliveredInitialLiveFocus) {
-                if (activeTab == MainTab.LIVE && !hasDeliveredInitialLiveFocus && filteredChannels.isNotEmpty()) {
-                    hasDeliveredInitialLiveFocus = true
-                    contentFocusRequestNonce++
+            if (!hasDeliveredInitialContentFocus) {
+                when (activeTab) {
+                    MainTab.LIVE, MainTab.GUIDE -> {
+                        LaunchedEffect(channels.isNotEmpty()) {
+                            if (channels.isNotEmpty()) {
+                                hasDeliveredInitialContentFocus = true
+                                contentFocusRequestNonce++
+                            }
+                        }
+                    }
+                    MainTab.RECORDINGS -> {
+                        val dvrEntries by repository.dvrEntries.collectAsState()
+                        LaunchedEffect(dvrEntries.isNotEmpty()) {
+                            if (dvrEntries.isNotEmpty()) {
+                                hasDeliveredInitialContentFocus = true
+                                contentFocusRequestNonce++
+                            }
+                        }
+                    }
+                    MainTab.SETTINGS -> {
+                        LaunchedEffect(Unit) {
+                            hasDeliveredInitialContentFocus = true
+                            contentFocusRequestNonce++
+                        }
+                    }
                 }
             }
             var railHasFocus by remember { mutableStateOf(false) }
-            BackHandler(enabled = activeTab != MainTab.LIVE && !isGuideSearchOpen) {
-                activeTab = MainTab.LIVE
+            BackHandler(enabled = activeTab != currentStartScreen.tab && !isGuideSearchOpen) {
+                activeTab = currentStartScreen.tab
                 contentFocusRequestNonce++
             }
-            BackHandler(enabled = activeTab == MainTab.LIVE && railHasFocus) {
+            BackHandler(enabled = activeTab == currentStartScreen.tab && railHasFocus) {
                 contentFocusRequestNonce++
             }
             var isRefreshing by remember { mutableStateOf(false) }
@@ -525,7 +549,7 @@ private fun TvContent(
                                     onSelectFilter = { activeFilter = it },
                                     onChannelClick = { channel ->
                                         focusMemory.liveChannelId = channel.id
-                                        hasDeliveredInitialLiveFocus = true
+                                        hasDeliveredInitialContentFocus = true
                                         playbackEngine.playChannel(channel, repository.hwDecPreset.value)
                                         route = TvRoute.PLAYER
                                     },
@@ -608,10 +632,14 @@ private fun TvContent(
                                 TvSettingsTab(
                                     profile = currentProfile,
                                     connectionState = connectionState,
+                                    startScreen = currentStartScreen,
                                     hwDecPreset = hwDecPreset,
                                     timeshiftWindow = timeshiftWindow,
                                     focusMemory = focusMemory,
                                     focusRequestNonce = contentFocusRequestNonce,
+                                    onSelectStartScreen = { screen ->
+                                        scope.launch { repository.setStartScreen(screen) }
+                                    },
                                     onSelectPreset = { preset ->
                                         scope.launch { repository.setHwDecPreset(preset) }
                                         playbackEngine.applyPreset(preset)
@@ -640,7 +668,7 @@ private fun TvContent(
                     railFocusRequester = railFocusRequester,
                     onRailFocusChanged = { railHasFocus = it },
                     onSelectTab = { tab ->
-                        hasDeliveredInitialLiveFocus = true
+                        hasDeliveredInitialContentFocus = true
                         activeTab = tab
                         contentFocusRequestNonce++
                     },
@@ -1191,10 +1219,12 @@ private fun TvChannelCard(
 private fun TvSettingsTab(
     profile: ServerProfile,
     connectionState: ConnectionState,
+    startScreen: StartScreen,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
     focusMemory: TvFocusMemory,
     focusRequestNonce: Int,
+    onSelectStartScreen: (StartScreen) -> Unit,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
     onRetryConnect: () -> Unit,
@@ -1350,6 +1380,50 @@ private fun TvSettingsTab(
                         }
                     }
                 }
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .widthIn(max = 760.dp)
+                .fillMaxWidth()
+                .clip(MuxGridShapes.Card)
+                .background(MuxGridColors.CardSurface)
+                .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = "GENERAL",
+                style = MuxGridType.Eyebrow,
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Start Screen",
+                    style = MuxGridType.CardSubtitle,
+                    fontSize = 13.sp,
+                )
+                Row(
+                    modifier = Modifier
+                        .focusGroup()
+                        .focusRestorer()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    StartScreen.entries.forEach { option ->
+                        TvUnderlineOption(
+                            label = option.label,
+                            selected = startScreen == option,
+                            onClick = { onSelectStartScreen(option) },
+                        )
+                    }
+                }
+                Text(
+                    text = startScreen.description,
+                    style = MuxGridType.TabularSmall,
+                    color = MuxGridColors.TextMuted,
+                )
             }
         }
 

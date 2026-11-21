@@ -119,6 +119,47 @@ enum class MainTab {
     SETTINGS,
 }
 
+enum class StartScreen(
+    val label: String,
+    val description: String,
+    val tab: MainTab,
+    val liveFilter: LiveFilter = LiveFilter.All,
+) {
+    LIVE(
+        label = "Live",
+        description = "Opens Live channels (All) when the app starts",
+        tab = MainTab.LIVE,
+        liveFilter = LiveFilter.All,
+    ),
+    FAVORITES(
+        label = "Favorites",
+        description = "Opens Live channels filtered to Favorites when the app starts",
+        tab = MainTab.LIVE,
+        liveFilter = LiveFilter.Favorites,
+    ),
+    GUIDE(
+        label = "Guide",
+        description = "Opens the EPG Guide when the app starts",
+        tab = MainTab.GUIDE,
+    ),
+    RECORDINGS(
+        label = "Recordings",
+        description = "Opens Recordings when the app starts",
+        tab = MainTab.RECORDINGS,
+    ),
+    ;
+
+    companion object {
+        fun fromPersisted(raw: String?): StartScreen = when (raw) {
+            "LIVE" -> LIVE
+            "FAVORITES" -> FAVORITES
+            "GUIDE" -> GUIDE
+            "RECORDINGS" -> RECORDINGS
+            else -> LIVE
+        }
+    }
+}
+
 sealed interface LiveFilter {
     data object All : LiveFilter
     data object Tv : LiveFilter
