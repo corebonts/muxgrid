@@ -40,6 +40,7 @@ When deploying to multiple connected Android / Android TV devices:
   adb -s <device2> install -r app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk &
   wait
   ```
+- **Evaluating TV fluidity (debug vs. release):** Always profile and judge Android TV smoothness on an R8-minified, non-debuggable `release` build (optionally followed by `adb -s <tv> shell cmd package compile -m speed -f io.github.corebonts.muxgrid` so ART compiles immediately instead of waiting for idle dexopt). Android refuses to AOT-compile `DEBUGGABLE` APKs (`run-from-apk` / `quicken`), making Compose several times slower on entry-level 32-bit ARM TVs. For local in-place testing over a debug install without wiping app data, sign `app/build/outputs/apk/release/app-<abi>-release-unsigned.apk` into `app/build/tmp/` with `~/.android/debug.keystore` via `apksigner`—never wire `debug` signing into the `release` build type in [app/build.gradle.kts](app/build.gradle.kts).
 
 ## 4. Dependencies & FOSS Policy
 
@@ -51,4 +52,8 @@ When deploying to multiple connected Android / Android TV devices:
 
 - **Keep `:core:player` isolated:** Maintain the `PlaybackEngine` abstraction boundary in `:core:player` so GPL-licensed `libmpv` bindings stay decoupled from the rest of the Apache-2.0 codebase.
 - **Respect form-factor separation:** Keep phone/tablet UI in `:feature:mobile` and 10-ft D-pad TV UI in `:feature:tv`, sharing state/models via `:core:*` and visual tokens via `:core:designsystem` ([docs/DESIGN.md](docs/DESIGN.md)).
+- **Protect Android TV Compose performance:** On entry-level 32-bit ARM TVs, avoid patterns that trigger UI-thread jank:
+  - Keep D-pad focus memory non-observable (`TvFocusMemory`) and overlay the collapsible TV navigation rail over a fixed-width content area so focus/rail transitions never recompose or resize lazy grids/timelines.
+  - Never use `SubcomposeAsyncImage`, `tv.material3.Surface` (`SurfaceGlowNode` + multi-frame scale animations), or per-item `animate*AsState` inside dense TV lazy lists/grids; use `AsyncImage` with Coil memory/disk caching (`PiconFetcher.KeyerImpl` + `DiskCache`), lightweight focusable containers with merged `clearAndSetSemantics`, and explicit `contentType`.
+  - Keep HTSP event ingestion, EPG sorting, and periodic `NowNext` refreshes off the main thread (`Dispatchers.Default`), and keep pure-JVM Compose models listed in [compose_compiler_config.conf](compose_compiler_config.conf).
 - **Minimal, clean diffs:** Keep changes focused on the task, reuse existing helpers, and preserve unrelated comments and docstrings.

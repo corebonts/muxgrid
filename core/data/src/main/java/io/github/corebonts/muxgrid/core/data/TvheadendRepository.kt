@@ -4,6 +4,7 @@ import android.content.Context
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.htsp.HtspClient
 import io.github.corebonts.muxgrid.core.htsp.HtspNoAccessException
+import io.github.corebonts.muxgrid.core.htsp.HtspPushEvent
 import io.github.corebonts.muxgrid.core.htsp.HtspVfsClient
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ChannelTag
@@ -21,6 +22,7 @@ import io.github.corebonts.muxgrid.core.model.StreamTicket
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
@@ -103,9 +105,65 @@ class TvheadendRepository(
     )
 
     init {
-        scope.launch {
+        scope.launch(Dispatchers.Default) {
+            val pendingEpgBatch = ArrayList<HtspPushEvent>()
+            var flushJob: Job? = null
+            val batchLock = Any()
+
+            fun flushEpgBatch() {
+                val batch = synchronized(batchLock) {
+                    if (pendingEpgBatch.isEmpty()) return
+                    val copy = ArrayList(pendingEpgBatch)
+                    pendingEpgBatch.clear()
+                    copy
+                }
+                store.applyEvents(batch)
+            }
+
+            var inShadowSync = false
             htspClient.events.collect { event ->
-                store.applyEvent(event)
+                when (event) {
+                    HtspPushEvent.SyncStarting -> {
+                        inShadowSync = true
+                        flushJob?.cancel()
+                        flushJob = null
+                        synchronized(batchLock) { pendingEpgBatch.clear() }
+                        store.applyEvent(event)
+                    }
+                    HtspPushEvent.InitialSyncCompleted -> {
+                        inShadowSync = false
+                        flushJob?.cancel()
+                        flushJob = null
+                        synchronized(batchLock) { pendingEpgBatch.clear() }
+                        store.applyEvent(event)
+                    }
+                    is HtspPushEvent.EventAdd,
+                    is HtspPushEvent.EventUpdate,
+                    is HtspPushEvent.EventDelete,
+                    -> {
+                        if (inShadowSync) {
+                            store.applyEvent(event)
+                        } else {
+                            synchronized(batchLock) {
+                                pendingEpgBatch.add(event)
+                            }
+                            if (flushJob?.isActive != true) {
+                                flushJob = launch(Dispatchers.Default) {
+                                    delay(150L)
+                                    flushEpgBatch()
+                                }
+                            }
+                        }
+                    }
+                    else -> {
+                        if (!inShadowSync) {
+                            flushJob?.cancel()
+                            flushJob = null
+                            flushEpgBatch()
+                        }
+                        store.applyEvent(event)
+                    }
+                }
             }
         }
         scope.launch {
@@ -120,8 +178,8 @@ class TvheadendRepository(
                     }
                 }
         }
-        // Refresh Now/Next progress & transitions every 15 s
-        scope.launch {
+        // Refresh Now/Next progress & transitions every 15 s off the main thread
+        scope.launch(Dispatchers.Default) {
             while (isActive) {
                 delay(15_000L)
                 store.refreshNowNext()

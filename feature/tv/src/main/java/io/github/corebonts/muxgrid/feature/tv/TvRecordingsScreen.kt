@@ -1,9 +1,10 @@
 package io.github.corebonts.muxgrid.feature.tv
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,15 +43,17 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.tv.material3.Border
 import androidx.tv.material3.Button
-import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Icon
-import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
@@ -82,10 +85,8 @@ internal fun TvRecordingsScreen(
     imageLoader: ImageLoader,
     listState: LazyListState = rememberLazyListState(),
     shelfStateFor: (String) -> LazyListState = { LazyListState() },
-    lastFocusTarget: TvRecordingFocusTarget? = null,
-    onFocusTargetChanged: (TvRecordingFocusTarget) -> Unit = {},
+    focusMemory: TvFocusMemory = remember { TvFocusMemory() },
     focusRequestNonce: Int = 0,
-    initialContentFocusRequester: FocusRequester = remember { FocusRequester() },
     onWatchLiveChannel: (Channel) -> Unit,
     onPlayRecording: (DvrEntry, Channel?, Long) -> Unit,
     onStopRecording: suspend (Long) -> Result<Unit>,
@@ -136,42 +137,33 @@ internal fun TvRecordingsScreen(
         wasDialogOpen = isOpen
     }
 
-    val resolvedTarget = remember(shelves, lastFocusTarget) {
-        if (shelves.isEmpty()) return@remember null
-        // 1. Exact shelf + entry match
+    fun resolveTarget(): Triple<Int, String, Int>? {
+        if (shelves.isEmpty()) return null
+        val lastFocusTarget = focusMemory.recordingTarget
         if (lastFocusTarget != null) {
             val exactShelfIdx = shelves.indexOfFirst { it.first == lastFocusTarget.shelfKey }
             if (exactShelfIdx >= 0) {
                 val entryIdx = shelves[exactShelfIdx].third.indexOfFirst { it.id == lastFocusTarget.entryId }
                 if (entryIdx >= 0) {
-                    return@remember Triple(exactShelfIdx, shelves[exactShelfIdx].first, entryIdx)
+                    return Triple(exactShelfIdx, shelves[exactShelfIdx].first, entryIdx)
                 }
             }
-            // 2. Entry moved to another shelf (e.g. finished watching -> left Continue Watching)
             shelves.forEachIndexed { shelfIdx, (shelfKey, _, entries) ->
                 val entryIdx = entries.indexOfFirst { it.id == lastFocusTarget.entryId }
                 if (entryIdx >= 0) {
-                    return@remember Triple(shelfIdx, shelfKey, entryIdx)
+                    return Triple(shelfIdx, shelfKey, entryIdx)
                 }
             }
-            // 3. Entry was deleted -> stay on the same shelf if it still has items
             if (exactShelfIdx >= 0 && shelves[exactShelfIdx].third.isNotEmpty()) {
-                return@remember Triple(exactShelfIdx, shelves[exactShelfIdx].first, 0)
+                return Triple(exactShelfIdx, shelves[exactShelfIdx].first, 0)
             }
         }
-        // 4. First card of first shelf
-        Triple(0, shelves[0].first, 0)
-    }
-
-    val resolvedFocusKey = remember(resolvedTarget, shelves) {
-        resolvedTarget?.let { (shelfIdx, shelfKey, entryIdx) ->
-            shelves.getOrNull(shelfIdx)?.third?.getOrNull(entryIdx)?.let { "${shelfKey}_${it.id}" }
-        }
+        return Triple(0, shelves[0].first, 0)
     }
 
     LaunchedEffect(focusRequestNonce, localFocusRestoreNonce) {
         if (focusRequestNonce == 0 && localFocusRestoreNonce == 0) return@LaunchedEffect
-        val target = resolvedTarget ?: return@LaunchedEffect
+        val target = resolveTarget() ?: return@LaunchedEffect
         val (shelfIdx, shelfKey, entryIdx) = target
         val targetEntry = shelves.getOrNull(shelfIdx)?.third?.getOrNull(entryIdx) ?: return@LaunchedEffect
         val focusKey = "${shelfKey}_${targetEntry.id}"
@@ -193,7 +185,6 @@ internal fun TvRecordingsScreen(
                 return@LaunchedEffect
             }
         }
-        // Safe fallback: any visible card in the first visible shelf
         val firstVisibleShelfKey = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key as? String
         if (firstVisibleShelfKey != null) {
             val firstCardId = shelfStateFor(firstVisibleShelfKey).layoutInfo.visibleItemsInfo.firstOrNull()?.key as? Long
@@ -217,7 +208,7 @@ internal fun TvRecordingsScreen(
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         shelves.forEach { (shelfKey, shelfTitle, shelfEntries) ->
-            item(key = shelfKey) {
+            item(key = shelfKey, contentType = "recording_shelf") {
                 TvRecordingShelf(
                     shelfKey = shelfKey,
                     title = shelfTitle,
@@ -227,13 +218,11 @@ internal fun TvRecordingsScreen(
                     nowEpochSec = nowEpochSec,
                     imageLoader = imageLoader,
                     cardFocusRequesters = cardFocusRequesters,
-                    primaryContentFocusKey = resolvedFocusKey,
-                    initialContentFocusRequester = initialContentFocusRequester,
                     onFocusEntry = { entry ->
-                        onFocusTargetChanged(TvRecordingFocusTarget(shelfKey, entry.id))
+                        focusMemory.recordingTarget = TvRecordingFocusTarget(shelfKey, entry.id)
                     },
                     onClickEntry = { entry ->
-                        onFocusTargetChanged(TvRecordingFocusTarget(shelfKey, entry.id))
+                        focusMemory.recordingTarget = TvRecordingFocusTarget(shelfKey, entry.id)
                         actionError = null
                         selectedEntryId = entry.id
                     },
@@ -517,8 +506,6 @@ private fun TvRecordingShelf(
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     cardFocusRequesters: MutableMap<String, FocusRequester>,
-    primaryContentFocusKey: String?,
-    initialContentFocusRequester: FocusRequester,
     onFocusEntry: (DvrEntry) -> Unit,
     onClickEntry: (DvrEntry) -> Unit,
 ) {
@@ -536,10 +523,18 @@ private fun TvRecordingShelf(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
         ) {
-            items(entries, key = { it.id }) { entry ->
+            items(
+                items = entries,
+                key = { it.id },
+                contentType = { "recording_card" },
+            ) { entry ->
                 val ch = channelById[entry.channelId]
                 val focusKey = "${shelfKey}_${entry.id}"
                 val cardFocusRequester = remember(focusKey) { FocusRequester() }
+                val piconModel = remember(ch?.id, ch?.icon) {
+                    ch?.icon?.let { PiconModel(ch.id, it) }
+                }
+                var isFocused by remember(focusKey) { mutableStateOf(false) }
                 DisposableEffect(focusKey) {
                     cardFocusRequesters[focusKey] = cardFocusRequester
                     onDispose {
@@ -548,99 +543,105 @@ private fun TvRecordingShelf(
                         }
                     }
                 }
-                val isPrimaryContentTarget = focusKey == primaryContentFocusKey
-                Surface(
-                    onClick = { onClickEntry(entry) },
+                Column(
                     modifier = Modifier
                         .width(292.dp)
+                        .graphicsLayer {
+                            val scale = if (isFocused) 1.015f else 1f
+                            scaleX = scale
+                            scaleY = scale
+                        }
+                        .clip(MuxGridShapes.Card)
+                        .background(if (isFocused) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface)
+                        .then(
+                            if (isFocused) {
+                                Modifier.border(MuxGridBorders.FocusedCard, MuxGridColors.FocusBorder, MuxGridShapes.Card)
+                            } else {
+                                Modifier
+                            },
+                        )
                         .focusRequester(cardFocusRequester)
-                        .then(if (isPrimaryContentTarget) Modifier.focusRequester(initialContentFocusRequester) else Modifier)
-                        .onFocusChanged { if (it.isFocused) onFocusEntry(entry) },
-                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Card),
-                    colors = ClickableSurfaceDefaults.colors(
-                        containerColor = MuxGridColors.CardSurface,
-                        contentColor = MuxGridColors.TextPrimary,
-                        focusedContainerColor = MuxGridColors.CardSurfaceElevated,
-                        focusedContentColor = MuxGridColors.TextPrimary,
-                    ),
-                    border = ClickableSurfaceDefaults.border(
-                        border = Border.None,
-                        focusedBorder = Border(
-                            border = BorderStroke(MuxGridBorders.FocusedCard, MuxGridColors.FocusBorder),
-                            shape = MuxGridShapes.Card,
-                        ),
-                    ),
-                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
+                        .onFocusChanged { state ->
+                            val focused = state.isFocused
+                            if (isFocused != focused) isFocused = focused
+                            if (focused) onFocusEntry(entry)
+                        }
+                        .clickable(
+                            interactionSource = remember(focusKey) { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { onClickEntry(entry) },
+                        )
+                        .clearAndSetSemantics {
+                            role = Role.Button
+                            contentDescription = entry.title
+                        }
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            if (ch != null) {
-                                ChannelPiconBadge(
-                                    channelNumber = ch.formattedNumber,
-                                    channelName = ch.name,
-                                    piconModel = ch.icon?.let { PiconModel(ch.id, it) },
-                                    imageLoader = imageLoader,
-                                    size = 40.dp,
-                                )
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = entry.title,
-                                    style = MuxGridType.CardTitle,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    text = listOfNotNull(
-                                        ch?.name,
-                                        formatEpochDayHm(entry.startEpochSec, nowEpochSec),
-                                    ).joinToString(" · "),
-                                    style = MuxGridType.TabularSmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            DvrStateBadge(
-                                state = if (entry.isFileMissing) DvrState.INVALID else entry.state,
-                                isWatched = entry.isWatched,
+                        if (ch != null) {
+                            ChannelPiconBadge(
+                                channelNumber = ch.formattedNumber,
+                                channelName = ch.name,
+                                piconModel = piconModel,
+                                imageLoader = imageLoader,
+                                size = 40.dp,
                             )
                         }
-
-                        if (entry.state == DvrState.RECORDING) {
-                            val dur = entry.durationSec.coerceAtLeast(1L)
-                            val elapsed = (nowEpochSec - entry.startEpochSec).coerceIn(0L, dur)
-                            LiveProgressBar(
-                                progress = elapsed.toFloat() / dur.toFloat(),
-                                fillColor = MuxGridColors.CoralLive,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        } else if (entry.hasResumePosition) {
-                            LiveProgressBar(
-                                progress = entry.resumeProgressFraction(),
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Resume at ${formatDurationMs(entry.playPositionSec * 1000L)}",
-                                style = MuxGridType.TabularSmall,
-                                color = MuxGridColors.AccentSoft,
+                                text = entry.title,
+                                style = MuxGridType.CardTitle,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
-                        } else {
                             Text(
                                 text = listOfNotNull(
-                                    formatDurationMinutes(entry.startEpochSec, entry.stopEpochSec),
-                                    formatFileSize(entry.dataSize).takeIf { it.isNotEmpty() },
-                                    entry.error?.takeIf { it.isNotBlank() },
+                                    ch?.name,
+                                    formatEpochDayHm(entry.startEpochSec, nowEpochSec),
                                 ).joinToString(" · "),
                                 style = MuxGridType.TabularSmall,
-                                color = if (entry.isFileMissing) MuxGridColors.CoralLive else MuxGridColors.TextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
+                        DvrStateBadge(
+                            state = if (entry.isFileMissing) DvrState.INVALID else entry.state,
+                            isWatched = entry.isWatched,
+                        )
+                    }
+
+                    if (entry.state == DvrState.RECORDING) {
+                        val dur = entry.durationSec.coerceAtLeast(1L)
+                        val elapsed = (nowEpochSec - entry.startEpochSec).coerceIn(0L, dur)
+                        LiveProgressBar(
+                            progress = elapsed.toFloat() / dur.toFloat(),
+                            fillColor = MuxGridColors.CoralLive,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else if (entry.hasResumePosition) {
+                        LiveProgressBar(
+                            progress = entry.resumeProgressFraction(),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            text = "Resume at ${formatDurationMs(entry.playPositionSec * 1000L)}",
+                            style = MuxGridType.TabularSmall,
+                            color = MuxGridColors.AccentSoft,
+                        )
+                    } else {
+                        Text(
+                            text = listOfNotNull(
+                                formatDurationMinutes(entry.startEpochSec, entry.stopEpochSec),
+                                formatFileSize(entry.dataSize).takeIf { it.isNotEmpty() },
+                                entry.error?.takeIf { it.isNotBlank() },
+                            ).joinToString(" · "),
+                            style = MuxGridType.TabularSmall,
+                            color = if (entry.isFileMissing) MuxGridColors.CoralLive else MuxGridColors.TextMuted,
+                        )
                     }
                 }
             }

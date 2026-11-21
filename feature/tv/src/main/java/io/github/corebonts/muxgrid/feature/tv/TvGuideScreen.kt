@@ -4,8 +4,10 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -37,6 +39,7 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -55,6 +58,10 @@ import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -73,6 +80,7 @@ import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrConfirmKind
+import io.github.corebonts.muxgrid.core.designsystem.DvrLookupIndex
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
@@ -117,10 +125,8 @@ internal fun TvGuideScreen(
     listState: LazyListState = rememberLazyListState(),
     windowStartEpochSec: Long = floorToHalfHour(nowEpochSec),
     onWindowStartChange: (Long) -> Unit = {},
-    lastFocusTarget: TvGuideFocusTarget? = null,
-    onFocusTargetChanged: (TvGuideFocusTarget) -> Unit = {},
+    focusMemory: TvFocusMemory = remember { TvFocusMemory() },
     focusRequestNonce: Int = 0,
-    initialContentFocusRequester: FocusRequester = remember { FocusRequester() },
     searchOpen: Boolean = false,
     onCloseSearch: () -> Unit = {},
     onWatchChannel: (Channel) -> Unit,
@@ -132,6 +138,7 @@ internal fun TvGuideScreen(
     val scope = rememberCoroutineScope()
     val days = remember(nowEpochSec / 3600L) { buildUpcomingDays(nowEpochSec, count = 7) }
     val windowEndEpochSec = windowStartEpochSec + TIMELINE_WINDOW_SEC
+    val dvrIndex = remember(dvrEntries) { DvrLookupIndex(dvrEntries) }
 
     val searchState = rememberTextFieldState()
     val searchFocusRequester = remember { FocusRequester() }
@@ -158,7 +165,8 @@ internal fun TvGuideScreen(
         wasSearchOpen = searchOpen
     }
 
-    var focusedEvent by remember { mutableStateOf<EpgEvent?>(null) }
+    // Isolated state: written on D-pad cell focus, read ONLY inside TvGuidePreviewBar so timeline rows never recompose
+    val focusedEventState = remember { mutableStateOf<EpgEvent?>(null) }
     var actionEventKey by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     var wasActionDialogOpen by remember { mutableStateOf(false) }
     var pendingConfirm by remember { mutableStateOf<Pair<DvrConfirmKind, DvrEntry>?>(null) }
@@ -175,11 +183,6 @@ internal fun TvGuideScreen(
         wasActionDialogOpen = isOpen
     }
 
-    val effectiveTargetChannelId = remember(channels, lastFocusTarget) {
-        lastFocusTarget?.channelId?.takeIf { id -> channels.any { it.id == id } }
-            ?: channels.firstOrNull()?.id
-    }
-
     LaunchedEffect(focusRequestNonce, localFocusRestoreNonce) {
         if (focusRequestNonce == 0 && localFocusRestoreNonce == 0) return@LaunchedEffect
         if (searchOpen) {
@@ -190,6 +193,7 @@ internal fun TvGuideScreen(
             runCatching { nowButtonFocusRequester.requestFocus() }
             return@LaunchedEffect
         }
+        val lastFocusTarget = focusMemory.guideTarget
         val targetRowIndex = lastFocusTarget?.channelId
             ?.let { id -> channels.indexOfFirst { it.id == id } }
             ?.takeIf { it >= 0 }
@@ -256,16 +260,21 @@ internal fun TvGuideScreen(
         }
     }
 
-    val previewEvent = focusedEvent ?: if (searchOpen && trimmedQuery.isNotEmpty()) {
-        searchResults.firstOrNull()?.first
-    } else {
-        channels.firstNotNullOfOrNull { ch ->
-            epgByChannel[ch.id]?.firstOrNull { it.stopEpochSec > windowStartEpochSec && it.startEpochSec < windowEndEpochSec }
+    val fallbackPreviewEvent = remember(searchOpen, trimmedQuery, searchResults, channels, epgByChannel, windowStartEpochSec) {
+        if (searchOpen && trimmedQuery.isNotEmpty()) {
+            searchResults.firstOrNull()?.first
+        } else {
+            channels.firstNotNullOfOrNull { ch ->
+                epgByChannel[ch.id]?.firstOrNull { it.stopEpochSec > windowStartEpochSec && it.startEpochSec < windowEndEpochSec }
+            }
         }
     }
 
     val slotStarts = remember(windowStartEpochSec) {
         List(6) { idx -> windowStartEpochSec + idx * 1800L } // 6 x 30-min markers
+    }
+    val slotLabels = remember(slotStarts) {
+        slotStarts.map { formatEpochHm(it) }
     }
     val nowFraction = remember(nowEpochSec, windowStartEpochSec) {
         if (nowEpochSec in windowStartEpochSec..windowEndEpochSec) {
@@ -274,6 +283,28 @@ internal fun TvGuideScreen(
             null
         }
     }
+
+    val channelShape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm)
+    val channelBorder = ClickableSurfaceDefaults.border(
+        border = Border.None,
+        focusedBorder = Border(
+            border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
+            shape = MuxGridShapes.Sm,
+        ),
+    )
+    val cellColorsLive = ClickableSurfaceDefaults.colors(
+        containerColor = MuxGridColors.CardSurfaceElevated,
+        contentColor = MuxGridColors.TextPrimary,
+        focusedContainerColor = MuxGridColors.Accent.copy(alpha = 0.22f),
+        focusedContentColor = MuxGridColors.TextPrimary,
+    )
+    val cellColorsEven = ClickableSurfaceDefaults.colors(
+        containerColor = MuxGridColors.CardSurface,
+        contentColor = MuxGridColors.TextPrimary,
+        focusedContainerColor = MuxGridColors.Accent.copy(alpha = 0.22f),
+        focusedContentColor = MuxGridColors.TextPrimary,
+    )
+    val cellScale = ClickableSurfaceDefaults.scale(focusedScale = 1.015f)
 
     Column(
         modifier = Modifier
@@ -376,9 +407,7 @@ internal fun TvGuideScreen(
                 }
                 Button(
                     onClick = { onWindowStartChange(floorToHalfHour(nowEpochSec)) },
-                    modifier = Modifier
-                        .focusRequester(nowButtonFocusRequester)
-                        .then(if (channels.isEmpty()) Modifier.focusRequester(initialContentFocusRequester) else Modifier),
+                    modifier = Modifier.focusRequester(nowButtonFocusRequester),
                     shape = tvButtonShape(),
                     colors = tvPrimaryButtonColors(),
                 ) {
@@ -451,9 +480,13 @@ internal fun TvGuideScreen(
                     contentPadding = PaddingValues(bottom = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    items(searchResults, key = { it.first.id }) { (ev, ch) ->
+                    items(
+                        items = searchResults,
+                        key = { it.first.id },
+                        contentType = { "guide_search_row" },
+                    ) { (ev, ch) ->
                         val isLiveNow = nowEpochSec in ev.startEpochSec until ev.stopEpochSec
-                        val linkedDvr = findMatchingDvrEntry(ev, dvrEntries)
+                        val linkedDvr = dvrIndex.findMatch(ev)
                         Surface(
                             onClick = {
                                 actionError = null
@@ -461,22 +494,11 @@ internal fun TvGuideScreen(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .onFocusChanged { if (it.isFocused) focusedEvent = ev },
-                            shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
-                            colors = ClickableSurfaceDefaults.colors(
-                                containerColor = if (isLiveNow) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface,
-                                contentColor = MuxGridColors.TextPrimary,
-                                focusedContainerColor = MuxGridColors.Accent.copy(alpha = 0.22f),
-                                focusedContentColor = MuxGridColors.TextPrimary,
-                            ),
-                            border = ClickableSurfaceDefaults.border(
-                                border = Border.None,
-                                focusedBorder = Border(
-                                    border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                                    shape = MuxGridShapes.Sm,
-                                ),
-                            ),
-                            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.01f),
+                                .onFocusChanged { if (it.isFocused) focusedEventState.value = ev },
+                            shape = channelShape,
+                            colors = if (isLiveNow) cellColorsLive else cellColorsEven,
+                            border = channelBorder,
+                            scale = cellScale,
                         ) {
                             Row(
                                 modifier = Modifier
@@ -550,9 +572,9 @@ internal fun TvGuideScreen(
                         }
                         Box(modifier = Modifier.width(trackWidth)) {
                             Row(modifier = Modifier.fillMaxWidth()) {
-                                slotStarts.forEach { slotSec ->
+                                slotLabels.forEach { slotLabel ->
                                     Text(
-                                        text = formatEpochHm(slotSec),
+                                        text = slotLabel,
                                         style = MuxGridType.TabularSmall,
                                         color = MuxGridColors.TextSecondary,
                                         modifier = Modifier.weight(1f),
@@ -578,7 +600,11 @@ internal fun TvGuideScreen(
                         contentPadding = PaddingValues(bottom = 6.dp),
                         verticalArrangement = Arrangement.spacedBy(3.dp),
                     ) {
-                        itemsIndexed(channels, key = { _, ch -> ch.id }) { rowIndex, channel ->
+                        itemsIndexed(
+                            items = channels,
+                            key = { _, ch -> ch.id },
+                            contentType = { _, _ -> "guide_row" },
+                        ) { rowIndex, channel ->
                             val rowCells = remember(
                                 channel.id,
                                 epgByChannel[channel.id],
@@ -591,18 +617,13 @@ internal fun TvGuideScreen(
                                     windowEnd = windowEndEpochSec,
                                 )
                             }
-                            val baseCellBg = if (rowIndex % 2 == 0) MuxGridColors.CardSurface else MuxGridColors.CardSurfaceAlt
-                            val isTargetRow = channel.id == effectiveTargetChannelId
-                            val firstRowEventId = remember(rowCells) { rowCells.firstNotNullOfOrNull { it.event?.id } }
-                            val targetEventIdForRow = if (isTargetRow) {
-                                lastFocusTarget?.takeIf { it.channelId == channel.id }?.eventId
-                                    ?.takeIf { id -> rowCells.any { it.event?.id == id } }
-                                    ?: firstRowEventId
-                            } else {
-                                null
-                            }
+                            val isEvenRow = rowIndex % 2 == 0
+                            val baseCellBg = if (isEvenRow) MuxGridColors.CardSurface else MuxGridColors.CardSurfaceAlt
                             val chFocusKey = "ch_${channel.id}"
                             val chFocusRequester = remember(chFocusKey) { FocusRequester() }
+                            val piconModel = remember(channel.id, channel.icon) {
+                                channel.icon?.let { PiconModel(channel.id, it) }
+                            }
                             DisposableEffect(chFocusKey) {
                                 cellFocusRequesters[chFocusKey] = chFocusRequester
                                 onDispose {
@@ -618,75 +639,69 @@ internal fun TvGuideScreen(
                                     .height(64.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                // Sticky channel column
-                                Surface(
-                                    onClick = {
-                                        onFocusTargetChanged(TvGuideFocusTarget(channelId = channel.id))
-                                        onWatchChannel(channel)
-                                    },
+                                // Sticky channel column (lightweight focusable container avoids SurfaceGlowNode overhead)
+                                var chFocused by remember { mutableStateOf(false) }
+                                Row(
                                     modifier = Modifier
                                         .width(channelColWidth)
                                         .fillMaxHeight()
                                         .padding(end = 4.dp)
-                                        .focusRequester(chFocusRequester)
+                                        .clip(MuxGridShapes.Sm)
+                                        .background(if (chFocused) MuxGridColors.CardSurfaceElevated else baseCellBg)
                                         .then(
-                                            if (isTargetRow && targetEventIdForRow == null) {
-                                                Modifier.focusRequester(initialContentFocusRequester)
+                                            if (chFocused) {
+                                                Modifier.border(MuxGridBorders.Focused, MuxGridColors.FocusBorder, MuxGridShapes.Sm)
                                             } else {
                                                 Modifier
                                             },
                                         )
-                                        .onFocusChanged {
-                                            if (it.isFocused) {
-                                                onFocusTargetChanged(TvGuideFocusTarget(channelId = channel.id))
+                                        .focusRequester(chFocusRequester)
+                                        .onFocusChanged { state ->
+                                            val focused = state.isFocused
+                                            if (chFocused != focused) chFocused = focused
+                                            if (focused) {
+                                                focusMemory.guideTarget = TvGuideFocusTarget(channelId = channel.id)
                                             }
-                                        },
-                                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
-                                    colors = ClickableSurfaceDefaults.colors(
-                                        containerColor = baseCellBg,
-                                        contentColor = MuxGridColors.TextPrimary,
-                                        focusedContainerColor = MuxGridColors.CardSurfaceElevated,
-                                        focusedContentColor = MuxGridColors.TextPrimary,
-                                    ),
-                                    border = ClickableSurfaceDefaults.border(
-                                        border = Border.None,
-                                        focusedBorder = Border(
-                                            border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                                            shape = MuxGridShapes.Sm,
-                                        ),
-                                    ),
-                                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .padding(horizontal = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        ChannelPiconBadge(
-                                            channelNumber = channel.formattedNumber,
-                                            channelName = channel.name,
-                                            piconModel = channel.icon?.let { PiconModel(channel.id, it) },
-                                            imageLoader = imageLoader,
-                                            size = 32.dp,
+                                        }
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null,
+                                            onClick = {
+                                                focusMemory.guideTarget = TvGuideFocusTarget(channelId = channel.id)
+                                                onWatchChannel(channel)
+                                            },
                                         )
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            if (channel.number > 0) {
-                                                Text(
-                                                    text = channel.formattedNumber,
-                                                    style = MuxGridType.TabularSmall,
-                                                    color = MuxGridColors.TextMuted,
-                                                )
-                                            }
+                                        .clearAndSetSemantics {
+                                            role = Role.Button
+                                            contentDescription = "${channel.formattedNumber} ${channel.name}"
+                                        }
+                                        .padding(horizontal = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    ChannelPiconBadge(
+                                        channelNumber = channel.formattedNumber,
+                                        channelName = channel.name,
+                                        piconModel = piconModel,
+                                        imageLoader = imageLoader,
+                                        size = 32.dp,
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        if (channel.number > 0) {
                                             Text(
-                                                text = channel.name,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
+                                                text = channel.formattedNumber,
+                                                style = MuxGridType.TabularSmall,
+                                                color = MuxGridColors.TextMuted,
                                             )
                                         }
+                                        Text(
+                                            text = channel.name,
+                                            color = MuxGridColors.TextPrimary,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
                                     }
                                 }
 
@@ -722,9 +737,12 @@ internal fun TvGuideScreen(
                                                 }
                                             } else {
                                                 val isLiveNow = nowEpochSec in ev.startEpochSec until ev.stopEpochSec
-                                                val linkedDvr = findMatchingDvrEntry(ev, dvrEntries)
+                                                val linkedDvr = dvrIndex.findMatch(ev)
                                                 val evFocusKey = "ev_${channel.id}_${ev.id}"
                                                 val evFocusRequester = remember(evFocusKey) { FocusRequester() }
+                                                val timeRangeLabel = remember(ev.id, ev.startEpochSec, ev.stopEpochSec) {
+                                                    "${formatEpochHm(ev.startEpochSec)}–${formatEpochHm(ev.stopEpochSec)}"
+                                                }
                                                 DisposableEffect(evFocusKey) {
                                                     cellFocusRequesters[evFocusKey] = evFocusRequester
                                                     onDispose {
@@ -733,91 +751,87 @@ internal fun TvGuideScreen(
                                                         }
                                                     }
                                                 }
-                                                val isPrimaryTargetCell = isTargetRow && ev.id == targetEventIdForRow
-                                                Surface(
-                                                    onClick = {
-                                                        onFocusTargetChanged(TvGuideFocusTarget(channel.id, ev.id))
-                                                        if (isLiveNow && linkedDvr == null) {
-                                                            onWatchChannel(channel)
-                                                        } else {
-                                                            actionError = null
-                                                            actionEventKey = ev.channelId to ev.id
-                                                        }
-                                                    },
+                                                var evFocused by remember(evFocusKey) { mutableStateOf(false) }
+                                                val cellBg = when {
+                                                    evFocused -> MuxGridColors.Accent.copy(alpha = 0.22f)
+                                                    isLiveNow -> MuxGridColors.CardSurfaceElevated
+                                                    else -> baseCellBg
+                                                }
+                                                Column(
                                                     modifier = Modifier
                                                         .weight(cell.weight)
                                                         .fillMaxHeight()
-                                                        .focusRequester(evFocusRequester)
+                                                        .clip(MuxGridShapes.Xs)
+                                                        .background(cellBg)
                                                         .then(
-                                                            if (isPrimaryTargetCell) {
-                                                                Modifier.focusRequester(initialContentFocusRequester)
-                                                            } else {
-                                                                Modifier
-                                                            },
-                                                        )
-                                                        .onFocusChanged {
-                                                            if (it.isFocused) {
-                                                                focusedEvent = ev
-                                                                onFocusTargetChanged(TvGuideFocusTarget(channel.id, ev.id))
-                                                            }
-                                                        },
-                                                    shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Xs),
-                                                    colors = ClickableSurfaceDefaults.colors(
-                                                        containerColor = if (isLiveNow) MuxGridColors.CardSurfaceElevated else baseCellBg,
-                                                        contentColor = MuxGridColors.TextPrimary,
-                                                        focusedContainerColor = MuxGridColors.Accent.copy(alpha = 0.22f),
-                                                        focusedContentColor = MuxGridColors.TextPrimary,
-                                                    ),
-                                                    border = ClickableSurfaceDefaults.border(
-                                                        border = if (linkedDvr?.state == DvrState.RECORDING) {
-                                                            Border(
-                                                                border = BorderStroke(
+                                                            when {
+                                                                evFocused -> Modifier.border(
+                                                                    MuxGridBorders.Focused,
+                                                                    MuxGridColors.FocusBorder,
+                                                                    MuxGridShapes.Xs,
+                                                                )
+                                                                linkedDvr?.state == DvrState.RECORDING -> Modifier.border(
                                                                     MuxGridBorders.Hairline,
                                                                     MuxGridColors.CoralLive.copy(alpha = 0.65f),
-                                                                ),
-                                                                shape = MuxGridShapes.Xs,
-                                                            )
-                                                        } else {
-                                                            Border.None
-                                                        },
-                                                        focusedBorder = Border(
-                                                            border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                                                            shape = MuxGridShapes.Xs,
-                                                        ),
-                                                    ),
-                                                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.015f),
-                                                ) {
-                                                    Column(
-                                                        modifier = Modifier
-                                                            .fillMaxSize()
-                                                            .padding(horizontal = 9.dp, vertical = 7.dp),
-                                                        verticalArrangement = Arrangement.SpaceBetween,
-                                                    ) {
-                                                        Row(
-                                                            modifier = Modifier.fillMaxWidth(),
-                                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                                            verticalAlignment = Alignment.CenterVertically,
-                                                        ) {
-                                                            Text(
-                                                                text = ev.title,
-                                                                fontSize = 12.5.sp,
-                                                                fontWeight = FontWeight.SemiBold,
-                                                                maxLines = 1,
-                                                                overflow = TextOverflow.Ellipsis,
-                                                                modifier = Modifier.weight(1f),
-                                                            )
-                                                            if (linkedDvr != null) {
-                                                                Spacer(Modifier.width(4.dp))
-                                                                DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
+                                                                    MuxGridShapes.Xs,
+                                                                )
+                                                                else -> Modifier
+                                                            },
+                                                        )
+                                                        .focusRequester(evFocusRequester)
+                                                        .onFocusChanged { state ->
+                                                            val focused = state.isFocused
+                                                            if (evFocused != focused) evFocused = focused
+                                                            if (focused) {
+                                                                focusedEventState.value = ev
+                                                                focusMemory.guideTarget = TvGuideFocusTarget(channel.id, ev.id)
                                                             }
                                                         }
-                                                        Text(
-                                                            text = "${formatEpochHm(ev.startEpochSec)}–${formatEpochHm(ev.stopEpochSec)}",
-                                                            style = MuxGridType.TabularSmall,
-                                                            color = MuxGridColors.TextMuted,
-                                                            maxLines = 1,
+                                                        .clickable(
+                                                            interactionSource = remember(evFocusKey) { MutableInteractionSource() },
+                                                            indication = null,
+                                                            onClick = {
+                                                                focusMemory.guideTarget = TvGuideFocusTarget(channel.id, ev.id)
+                                                                if (isLiveNow && linkedDvr == null) {
+                                                                    onWatchChannel(channel)
+                                                                } else {
+                                                                    actionError = null
+                                                                    actionEventKey = ev.channelId to ev.id
+                                                                }
+                                                            },
                                                         )
+                                                        .clearAndSetSemantics {
+                                                            role = Role.Button
+                                                            contentDescription = "${ev.title}, $timeRangeLabel"
+                                                        }
+                                                        .padding(horizontal = 9.dp, vertical = 7.dp),
+                                                    verticalArrangement = Arrangement.SpaceBetween,
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                    ) {
+                                                        Text(
+                                                            text = ev.title,
+                                                            color = MuxGridColors.TextPrimary,
+                                                            fontSize = 12.5.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis,
+                                                            modifier = Modifier.weight(1f),
+                                                        )
+                                                        if (linkedDvr != null) {
+                                                            Spacer(Modifier.width(4.dp))
+                                                            DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
+                                                        }
                                                     }
+                                                    Text(
+                                                        text = timeRangeLabel,
+                                                        style = MuxGridType.TabularSmall,
+                                                        color = MuxGridColors.TextMuted,
+                                                        maxLines = 1,
+                                                    )
                                                 }
                                             }
                                         }
@@ -840,70 +854,12 @@ internal fun TvGuideScreen(
             }
         }
 
-        // Fixed-height bottom details bar for focused program (avoids top-layout height jumping)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(MuxGridShapes.Sm)
-                .background(MuxGridColors.CardSurface),
-        ) {
-            MuxGridDivider()
-            Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                if (previewEvent != null) {
-                    val dvr = findMatchingDvrEntry(previewEvent, dvrEntries)
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = previewEvent.title,
-                                style = MuxGridType.Title,
-                                fontSize = 17.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            if (dvr != null) {
-                                DvrStateBadge(state = dvr.state, isWatched = dvr.isWatched)
-                                Spacer(Modifier.width(10.dp))
-                            }
-                            Text(
-                                text = "${formatEpochHm(previewEvent.startEpochSec)}–${formatEpochHm(previewEvent.stopEpochSec)} (${formatDurationMinutes(previewEvent.startEpochSec, previewEvent.stopEpochSec)})",
-                                style = MuxGridType.TabularSmall,
-                                color = MuxGridColors.AccentSoft,
-                            )
-                        }
-                        val synopsis = previewEvent.description ?: previewEvent.summary ?: previewEvent.subtitle
-                        Text(
-                            text = synopsis?.takeIf { it.isNotBlank() } ?: "Press OK to watch or schedule recording",
-                            style = MuxGridType.CardSubtitle,
-                            color = MuxGridColors.TextSecondary,
-                            minLines = 2,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(
-                            text = "Program Guide",
-                            style = MuxGridType.Title,
-                            fontSize = 17.sp,
-                            maxLines = 1,
-                        )
-                        Text(
-                            text = "Browse upcoming programs across all channels",
-                            style = MuxGridType.CardSubtitle,
-                            minLines = 2,
-                            maxLines = 2,
-                        )
-                    }
-                }
-            }
-        }
+        // Fixed-height bottom details bar isolated in its own composable so D-pad focus changes never recompose the grid
+        TvGuidePreviewBar(
+            focusedEventState = focusedEventState,
+            fallbackEvent = fallbackPreviewEvent,
+            dvrIndex = dvrIndex,
+        )
     }
 
     val actionEvent = actionEventKey?.let { (chId, evId) ->
@@ -1128,6 +1084,78 @@ internal fun TvGuideScreen(
     }
 }
 
+@Composable
+private fun TvGuidePreviewBar(
+    focusedEventState: State<EpgEvent?>,
+    fallbackEvent: EpgEvent?,
+    dvrIndex: DvrLookupIndex,
+) {
+    val previewEvent = focusedEventState.value ?: fallbackEvent
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MuxGridShapes.Sm)
+            .background(MuxGridColors.CardSurface),
+    ) {
+        MuxGridDivider()
+        Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            if (previewEvent != null) {
+                val dvr = dvrIndex.findMatch(previewEvent)
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = previewEvent.title,
+                            style = MuxGridType.Title,
+                            fontSize = 17.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        if (dvr != null) {
+                            DvrStateBadge(state = dvr.state, isWatched = dvr.isWatched)
+                            Spacer(Modifier.width(10.dp))
+                        }
+                        Text(
+                            text = "${formatEpochHm(previewEvent.startEpochSec)}–${formatEpochHm(previewEvent.stopEpochSec)} (${formatDurationMinutes(previewEvent.startEpochSec, previewEvent.stopEpochSec)})",
+                            style = MuxGridType.TabularSmall,
+                            color = MuxGridColors.AccentSoft,
+                        )
+                    }
+                    val synopsis = previewEvent.description ?: previewEvent.summary ?: previewEvent.subtitle
+                    Text(
+                        text = synopsis?.takeIf { it.isNotBlank() } ?: "Press OK to watch or schedule recording",
+                        style = MuxGridType.CardSubtitle,
+                        color = MuxGridColors.TextSecondary,
+                        minLines = 2,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = "Program Guide",
+                        style = MuxGridType.Title,
+                        fontSize = 17.sp,
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = "Browse upcoming programs across all channels",
+                        style = MuxGridType.CardSubtitle,
+                        minLines = 2,
+                        maxLines = 2,
+                    )
+                }
+            }
+        }
+    }
+}
+
 private fun floorToHalfHour(epochSec: Long): Long = (epochSec / 1800L) * 1800L
 
 private fun buildRowTimelineCells(
@@ -1136,10 +1164,7 @@ private fun buildRowTimelineCells(
     windowStart: Long,
     windowEnd: Long,
 ): List<TimelineCell> {
-    val visible = events
-        .filter { it.stopEpochSec > windowStart && it.startEpochSec < windowEnd }
-        .sortedBy { it.startEpochSec }
-    if (visible.isEmpty()) {
+    if (events.isEmpty()) {
         return listOf(
             TimelineCell(
                 key = "empty_${channelId}_$windowStart",
@@ -1151,9 +1176,12 @@ private fun buildRowTimelineCells(
         )
     }
 
+    // Events in TvheadendStore are already sorted by startEpochSec; scan directly without re-sorting
     val cells = ArrayList<TimelineCell>()
     var cursor = windowStart
-    for (ev in visible) {
+    for (ev in events) {
+        if (ev.startEpochSec >= windowEnd) break
+        if (ev.stopEpochSec <= windowStart) continue
         val clampedStart = maxOf(ev.startEpochSec, cursor)
         val clampedEnd = minOf(ev.stopEpochSec, windowEnd)
         if (clampedEnd <= clampedStart) continue
@@ -1183,6 +1211,17 @@ private fun buildRowTimelineCells(
         )
         cursor = clampedEnd
     }
+    if (cells.isEmpty()) {
+        return listOf(
+            TimelineCell(
+                key = "empty_${channelId}_$windowStart",
+                weight = 1f,
+                event = null,
+                startEpochSec = windowStart,
+                stopEpochSec = windowEnd,
+            ),
+        )
+    }
     if (cursor < windowEnd && (windowEnd - cursor) >= 300L) {
         cells.add(
             TimelineCell(
@@ -1194,15 +1233,5 @@ private fun buildRowTimelineCells(
             ),
         )
     }
-    return cells.ifEmpty {
-        listOf(
-            TimelineCell(
-                key = "empty_${channelId}_$windowStart",
-                weight = 1f,
-                event = null,
-                startEpochSec = windowStart,
-                stopEpochSec = windowEnd,
-            ),
-        )
-    }
+    return cells
 }

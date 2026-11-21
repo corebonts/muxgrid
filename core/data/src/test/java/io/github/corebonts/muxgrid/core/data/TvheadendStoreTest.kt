@@ -162,4 +162,33 @@ class TvheadendStoreTest {
         assertEquals(1_200L, entry.playPositionSec)
         assertEquals(1, entry.playCount)
     }
+
+    @Test
+    fun `applyEvents batches post-sync EPG updates and refreshNowNext advances from cached EPG`() {
+        var nowSec = 1_000L
+        val store = TvheadendStore(epochSecondsProvider = { nowSec })
+        store.applyEvent(HtspPushEvent.SyncStarting)
+        store.applyEvent(HtspPushEvent.ChannelAdd(Channel(id = 1L, number = 1, name = "M1 HD")))
+        store.applyEvent(HtspPushEvent.InitialSyncCompleted)
+
+        store.applyEvents(
+            listOf(
+                HtspPushEvent.EventAdd(
+                    EpgEvent(id = 2L, channelId = 1L, startEpochSec = 1_500L, stopEpochSec = 2_000L, title = "Second"),
+                ),
+                HtspPushEvent.EventAdd(
+                    EpgEvent(id = 1L, channelId = 1L, startEpochSec = 900L, stopEpochSec = 1_500L, title = "First"),
+                ),
+            ),
+        )
+
+        assertEquals(listOf(1L, 2L), store.epgByChannel.value[1L]?.map { it.id })
+        assertEquals("First", store.nowNextByChannel.value[1L]?.now?.title)
+        assertEquals("Second", store.nowNextByChannel.value[1L]?.next?.title)
+
+        nowSec = 1_600L
+        store.refreshNowNext()
+        assertEquals("Second", store.nowNextByChannel.value[1L]?.now?.title)
+        assertNull(store.nowNextByChannel.value[1L]?.next)
+    }
 }

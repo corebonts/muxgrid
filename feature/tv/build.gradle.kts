@@ -25,6 +25,10 @@ android {
     }
 }
 
+composeCompiler {
+    stabilityConfigurationFiles.add(rootProject.layout.projectDirectory.file("compose_compiler_config.conf"))
+}
+
 dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:data"))

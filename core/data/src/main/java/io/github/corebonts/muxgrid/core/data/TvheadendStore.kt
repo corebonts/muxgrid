@@ -49,65 +49,91 @@ class TvheadendStore(
     private val _dvrEntries = MutableStateFlow<Map<Long, DvrEntry>>(emptyMap())
     val dvrEntries: StateFlow<Map<Long, DvrEntry>> = _dvrEntries.asStateFlow()
 
-    fun applyEvent(event: HtspPushEvent) {
-        synchronized(lock) {
-            when (event) {
-                HtspPushEvent.SyncStarting -> {
-                    shadowSyncActive = true
-                    shadowChannels.clear()
-                    shadowTags.clear()
-                    shadowEvents.clear()
-                    shadowDvrEntries.clear()
-                }
-                HtspPushEvent.InitialSyncCompleted -> {
-                    if (shadowSyncActive) {
-                        liveChannels.clear()
-                        liveChannels.putAll(shadowChannels)
-                        liveTags.clear()
-                        liveTags.putAll(shadowTags)
-                        liveEvents.clear()
-                        liveEvents.putAll(shadowEvents)
-                        liveDvrEntries.clear()
-                        liveDvrEntries.putAll(shadowDvrEntries)
+    private var cachedEpgByChannel: Map<Long, List<EpgEvent>> = emptyMap()
 
+    fun applyEvent(event: HtspPushEvent) {
+        applyEvents(listOf(event))
+    }
+
+    fun applyEvents(events: List<HtspPushEvent>) {
+        if (events.isEmpty()) return
+        synchronized(lock) {
+            var dirtyChannels = false
+            var dirtyTags = false
+            var dirtyEvents = false
+            var dirtyDvr = false
+
+            for (event in events) {
+                when (event) {
+                    HtspPushEvent.SyncStarting -> {
+                        shadowSyncActive = true
                         shadowChannels.clear()
                         shadowTags.clear()
                         shadowEvents.clear()
                         shadowDvrEntries.clear()
-                        shadowSyncActive = false
                     }
-                    publishAllLocked()
-                }
-                else -> {
-                    val targetChannels = if (shadowSyncActive) shadowChannels else liveChannels
-                    val targetTags = if (shadowSyncActive) shadowTags else liveTags
-                    val targetEvents = if (shadowSyncActive) shadowEvents else liveEvents
-                    val targetDvr = if (shadowSyncActive) shadowDvrEntries else liveDvrEntries
+                    HtspPushEvent.InitialSyncCompleted -> {
+                        if (shadowSyncActive) {
+                            liveChannels.clear()
+                            liveChannels.putAll(shadowChannels)
+                            liveTags.clear()
+                            liveTags.putAll(shadowTags)
+                            liveEvents.clear()
+                            liveEvents.putAll(shadowEvents)
+                            liveDvrEntries.clear()
+                            liveDvrEntries.putAll(shadowDvrEntries)
 
-                    val changed = applyMutation(
-                        event = event,
-                        channelsMap = targetChannels,
-                        tagsMap = targetTags,
-                        eventsMap = targetEvents,
-                        dvrMap = targetDvr,
-                    )
+                            shadowChannels.clear()
+                            shadowTags.clear()
+                            shadowEvents.clear()
+                            shadowDvrEntries.clear()
+                            shadowSyncActive = false
+                        }
+                        publishAllLocked()
+                        dirtyChannels = false
+                        dirtyTags = false
+                        dirtyEvents = false
+                        dirtyDvr = false
+                    }
+                    else -> {
+                        val targetChannels = if (shadowSyncActive) shadowChannels else liveChannels
+                        val targetTags = if (shadowSyncActive) shadowTags else liveTags
+                        val targetEvents = if (shadowSyncActive) shadowEvents else liveEvents
+                        val targetDvr = if (shadowSyncActive) shadowDvrEntries else liveDvrEntries
 
-                    if (!shadowSyncActive && changed != ChangeScope.NONE) {
-                        when (changed) {
-                            ChangeScope.CHANNELS -> {
-                                publishChannelsLocked()
-                                publishNowNextLocked(rebuildEpg = false)
+                        val changed = applyMutation(
+                            event = event,
+                            channelsMap = targetChannels,
+                            tagsMap = targetTags,
+                            eventsMap = targetEvents,
+                            dvrMap = targetDvr,
+                        )
+
+                        if (!shadowSyncActive) {
+                            when (changed) {
+                                ChangeScope.CHANNELS -> dirtyChannels = true
+                                ChangeScope.TAGS -> {
+                                    dirtyTags = true
+                                    dirtyChannels = true
+                                }
+                                ChangeScope.EVENTS -> dirtyEvents = true
+                                ChangeScope.DVR -> dirtyDvr = true
+                                ChangeScope.NONE -> Unit
                             }
-                            ChangeScope.TAGS -> {
-                                publishTagsLocked()
-                                publishChannelsLocked()
-                            }
-                            ChangeScope.EVENTS -> publishNowNextLocked(rebuildEpg = true)
-                            ChangeScope.DVR -> publishDvrLocked()
-                            ChangeScope.NONE -> Unit
                         }
                     }
                 }
+            }
+
+            if (!shadowSyncActive) {
+                if (dirtyTags) publishTagsLocked()
+                if (dirtyChannels) publishChannelsLocked()
+                if (dirtyEvents) {
+                    publishNowNextLocked(rebuildEpg = true)
+                } else if (dirtyChannels) {
+                    publishNowNextLocked(rebuildEpg = false)
+                }
+                if (dirtyDvr) publishDvrLocked()
             }
         }
     }
@@ -282,15 +308,20 @@ class TvheadendStore(
 
     private fun publishNowNextLocked(rebuildEpg: Boolean = true) {
         val nowSec = epochSecondsProvider()
-        val eventsByChannel = HashMap<Long, MutableList<EpgEvent>>()
-        for (ev in liveEvents.values) {
-            eventsByChannel.getOrPut(ev.channelId) { ArrayList() }.add(ev)
-        }
-        for (list in eventsByChannel.values) {
-            list.sortBy { it.startEpochSec }
-        }
-        if (rebuildEpg) {
-            _epgByChannel.value = eventsByChannel.mapValues { (_, list) -> list.toList() }
+        val eventsByChannel: Map<Long, List<EpgEvent>> = if (rebuildEpg) {
+            val grouped = HashMap<Long, MutableList<EpgEvent>>()
+            for (ev in liveEvents.values) {
+                grouped.getOrPut(ev.channelId) { ArrayList() }.add(ev)
+            }
+            for (list in grouped.values) {
+                list.sortBy { it.startEpochSec }
+            }
+            val frozen = grouped.mapValues { (_, list) -> list.toList() }
+            cachedEpgByChannel = frozen
+            _epgByChannel.value = frozen
+            frozen
+        } else {
+            cachedEpgByChannel
         }
 
         val result = HashMap<Long, NowNextProgram>(liveChannels.size)

@@ -48,10 +48,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -72,7 +75,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import coil3.ImageLoader
-import coil3.compose.SubcomposeAsyncImage
+import coil3.compose.AsyncImage
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ChannelTag
 import io.github.corebonts.muxgrid.core.model.ConnectionState
@@ -154,6 +157,7 @@ fun ChannelPiconBadge(
     imageLoader: ImageLoader,
     modifier: Modifier = Modifier,
     size: Dp = 46.dp,
+    contentDescription: String? = null,
 ) {
     val shape = MuxGridShapes.Sm
     Box(
@@ -164,20 +168,21 @@ fun ChannelPiconBadge(
         contentAlignment = Alignment.Center,
     ) {
         if (piconModel != null) {
-            SubcomposeAsyncImage(
+            var loadSucceeded by remember(piconModel) { mutableStateOf(false) }
+            if (!loadSucceeded) {
+                PiconFallbackLabel(channelNumber, channelName)
+            }
+            AsyncImage(
                 model = piconModel,
                 imageLoader = imageLoader,
-                contentDescription = channelName,
+                contentDescription = contentDescription,
                 contentScale = ContentScale.Fit,
+                onLoading = { loadSucceeded = false },
+                onError = { loadSucceeded = false },
+                onSuccess = { loadSucceeded = true },
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(5.dp),
-                error = {
-                    PiconFallbackLabel(channelNumber, channelName)
-                },
-                loading = {
-                    PiconFallbackLabel(channelNumber, channelName)
-                },
             )
         } else {
             PiconFallbackLabel(channelNumber, channelName)
@@ -243,29 +248,36 @@ fun LiveProgressBar(
     modifier: Modifier = Modifier,
     fillColor: Color = MuxGridColors.ProgressFill,
     height: Dp = 2.dp,
+    animate: Boolean = false,
 ) {
     val clamped = progress.coerceIn(0f, 1f)
-    val animatedProgress by animateFloatAsState(
-        targetValue = clamped,
-        animationSpec = tween(durationMillis = 220, easing = LinearEasing),
-        label = "liveProgress",
-    )
-    Box(
+    val displayProgress = if (animate) {
+        animateFloatAsState(
+            targetValue = clamped,
+            animationSpec = tween(durationMillis = 220, easing = LinearEasing),
+            label = "liveProgress",
+        ).value
+    } else {
+        clamped
+    }
+    Spacer(
         modifier = modifier
             .height(height)
-            .clip(MuxGridShapes.Progress)
-            .background(MuxGridColors.TrackBackground),
-    ) {
-        if (animatedProgress > 0f) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(animatedProgress)
-                    .fillMaxHeight()
-                    .clip(MuxGridShapes.Progress)
-                    .background(fillColor),
-            )
-        }
-    }
+            .drawBehind {
+                val radius = CornerRadius(size.height / 2f, size.height / 2f)
+                drawRoundRect(
+                    color = MuxGridColors.TrackBackground,
+                    cornerRadius = radius,
+                )
+                if (displayProgress > 0f) {
+                    drawRoundRect(
+                        color = fillColor,
+                        size = Size(size.width * displayProgress, size.height),
+                        cornerRadius = radius,
+                    )
+                }
+            },
+    )
 }
 
 @Composable

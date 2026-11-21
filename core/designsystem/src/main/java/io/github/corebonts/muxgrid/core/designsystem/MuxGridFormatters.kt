@@ -37,6 +37,27 @@ fun groupCompletedDvrEntries(entries: Collection<DvrEntry>): List<DvrSeriesGroup
     }.sortedByDescending { it.latestStartEpochSec }
 }
 
+class DvrLookupIndex(
+    private val dvrEntries: Map<Long, DvrEntry>,
+) {
+    private val activeByChannelAndStart: Map<Long, Map<Long, DvrEntry>> = buildMap {
+        for (entry in dvrEntries.values) {
+            if (entry.state == DvrState.SCHEDULED || entry.state == DvrState.RECORDING) {
+                @Suppress("UNCHECKED_CAST")
+                val byStart = getOrPut(entry.channelId) { HashMap<Long, DvrEntry>() } as MutableMap<Long, DvrEntry>
+                byStart.putIfAbsent(entry.startEpochSec, entry)
+            }
+        }
+    }
+
+    fun findMatch(event: EpgEvent): DvrEntry? {
+        event.dvrId?.let { id ->
+            dvrEntries[id]?.let { return it }
+        }
+        return activeByChannelAndStart[event.channelId]?.get(event.startEpochSec)
+    }
+}
+
 fun findMatchingDvrEntry(
     event: EpgEvent,
     dvrEntries: Map<Long, DvrEntry>,

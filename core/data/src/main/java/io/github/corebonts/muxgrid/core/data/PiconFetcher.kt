@@ -9,6 +9,7 @@ import coil3.disk.DiskCache
 import coil3.fetch.FetchResult
 import coil3.fetch.Fetcher
 import coil3.fetch.SourceFetchResult
+import coil3.key.Keyer
 import coil3.memory.MemoryCache
 import coil3.request.Options
 import coil3.request.allowHardware
@@ -40,52 +41,105 @@ data class PiconModel(
 
 /**
  * Coil 3 [Fetcher] that normalizes Tvheadend channel icons (`imagecache/<id>`, `/imagecache/<id>`,
- * or external `http(s)://` URLs), fetching via HTSP VFS first and falling back to Digest/Basic HTTP.
+ * or external `http(s)://` URLs), checks Coil's [DiskCache], and otherwise fetches via HTSP VFS
+ * first with authenticated HTTP (Digest/Basic) fallback.
  */
 class PiconFetcher(
     private val rawIcon: String,
     private val htspClient: HtspClient,
     private val httpClient: OkHttpClient,
     private val profileProvider: () -> ServerProfile,
+    private val diskCache: DiskCache?,
 ) : Fetcher {
 
     override suspend fun fetch(): FetchResult? {
         val normalized = normalizeIconPath(rawIcon) ?: return null
-        if (normalized is NormalizedIcon.ImageCache) {
-            // Primary path: HTSP fileOpen / fileRead / fileClose
-            val bytes = tryHtspRead(normalized.htspPath)
-            if (bytes != null) {
-                val buffer = Buffer().write(bytes)
+        val profile = profileProvider()
+        val diskKey = cacheKeyFor(normalized, profile)
+
+        // 1. Check Coil DiskCache first so scrolling/restarts never re-hit HTSP/HTTP
+        val cache = diskCache
+        if (cache != null) {
+            val snapshot = runCatching { cache.openSnapshot(diskKey) }.getOrNull()
+            if (snapshot != null) {
                 return SourceFetchResult(
-                    source = ImageSource(buffer, FileSystem.SYSTEM),
+                    source = ImageSource(
+                        file = snapshot.data,
+                        fileSystem = cache.fileSystem,
+                        diskCacheKey = diskKey,
+                        closeable = snapshot,
+                    ),
                     mimeType = null,
+                    dataSource = DataSource.DISK,
+                )
+            }
+        }
+
+        // 2. Primary network path: HTSP fileOpen / fileRead / fileClose
+        var fetchedBytes: ByteArray? = null
+        var mimeType: String? = null
+        if (normalized is NormalizedIcon.ImageCache) {
+            fetchedBytes = tryHtspRead(normalized.htspPath)
+        }
+
+        // 3. Fallback path: authenticated HTTP (Digest/Basic)
+        if (fetchedBytes == null) {
+            val url = when (normalized) {
+                is NormalizedIcon.ExternalUrl -> normalized.url
+                is NormalizedIcon.ImageCache -> {
+                    if (!profile.isConfigured) return null
+                    "http://${profile.host}:${profile.httpPort}/${normalized.htspPath}"
+                }
+            }
+            val request = Request.Builder().url(url).build()
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("Failed to fetch picon HTTP ${response.code} for $url")
+                }
+                fetchedBytes = response.body?.bytes() ?: return null
+                mimeType = response.header("Content-Type")
+            }
+        }
+
+        val bytes = fetchedBytes ?: return null
+        if (cache != null && bytes.isNotEmpty()) {
+            val snapshot = writeToDiskCache(cache, diskKey, bytes)
+            if (snapshot != null) {
+                return SourceFetchResult(
+                    source = ImageSource(
+                        file = snapshot.data,
+                        fileSystem = cache.fileSystem,
+                        diskCacheKey = diskKey,
+                        closeable = snapshot,
+                    ),
+                    mimeType = mimeType,
                     dataSource = DataSource.NETWORK,
                 )
             }
         }
 
-        // Fallback path: authenticated HTTP (Digest/Basic)
-        val profile = profileProvider()
-        val url = when (normalized) {
-            is NormalizedIcon.ExternalUrl -> normalized.url
-            is NormalizedIcon.ImageCache -> {
-                if (!profile.isConfigured) return null
-                "http://${profile.host}:${profile.httpPort}/${normalized.htspPath}"
-            }
-        }
+        val buffer = Buffer().write(bytes)
+        return SourceFetchResult(
+            source = ImageSource(buffer, FileSystem.SYSTEM),
+            mimeType = mimeType,
+            dataSource = DataSource.NETWORK,
+        )
+    }
 
-        val request = Request.Builder().url(url).build()
-        httpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IOException("Failed to fetch picon HTTP ${response.code} for $url")
+    private fun writeToDiskCache(
+        cache: DiskCache,
+        key: String,
+        bytes: ByteArray,
+    ): DiskCache.Snapshot? {
+        val editor = runCatching { cache.openEditor(key) }.getOrNull() ?: return null
+        return try {
+            cache.fileSystem.write(editor.data) {
+                write(bytes)
             }
-            val bodyBytes = response.body?.bytes() ?: return null
-            val buffer = Buffer().write(bodyBytes)
-            return SourceFetchResult(
-                source = ImageSource(buffer, FileSystem.SYSTEM),
-                mimeType = response.header("Content-Type"),
-                dataSource = DataSource.NETWORK,
-            )
+            editor.commitAndOpenSnapshot()
+        } catch (_: Exception) {
+            runCatching { editor.abort() }
+            null
         }
     }
 
@@ -115,6 +169,15 @@ class PiconFetcher(
         }
     }
 
+    class KeyerImpl(
+        private val profileProvider: () -> ServerProfile,
+    ) : Keyer<PiconModel> {
+        override fun key(data: PiconModel, options: Options): String? {
+            val normalized = normalizeIconPath(data.rawIcon) ?: return null
+            return cacheKeyFor(normalized, profileProvider())
+        }
+    }
+
     class Factory(
         private val htspClient: HtspClient,
         private val httpClient: OkHttpClient,
@@ -131,6 +194,7 @@ class PiconFetcher(
                 htspClient = htspClient,
                 httpClient = httpClient,
                 profileProvider = profileProvider,
+                diskCache = imageLoader.diskCache,
             )
         }
     }
@@ -142,6 +206,11 @@ class PiconFetcher(
 
     companion object {
         private const val CHUNK_SIZE = 32_768L
+
+        internal fun cacheKeyFor(normalized: NormalizedIcon, profile: ServerProfile): String = when (normalized) {
+            is NormalizedIcon.ExternalUrl -> "picon:url:${normalized.url}"
+            is NormalizedIcon.ImageCache -> "picon:tvh:${profile.host}:${profile.htspPort}:${normalized.htspPath}"
+        }
 
         fun normalizeIconPath(rawIcon: String?): NormalizedIcon? {
             val trimmed = rawIcon?.trim()?.takeIf { it.isNotEmpty() } ?: return null
@@ -173,6 +242,7 @@ class PiconFetcher(
                 .allowHardware(false)
                 .bitmapConfig(Bitmap.Config.ARGB_8888)
                 .components {
+                    add(KeyerImpl(profileProvider))
                     add(Factory(htspClient, okHttp, profileProvider))
                 }
                 .memoryCache {
