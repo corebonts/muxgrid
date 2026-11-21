@@ -97,6 +97,7 @@ import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.model.ServerProfile
+import io.github.corebonts.muxgrid.core.model.StartScreen
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.player.PlaybackEngine
 import kotlinx.coroutines.launch
@@ -131,10 +132,12 @@ fun MobileRoot(
     val timeshiftWindow by repository.timeshiftWindow.collectAsState()
     val backgroundPlayEnabled by repository.backgroundPlayEnabled.collectAsState()
     val pipEnabled by repository.pipEnabled.collectAsState()
+    val startScreen by repository.startScreen.collectAsState()
     val playbackState by playbackEngine.state.collectAsState()
 
     val currentProfile = profile
-    if (currentProfile == null) {
+    val currentStartScreen = startScreen
+    if (currentProfile == null || currentStartScreen == null) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -149,8 +152,8 @@ fun MobileRoot(
     var route by remember(currentProfile.isConfigured) {
         mutableStateOf(if (currentProfile.isConfigured) MobileRoute.MAIN else MobileRoute.ONBOARDING)
     }
-    var activeTab by remember { mutableStateOf(MainTab.LIVE) }
-    var activeFilter by remember { mutableStateOf<LiveFilter>(LiveFilter.All) }
+    var activeTab by remember { mutableStateOf(currentStartScreen.tab) }
+    var activeFilter by remember { mutableStateOf(currentStartScreen.liveFilter) }
     var guideChannelId by remember { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(route) {
@@ -197,8 +200,8 @@ fun MobileRoot(
             )
         }
         MobileRoute.MAIN -> {
-            BackHandler(enabled = activeTab != MainTab.LIVE) {
-                activeTab = MainTab.LIVE
+            BackHandler(enabled = activeTab != currentStartScreen.tab) {
+                activeTab = currentStartScreen.tab
             }
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                 val useRail = maxWidth >= 600.dp
@@ -310,11 +313,15 @@ fun MobileRoot(
                             MobileSettingsTab(
                                 profile = currentProfile,
                                 connectionState = connectionState,
+                                startScreen = currentStartScreen,
                                 hwDecPreset = hwDecPreset,
                                 timeshiftWindow = timeshiftWindow,
                                 backgroundPlayEnabled = backgroundPlayEnabled,
                                 pipEnabled = pipEnabled,
                                 bottomContentPadding = bottomPad,
+                                onSelectStartScreen = { screen ->
+                                    scope.launch { repository.setStartScreen(screen) }
+                                },
                                 onSelectPreset = { preset ->
                                     scope.launch { repository.setHwDecPreset(preset) }
                                     playbackEngine.applyPreset(preset)
@@ -1182,11 +1189,13 @@ private fun MobileChannelCard(
 private fun MobileSettingsTab(
     profile: ServerProfile,
     connectionState: ConnectionState,
+    startScreen: StartScreen,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
     backgroundPlayEnabled: Boolean,
     pipEnabled: Boolean,
     bottomContentPadding: Dp,
+    onSelectStartScreen: (StartScreen) -> Unit,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
     onToggleBackgroundPlay: (Boolean) -> Unit,
@@ -1299,6 +1308,47 @@ private fun MobileSettingsTab(
                         )
                     }
                 }
+            }
+        }
+
+        Column(
+            modifier = Modifier.widthIn(max = 680.dp).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text("GENERAL", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MuxGridShapes.Card)
+                    .background(MuxGridColors.CardSurface)
+                    .padding(horizontal = 12.dp, vertical = 11.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "Start Screen",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MuxGridColors.TextPrimary,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    StartScreen.entries.forEach { option ->
+                        BroadcastUnderlineTab(
+                            label = option.label,
+                            selected = option == startScreen,
+                            onClick = { onSelectStartScreen(option) },
+                        )
+                    }
+                }
+                Text(
+                    text = startScreen.description,
+                    style = MuxGridType.TabularSmall,
+                    color = MuxGridColors.TextSecondary,
+                )
             }
         }
 

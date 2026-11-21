@@ -18,6 +18,7 @@ import io.github.corebonts.muxgrid.core.model.GrowingDvrFile
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.ServerProfile
+import io.github.corebonts.muxgrid.core.model.StartScreen
 import io.github.corebonts.muxgrid.core.model.StreamTicket
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import kotlinx.coroutines.CancellationException
@@ -97,6 +98,9 @@ class TvheadendRepository(
 
     val pipEnabled: StateFlow<Boolean> = settings.pipEnabled
         .stateIn(scope, SharingStarted.Eagerly, formFactor == FormFactor.PHONE)
+
+    val startScreen: StateFlow<StartScreen?> = settings.startScreen
+        .stateIn(scope, SharingStarted.Eagerly, null)
 
     val imageLoader: ImageLoader = PiconFetcher.createImageLoader(
         context = context.applicationContext,
@@ -265,6 +269,10 @@ class TvheadendRepository(
 
     suspend fun setPipEnabled(enabled: Boolean) {
         settings.setPipEnabled(enabled)
+    }
+
+    suspend fun setStartScreen(screen: StartScreen) {
+        settings.setStartScreen(screen)
     }
 
     suspend fun openGrowingDvrFile(dvrId: Long): GrowingDvrFile =
