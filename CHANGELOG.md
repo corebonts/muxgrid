@@ -2,6 +2,12 @@
 
 All notable changes to **MuxGrid** are documented in this file.
 
+## [0.7.1] — 2026-11-21 — Next stop - Playing
+
+### Fixes
+- Registered the active `MediaSession` with `MuxGridMediaSessionService` and requested Android 13+ notification permission (`POST_NOTIFICATIONS`) so media playback notifications and lock-screen controls appear reliably (`MainActivity`, `MuxGridMediaSessionService`, `MuxGridSessionPlayer`, `MpvPlaybackEngine`).
+- Validated linked `Now`/`Next` EPG event timestamps in `TvheadendStore` so stale or out-of-range linked events are not displayed as the current or upcoming program.
+
 ## [0.7.0] — 2026-11-21 — Scroll without borders
 
 ### Continuous Program Guide (EPG) & Tablet/Landscape Grid
