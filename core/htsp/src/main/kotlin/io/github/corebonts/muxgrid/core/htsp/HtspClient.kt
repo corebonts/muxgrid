@@ -8,6 +8,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -15,11 +16,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.IOException
@@ -48,9 +51,13 @@ class HtspClient(
     private var activeSession: HtspSession? = null
 
     @Volatile
+    private var lastProfile: ServerProfile? = null
+
+    @Volatile
     var suppressTransientErrors: Boolean = false
 
     fun connect(profile: ServerProfile) {
+        lastProfile = profile
         connectionJob?.cancel()
         activeSession?.close()
         activeSession = null
@@ -59,6 +66,10 @@ class HtspClient(
             _connectionState.value = ConnectionState.Disconnected
             return
         }
+
+        // Publish Connecting synchronously so callers waiting on a resync never
+        // observe the previous (stale) Connected state.
+        _connectionState.value = ConnectionState.Connecting
 
         connectionJob = scope.launch(Dispatchers.IO) {
             var backoffMs = INITIAL_BACKOFF_MS
@@ -117,6 +128,34 @@ class HtspClient(
         activeSession?.close()
         activeSession = null
         _connectionState.value = ConnectionState.Disconnected
+    }
+
+    /**
+     * Reconnects and waits for a fresh metadata sync.
+     *
+     * HTSP has no "list DVR entries" RPC: the server only sends a full snapshot in
+     * response to `enableAsyncMetadata`, which is tied to a connection. Reconnecting
+     * is therefore the supported way to force a refresh of channels, EPG and DVR.
+     * Returns true when the resync completed and the client is Connected again.
+     */
+    suspend fun resync(timeoutMs: Long = RESYNC_TIMEOUT_MS): Boolean {
+        val profile = lastProfile ?: return false
+        if (!profile.isConfigured) return false
+
+        val oldJob = connectionJob
+        connectionJob = null
+        // Closing the socket first unblocks the reader loop so cancelAndJoin cannot hang.
+        activeSession?.close()
+        activeSession = null
+        oldJob?.cancelAndJoin()
+
+        connect(profile)
+        val result = withTimeoutOrNull(timeoutMs) {
+            connectionState.first {
+                it is ConnectionState.Connected || it is ConnectionState.Error
+            }
+        }
+        return result is ConnectionState.Connected
     }
 
     suspend fun getTicket(channelId: Long): TicketResult {
@@ -423,6 +462,7 @@ class HtspClient(
         private const val CONNECT_TIMEOUT_MS = 6_000
         private const val RPC_TIMEOUT_MS = 10_000L
         private const val INITIAL_SYNC_TIMEOUT_MS = 30_000L
+        private const val RESYNC_TIMEOUT_MS = 30_000L
         private const val DEFAULT_EPG_WINDOW_SEC = 7L * 86_400L
         private const val DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000L
         private const val INITIAL_BACKOFF_MS = 1_000L

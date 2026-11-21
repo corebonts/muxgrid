@@ -403,4 +403,77 @@ class HtspClientTest {
             }
         }
     }
+
+    @Test
+    fun `resync reconnects and waits for a fresh metadata sync`() = runBlocking {
+        val syncCount = AtomicInteger(0)
+
+        ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
+            val serverTask = async(Dispatchers.IO) {
+                repeat(2) {
+                    server.accept().use { sock ->
+                        val input = BufferedInputStream(sock.getInputStream())
+                        val output = BufferedOutputStream(sock.getOutputStream())
+
+                        val hello = HtsMsgCodec.readFrame(input)
+                        output.write(
+                            HtsMsgCodec.encodeFrame(
+                                htsMap {
+                                    put("seq", hello.getLong("seq")!!)
+                                    put("htspversion", 44)
+                                },
+                            ),
+                        )
+                        output.flush()
+
+                        val sync = HtsMsgCodec.readFrame(input)
+                        assertEquals("enableAsyncMetadata", sync.getString("method"))
+                        syncCount.incrementAndGet()
+                        output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
+                        output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
+                        output.flush()
+
+                        // Answer the clock-offset RPC, then keep reading until the client closes.
+                        try {
+                            while (true) {
+                                val req = HtsMsgCodec.readFrame(input)
+                                if (req.getString("method") == "getSysTime") {
+                                    output.write(
+                                        HtsMsgCodec.encodeFrame(
+                                            htsMap {
+                                                put("seq", req.getLong("seq")!!)
+                                                put("time", System.currentTimeMillis() / 1000L)
+                                            },
+                                        ),
+                                    )
+                                    output.flush()
+                                }
+                            }
+                        } catch (_: Exception) {
+                            // Client closed the connection for the resync.
+                        }
+                    }
+                }
+            }
+
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val client = HtspClient(scope = scope)
+            try {
+                client.connect(ServerProfile(host = "127.0.0.1", htspPort = server.localPort))
+                withTimeout(5_000) {
+                    client.connectionState.first { it is ConnectionState.Connected }
+                }
+                assertEquals(1, syncCount.get())
+
+                assertTrue(client.resync())
+
+                assertEquals(2, syncCount.get())
+                assertTrue(client.connectionState.value is ConnectionState.Connected)
+            } finally {
+                client.disconnect()
+                scope.cancel()
+                serverTask.await()
+            }
+        }
+    }
 }

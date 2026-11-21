@@ -218,6 +218,7 @@ private fun TvMvpContent(
             val lifecycleOwner = LocalLifecycleOwner.current
             var visibleError by remember { mutableStateOf<ConnectionState.Error?>(null) }
             var railHasFocus by remember { mutableStateOf(false) }
+            var isRefreshing by remember { mutableStateOf(false) }
             val railFocusRequester = remember { FocusRequester() }
             val contentFocusRequester = remember { FocusRequester() }
 
@@ -271,8 +272,61 @@ private fun TvMvpContent(
                             },
                             style = MuxGridType.ScreenTitle,
                         )
-                        if (connectionState !is ConnectionState.Connected) {
-                            ConnectionStatusBadge(state = connectionState)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            if (connectionState !is ConnectionState.Connected) {
+                                ConnectionStatusBadge(state = connectionState)
+                            }
+                            Surface(
+                                onClick = {
+                                    if (!isRefreshing) {
+                                        scope.launch {
+                                            isRefreshing = true
+                                            try {
+                                                repository.refresh()
+                                            } finally {
+                                                isRefreshing = false
+                                            }
+                                        }
+                                    }
+                                },
+                                shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
+                                colors = ClickableSurfaceDefaults.colors(
+                                    containerColor = Color.Transparent,
+                                    contentColor = MuxGridColors.TextSecondary,
+                                    focusedContainerColor = MuxGridColors.FocusBorder,
+                                    focusedContentColor = MuxGridColors.CanvasTv,
+                                ),
+                                border = ClickableSurfaceDefaults.border(
+                                    border = Border.None,
+                                    focusedBorder = Border(
+                                        border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
+                                        shape = MuxGridShapes.Sm,
+                                    ),
+                                ),
+                                scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+                            ) {
+                                Box(
+                                    modifier = Modifier.size(38.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (isRefreshing) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MuxGridColors.AccentSoft,
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = MuxGridIcons.Refresh,
+                                            contentDescription = "Refresh",
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 

@@ -143,6 +143,23 @@ class TvheadendRepository(
         }
     }
 
+    /**
+     * Forces a fresh metadata sync (channels, EPG and DVR entries) from Tvheadend.
+     * Used by pull-to-refresh so changes made by other clients show up immediately
+     * and a stale connection can recover without leaving the screen.
+     */
+    suspend fun refresh(): Result<Unit> = runCatchingSuspend {
+        store.refreshNowNext()
+        val profile = serverProfile.value ?: return@runCatchingSuspend
+        if (!profile.isConfigured) return@runCatchingSuspend
+
+        if (!htspClient.resync()) {
+            val message = (connectionState.value as? ConnectionState.Error)?.message
+                ?: "Timed out refreshing from Tvheadend"
+            throw IllegalStateException(message)
+        }
+    }
+
     fun setForeground(isForeground: Boolean, keepAliveInBackground: Boolean = false) {
         if (isForeground) {
             backgroundDisconnectJob?.cancel()

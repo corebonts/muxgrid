@@ -29,6 +29,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -88,6 +89,7 @@ internal fun MobileRecordingsScreen(
     onCancelRecording: suspend (Long) -> Result<Unit>,
     onDeleteRecording: suspend (Long) -> Result<Unit>,
     onToggleWatched: suspend (Long, Boolean) -> Result<Unit>,
+    onRefresh: suspend () -> Result<Unit>,
 ) {
     val scope = rememberCoroutineScope()
     var filter by remember { mutableStateOf(RecordingsFilter.ALL) }
@@ -95,6 +97,20 @@ internal fun MobileRecordingsScreen(
     var actionEntry by remember { mutableStateOf<DvrEntry?>(null) }
     var pendingDelete by remember { mutableStateOf<DvrEntry?>(null) }
     var actionFeedback by remember { mutableStateOf<String?>(null) }
+    var isRefreshing by remember { mutableStateOf(false) }
+
+    val triggerRefresh = {
+        if (!isRefreshing) {
+            scope.launch {
+                isRefreshing = true
+                actionFeedback = null
+                onRefresh().onFailure {
+                    actionFeedback = it.message ?: "Failed to refresh recordings"
+                }
+                isRefreshing = false
+            }
+        }
+    }
 
     val channelById = remember(channels) { channels.associateBy { it.id } }
     val allList = remember(dvrEntries) { dvrEntries.values.toList() }
@@ -145,129 +161,139 @@ internal fun MobileRecordingsScreen(
         val showScheduled = scheduled.isNotEmpty() && filter != RecordingsFilter.COMPLETED
         val showFailed = failed.isNotEmpty() && filter == RecordingsFilter.ALL
 
-        if (!showRecordingNow && !showCompleted && !showScheduled && !showFailed) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "No recordings or scheduled timers",
-                    style = MuxGridType.CardSubtitle,
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 6.dp, bottom = bottomContentPadding),
-            ) {
-                if (showRecordingNow) {
-                    item(key = "hdr_rec_now") {
-                        SectionHeader("RECORDING NOW")
-                    }
-                    items(recordingNow, key = { "rec_${it.id}" }) { entry ->
-                        val ch = channelById[entry.channelId]
-                        RecordingNowCard(
-                            entry = entry,
-                            channel = ch,
-                            nowEpochSec = nowEpochSec,
-                            imageLoader = imageLoader,
-                            onWatchFromStart = {
-                                val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
-                                onPlayRecording(entry, ch, startSec)
-                            },
-                            onStop = {
-                                scope.launch {
-                                    actionFeedback = null
-                                    onStopRecording(entry.id).onFailure {
-                                        actionFeedback = it.message ?: "Failed to stop recording"
-                                    }
-                                }
-                            },
-                            onOpenMenu = { actionEntry = entry },
-                        )
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = triggerRefresh,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            if (!showRecordingNow && !showCompleted && !showScheduled && !showFailed) {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    item {
+                        Box(
+                            modifier = Modifier.fillParentMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "No recordings or scheduled timers",
+                                style = MuxGridType.CardSubtitle,
+                            )
+                        }
                     }
                 }
-
-                if (showCompleted) {
-                    item(key = "hdr_completed") {
-                        SectionHeader("COMPLETED")
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 6.dp, bottom = bottomContentPadding),
+                ) {
+                    if (showRecordingNow) {
+                        item(key = "hdr_rec_now") {
+                            SectionHeader("RECORDING NOW")
+                        }
+                        items(recordingNow, key = { "rec_${it.id}" }) { entry ->
+                            val ch = channelById[entry.channelId]
+                            RecordingNowCard(
+                                entry = entry,
+                                channel = ch,
+                                nowEpochSec = nowEpochSec,
+                                imageLoader = imageLoader,
+                                onWatchFromStart = {
+                                    val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
+                                    onPlayRecording(entry, ch, startSec)
+                                },
+                                onStop = {
+                                    scope.launch {
+                                        actionFeedback = null
+                                        onStopRecording(entry.id).onFailure {
+                                            actionFeedback = it.message ?: "Failed to stop recording"
+                                        }
+                                    }
+                                },
+                                onOpenMenu = { actionEntry = entry },
+                            )
+                        }
                     }
-                    items(completedGroups, key = { "grp_${it.key}" }) { group ->
-                        if (group.entries.size == 1) {
-                            val entry = group.entries.first()
-                            CompletedRecordingRow(
+
+                    if (showCompleted) {
+                        item(key = "hdr_completed") {
+                            SectionHeader("COMPLETED")
+                        }
+                        items(completedGroups, key = { "grp_${it.key}" }) { group ->
+                            if (group.entries.size == 1) {
+                                val entry = group.entries.first()
+                                CompletedRecordingRow(
+                                    entry = entry,
+                                    channel = channelById[entry.channelId],
+                                    nowEpochSec = nowEpochSec,
+                                    imageLoader = imageLoader,
+                                    onResumeOrPlay = {
+                                        val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
+                                        onPlayRecording(entry, channelById[entry.channelId], startSec)
+                                    },
+                                    onOpenMenu = { actionEntry = entry },
+                                )
+                                MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
+                            } else {
+                                val expanded = group.key in expandedGroupKeys
+                                SeriesGroupRow(
+                                    group = group,
+                                    expanded = expanded,
+                                    channelById = channelById,
+                                    nowEpochSec = nowEpochSec,
+                                    imageLoader = imageLoader,
+                                    onToggleExpand = {
+                                        expandedGroupKeys = if (expanded) {
+                                            expandedGroupKeys - group.key
+                                        } else {
+                                            expandedGroupKeys + group.key
+                                        }
+                                    },
+                                    onPlayEntry = { entry, startSec ->
+                                        onPlayRecording(entry, channelById[entry.channelId], startSec)
+                                    },
+                                    onOpenMenu = { actionEntry = it },
+                                )
+                                MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
+                            }
+                        }
+                    }
+
+                    if (showScheduled) {
+                        item(key = "hdr_scheduled") {
+                            SectionHeader("SCHEDULED")
+                        }
+                        items(scheduled, key = { "sched_${it.id}" }) { entry ->
+                            ScheduledTimerRow(
                                 entry = entry,
                                 channel = channelById[entry.channelId],
                                 nowEpochSec = nowEpochSec,
                                 imageLoader = imageLoader,
-                                onResumeOrPlay = {
-                                    val startSec = if (entry.hasResumePosition) entry.playPositionSec else 0L
-                                    onPlayRecording(entry, channelById[entry.channelId], startSec)
-                                },
-                                onOpenMenu = { actionEntry = entry },
-                            )
-                            MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
-                        } else {
-                            val expanded = group.key in expandedGroupKeys
-                            SeriesGroupRow(
-                                group = group,
-                                expanded = expanded,
-                                channelById = channelById,
-                                nowEpochSec = nowEpochSec,
-                                imageLoader = imageLoader,
-                                onToggleExpand = {
-                                    expandedGroupKeys = if (expanded) {
-                                        expandedGroupKeys - group.key
-                                    } else {
-                                        expandedGroupKeys + group.key
+                                onCancel = {
+                                    scope.launch {
+                                        actionFeedback = null
+                                        onCancelRecording(entry.id).onFailure {
+                                            actionFeedback = it.message ?: "Failed to cancel timer"
+                                        }
                                     }
                                 },
-                                onPlayEntry = { entry, startSec ->
-                                    onPlayRecording(entry, channelById[entry.channelId], startSec)
-                                },
-                                onOpenMenu = { actionEntry = it },
                             )
-                            MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
+                            MuxGridDivider(modifier = Modifier.padding(start = 68.dp, end = 16.dp))
                         }
                     }
-                }
 
-                if (showScheduled) {
-                    item(key = "hdr_scheduled") {
-                        SectionHeader("SCHEDULED")
-                    }
-                    items(scheduled, key = { "sched_${it.id}" }) { entry ->
-                        ScheduledTimerRow(
-                            entry = entry,
-                            channel = channelById[entry.channelId],
-                            nowEpochSec = nowEpochSec,
-                            imageLoader = imageLoader,
-                            onCancel = {
-                                scope.launch {
-                                    actionFeedback = null
-                                    onCancelRecording(entry.id).onFailure {
-                                        actionFeedback = it.message ?: "Failed to cancel timer"
-                                    }
-                                }
-                            },
-                        )
-                        MuxGridDivider(modifier = Modifier.padding(start = 68.dp, end = 16.dp))
-                    }
-                }
-
-                if (showFailed) {
-                    item(key = "hdr_failed") {
-                        SectionHeader("MISSED / FAILED")
-                    }
-                    items(failed, key = { "fail_${it.id}" }) { entry ->
-                        FailedRecordingRow(
-                            entry = entry,
-                            channel = channelById[entry.channelId],
-                            nowEpochSec = nowEpochSec,
-                            imageLoader = imageLoader,
-                            onDelete = { pendingDelete = entry },
-                        )
-                        MuxGridDivider(modifier = Modifier.padding(start = 68.dp, end = 16.dp))
+                    if (showFailed) {
+                        item(key = "hdr_failed") {
+                            SectionHeader("MISSED / FAILED")
+                        }
+                        items(failed, key = { "fail_${it.id}" }) { entry ->
+                            FailedRecordingRow(
+                                entry = entry,
+                                channel = channelById[entry.channelId],
+                                nowEpochSec = nowEpochSec,
+                                imageLoader = imageLoader,
+                                onDelete = { pendingDelete = entry },
+                            )
+                            MuxGridDivider(modifier = Modifier.padding(start = 68.dp, end = 16.dp))
+                        }
                     }
                 }
             }
