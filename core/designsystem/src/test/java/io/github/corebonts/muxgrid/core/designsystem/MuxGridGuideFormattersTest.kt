@@ -305,36 +305,71 @@ class MuxGridGuideFormattersTest {
     }
 
     @Test
-    fun `computeEnsureVisibleScrollPx scrolls minimally to reveal focused events`() {
-        // Already visible -> no movement
+    fun `computeEnsureVisibleScrollPx only scrolls when out of viewport and avoids ping-pong on wide shows`() {
+        // Flush inside viewport -> no movement
         assertEquals(
             200f,
             computeEnsureVisibleScrollPx(
-                startPx = 250f,
-                stopPx = 450f,
+                startPx = 200f,
+                stopPx = 800f,
                 currentScrollPx = 200f,
                 viewportWidthPx = 600f,
                 maxScrollPx = 2000f,
             ),
         )
-        // Partially off right -> scroll right with trailing margin
+        // Partially off right on horizontal navigation -> scroll minimally to fit stopPx
         assertEquals(
-            324f,
+            300f,
             computeEnsureVisibleScrollPx(
                 startPx = 700f,
                 stopPx = 900f,
                 currentScrollPx = 200f,
                 viewportWidthPx = 600f,
                 maxScrollPx = 2000f,
+                requireFullVisibility = true,
             ),
         )
-        // Wider than viewport -> align start with leading margin
+        // Partially off left on vertical (Up/Down) navigation while comfortably visible -> no jerk
         assertEquals(
-            476f,
+            200f,
             computeEnsureVisibleScrollPx(
-                startPx = 500f,
-                stopPx = 1500f,
+                startPx = 100f,
+                stopPx = 350f,
                 currentScrollPx = 200f,
+                viewportWidthPx = 600f,
+                maxScrollPx = 2000f,
+                requireFullVisibility = false,
+            ),
+        )
+        // Wider than viewport and already spanning it -> no movement (no ping-pong)
+        assertEquals(
+            200f,
+            computeEnsureVisibleScrollPx(
+                startPx = 100f,
+                stopPx = 1200f,
+                currentScrollPx = 200f,
+                viewportWidthPx = 600f,
+                maxScrollPx = 2000f,
+            ),
+        )
+        // Wider than viewport and mostly off to the right -> align start
+        assertEquals(
+            700f,
+            computeEnsureVisibleScrollPx(
+                startPx = 700f,
+                stopPx = 1700f,
+                currentScrollPx = 200f,
+                viewportWidthPx = 600f,
+                maxScrollPx = 2000f,
+            ),
+        )
+        // Wider than viewport and mostly off to the left -> align end
+        assertEquals(
+            400f,
+            computeEnsureVisibleScrollPx(
+                startPx = 0f,
+                stopPx = 1000f,
+                currentScrollPx = 900f,
                 viewportWidthPx = 600f,
                 maxScrollPx = 2000f,
             ),
