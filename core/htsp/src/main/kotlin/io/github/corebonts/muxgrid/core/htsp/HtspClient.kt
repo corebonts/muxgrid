@@ -464,7 +464,7 @@ class HtspClient(
     companion object {
         const val CLIENT_HTSP_VERSION = 44
         const val CLIENT_NAME = "MuxGrid"
-        const val CLIENT_VERSION = "0.5.0"
+        const val CLIENT_VERSION = "0.6.0"
 
         private const val CONNECT_TIMEOUT_MS = 6_000
         private const val RPC_TIMEOUT_MS = 10_000L

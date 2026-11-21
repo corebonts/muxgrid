@@ -2,7 +2,26 @@
 
 All notable changes to **MuxGrid** are documented in this file.
 
-## [0.5.0] — Unreleased / Current Main
+## [0.6.0] — 2026-11-21
+
+### Android TV Performance & Playback Smoothness
+- Eliminated TV live OSD stutter, `MediaSession` churn, and mid-GOP software decode fallbacks during live playback (`TvPlayerScreen`, `MpvPlaybackEngine`, `MuxGridSessionPlayer`, `MainActivity`).
+- Optimized Android TV Compose fluidity with `compose_compiler_config.conf` stability configuration, Coil memory/disk picon caching (`PiconFetcher`), and background EPG sorting/`NowNext` sync (`TvheadendStore`, `TvheadendRepository`).
+
+### Android TV Navigation, Search & D-Pad Ergonomics
+- Added top-bar program search to the Android TV Guide (`TvGuideScreen`, `TvFeature`).
+- Improved Android TV initial focus, back-navigation focus restoration, and D-pad ergonomics across Live, Guide, Recordings, and Player screens.
+
+### Unified UI, Settings & Space Efficiency
+- Promoted **Settings** to a main navigation tab on both TV and mobile instead of a modal dialog/sheet, and replaced Cancel with a top-right close icon on mobile server setup.
+- Unified dialogs, modal sheets, and DVR confirmations across mobile and TV (`MuxGridComponents`).
+- Made mobile and TV chrome more space-efficient and fixed live UI refresh issues.
+
+### Stability & Documentation
+- Fixed `TunerBusy` `fdsan` crashes on mobile (`ytdl_hook` subprocess handling, in-window alert, and synchronous surface detach).
+- Added cross-agent AI guidelines in `AGENTS.md`.
+
+## [0.5.0] — 2026-11-21
 
 ### Broadcast Monitor Facelift & Polish
 - Redesigned UI around the **Broadcast Monitor** aesthetic (`Carbon #09090B` / `#0C0C0E` surfaces, `Signal Amber #E5A00D` accent, `Coral #E53935` live/recording dots, tabular numerals, crisp hairline borders).
