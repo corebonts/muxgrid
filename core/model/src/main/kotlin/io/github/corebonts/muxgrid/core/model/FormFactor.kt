@@ -76,3 +76,39 @@ enum class ThemeMode(
                 ?: defaultFor(formFactor)
     }
 }
+
+enum class BackgroundPlaybackMode(
+    val label: String,
+    val description: String,
+) {
+    OFF("Off", "Pauses video when leaving the app or locking the screen (Radio always on)"),
+    AUDIO("Audio", "Continues audio-only when leaving the app or locking the screen"),
+    PIP("PiP", "Picture-in-Picture when switching apps; continues audio when locking the screen"),
+    ;
+
+    companion object {
+        fun defaultFor(formFactor: FormFactor): BackgroundPlaybackMode = when (formFactor) {
+            FormFactor.PHONE -> PIP
+            FormFactor.TV -> OFF
+        }
+
+        fun fromPersisted(
+            raw: String?,
+            legacyPipEnabled: Boolean?,
+            legacyBackgroundPlay: Boolean?,
+            formFactor: FormFactor,
+        ): BackgroundPlaybackMode {
+            raw?.let { persisted ->
+                entries.firstOrNull { it.name == persisted }?.let { return it }
+            }
+            if (legacyPipEnabled != null || legacyBackgroundPlay != null) {
+                return when {
+                    legacyPipEnabled == true -> PIP
+                    legacyBackgroundPlay == true -> AUDIO
+                    else -> OFF
+                }
+            }
+            return defaultFor(formFactor)
+        }
+    }
+}

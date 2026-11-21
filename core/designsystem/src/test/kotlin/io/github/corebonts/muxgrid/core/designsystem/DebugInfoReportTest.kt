@@ -41,7 +41,7 @@ class DebugInfoReportTest {
             decoderPreset = HwDecPreset.MEDIACODEC_ZERO_COPY,
             timeshiftWindow = TimeshiftWindow.MB_512,
             themeMode = ThemeMode.DARK,
-            backgroundAudioEnabled = null,
+            backgroundPlaybackMode = null,
             pipStatus = "N/A (TV)",
             serverSoftwareSummary = "Tvheadend 4.3-2375 (HTSP v34)",
         )
@@ -59,7 +59,7 @@ class DebugInfoReportTest {
         assertTrue(report.contains("Storage Free: 3.2 GB / 8.0 GB"))
         assertTrue(report.contains("Decoder: MEDIACODEC_ZERO_COPY"))
         assertTrue(report.contains("Server: Tvheadend 4.3-2375 (HTSP v34)"))
-        assertFalse(report.contains("Background Audio:"))
+        assertFalse(report.contains("Background Playback:"))
     }
 
     @Test

@@ -1,11 +1,13 @@
 package io.github.corebonts.muxgrid
 
 import android.app.PictureInPictureParams
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.util.Rational
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -44,6 +46,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
 import io.github.corebonts.muxgrid.core.designsystem.copyTextToClipboard
 import io.github.corebonts.muxgrid.core.designsystem.isDebuggableBuild
 import io.github.corebonts.muxgrid.core.model.AppBuildInfo
+import io.github.corebonts.muxgrid.core.model.BackgroundPlaybackMode
 import io.github.corebonts.muxgrid.core.model.FormFactor
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
@@ -80,7 +83,7 @@ class MainActivity : ComponentActivity() {
         consumeOpenPlayerExtra(intent)
 
         setContent {
-            val pipEnabled by container.repository.pipEnabled.collectAsState()
+            val backgroundPlaybackMode by container.repository.backgroundPlaybackMode.collectAsState()
             val themeMode by container.repository.themeMode.collectAsState()
             val systemDark = isSystemInDarkTheme()
             val isDarkTheme = when (themeMode) {
@@ -132,7 +135,9 @@ class MainActivity : ComponentActivity() {
                         .map { pb -> pb.videoWidth to pb.videoHeight }
                         .distinctUntilChanged()
                 }.collectAsState(initial = 0 to 0)
-                val shouldAutoPip = isMobilePlayerRouteActive && pipEnabled && keepScreenOn
+                val shouldAutoPip = isMobilePlayerRouteActive &&
+                    backgroundPlaybackMode == BackgroundPlaybackMode.PIP &&
+                    keepScreenOn
                 LaunchedEffect(shouldAutoPip, videoDims, isInPipModeState) {
                     if (!isInPipModeState) {
                         runCatching {
@@ -186,7 +191,7 @@ class MainActivity : ComponentActivity() {
                         appInfo = appInfo,
                         isInPictureInPictureMode = isInPipModeState,
                         openPlayerSignal = openPlayerSignal,
-                        canEnterPip = pipSupported && pipEnabled,
+                        canEnterPip = pipSupported,
                         onPlayerScreenActiveChanged = { active -> isMobilePlayerRouteActive = active },
                         onEnterPip = { enterPip(container.playbackEngine.state.value) },
                     )
@@ -267,7 +272,9 @@ class MainActivity : ComponentActivity() {
         val container = appContainer ?: return
         if (container.formFactor == FormFactor.TV) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return
-        if (!isMobilePlayerRouteActive || !container.repository.pipEnabled.value) return
+        if (!isMobilePlayerRouteActive ||
+            container.repository.backgroundPlaybackMode.value != BackgroundPlaybackMode.PIP
+        ) return
         val pb = container.playbackEngine.state.value
         val activeVideo = !pb.isRadio &&
             !pb.isAudioOnly &&
@@ -327,7 +334,13 @@ class MainActivity : ComponentActivity() {
             container.flushDvrProgress()
             val pb = container.playbackEngine.state.value
             val isPlaying = pb.status == PlaybackStatus.PLAYING || pb.status == PlaybackStatus.BUFFERING
-            val allowBgAudio = pb.isRadio || pb.isAudioOnly || container.repository.backgroundPlayEnabled.value
+            val bgMode = container.repository.backgroundPlaybackMode.value
+            val isScreenOff = (getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isInteractive == false
+            val allowBgAudio = pb.isRadio || when (bgMode) {
+                BackgroundPlaybackMode.OFF -> false
+                BackgroundPlaybackMode.AUDIO -> true
+                BackgroundPlaybackMode.PIP -> isScreenOff || pb.isAudioOnly
+            }
             val keepAlive = when {
                 isInPictureInPictureMode -> isPlaying
                 isChangingConfigurations -> isPlaying
