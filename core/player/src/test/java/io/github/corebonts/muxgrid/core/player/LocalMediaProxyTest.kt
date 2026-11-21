@@ -278,6 +278,7 @@ class LocalMediaProxyTest {
         val data = AtomicReference("0123456789".toByteArray(StandardCharsets.US_ASCII))
         val isRecording = AtomicBoolean(true)
         val closeCount = AtomicInteger(0)
+        val closeLatch = CountDownLatch(2)
 
         val proxy = LocalMediaProxy(
             serverBaseUrlProvider = { null },
@@ -294,6 +295,7 @@ class LocalMediaProxyTest {
                     }
                     override fun close() {
                         closeCount.incrementAndGet()
+                        closeLatch.countDown()
                     }
                 }
             },
@@ -325,6 +327,7 @@ class LocalMediaProxyTest {
             completedConn.setRequestProperty("Range", "bytes=100-")
             assertEquals(416, completedConn.responseCode)
             assertEquals("bytes */25", completedConn.getHeaderField("Content-Range"))
+            assertTrue(closeLatch.await(3, TimeUnit.SECONDS))
             assertTrue(closeCount.get() >= 2)
         } finally {
             appender.join(2_000)
