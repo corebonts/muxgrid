@@ -282,7 +282,7 @@ internal fun MobileRecordingsScreen(
                                     pendingConfirm = DvrConfirmKind.CANCEL_TIMER to entry
                                 },
                             )
-                            MuxGridDivider(modifier = Modifier.padding(start = 68.dp, end = 16.dp))
+                            MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
                         }
                     }
 
@@ -298,7 +298,7 @@ internal fun MobileRecordingsScreen(
                                 imageLoader = imageLoader,
                                 onDelete = { pendingConfirm = DvrConfirmKind.DELETE_RECORDING to entry },
                             )
-                            MuxGridDivider(modifier = Modifier.padding(start = 68.dp, end = 16.dp))
+                            MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
                         }
                     }
                 }
@@ -571,7 +571,7 @@ private fun RecordingNowCard(
                         channelName = channel.name,
                         piconModel = channel.icon?.let { PiconModel(channel.id, it) },
                         imageLoader = imageLoader,
-                        size = 42.dp,
+                        size = 44.dp,
                     )
                     Spacer(Modifier.width(12.dp))
                 }
@@ -754,7 +754,7 @@ private fun SeriesGroupRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onToggleExpand)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (channel != null) {
@@ -767,12 +767,17 @@ private fun SeriesGroupRow(
                 )
                 Spacer(Modifier.width(12.dp))
             }
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
                 Text(group.title, style = MuxGridType.CardTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     text = "${group.entries.size} recordings · Latest ${formatEpochDayHm(latest.startEpochSec, nowEpochSec)}",
                     style = MuxGridType.TabularSmall,
                     color = MuxGridColors.TextMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             if (unwatchedCount > 0) {
@@ -837,16 +842,21 @@ private fun ScheduledTimerRow(
                 channelName = channel.name,
                 piconModel = channel.icon?.let { PiconModel(channel.id, it) },
                 imageLoader = imageLoader,
-                size = 40.dp,
+                size = 44.dp,
             )
             Spacer(Modifier.width(12.dp))
         }
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
             Text(entry.title, style = MuxGridType.CardTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 text = "${channel?.name ?: "Channel"} · ${formatEpochDayHm(entry.startEpochSec, nowEpochSec)} (${formatDurationMinutes(entry.startEpochSec, entry.stopEpochSec)})",
                 style = MuxGridType.TabularSmall,
                 color = MuxGridColors.TextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         Spacer(Modifier.width(8.dp))
@@ -888,11 +898,14 @@ private fun FailedRecordingRow(
                 channelName = channel.name,
                 piconModel = channel.icon?.let { PiconModel(channel.id, it) },
                 imageLoader = imageLoader,
-                size = 40.dp,
+                size = 44.dp,
             )
             Spacer(Modifier.width(12.dp))
         }
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
