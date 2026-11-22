@@ -2,6 +2,11 @@ package io.github.corebonts.muxgrid.feature.mobile
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -56,7 +61,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -94,10 +101,19 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridModalSheet
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridSplashScreen
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridSyncingState
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
+import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_EXIT_DURATION_MS
+import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_EXIT_SCALE
+import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_STATUS_DELAY_MS
+import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_TIMEOUT_MS
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
+import io.github.corebonts.muxgrid.core.designsystem.isStartupSyncReady
+import io.github.corebonts.muxgrid.core.designsystem.syncStatusMessage
+import kotlinx.coroutines.delay
 import io.github.corebonts.muxgrid.core.designsystem.collectDebugEnvironmentSnapshot
 import io.github.corebonts.muxgrid.core.designsystem.connectionStatusColor
 import io.github.corebonts.muxgrid.core.designsystem.connectionStatusDotColor
@@ -163,15 +179,39 @@ fun MobileRoot(
     val currentProfile = profile
     val currentStartScreen = startScreen
     if (currentProfile == null || currentStartScreen == null) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MuxGridColors.CanvasPhone),
-            contentAlignment = Alignment.Center,
-        ) {
-            CircularProgressIndicator(color = MuxGridColors.AccentSoft)
-        }
+        MuxGridSplashScreen(backgroundColor = MuxGridColors.CanvasPhone)
         return
+    }
+
+    var hasExitedStartupSplash by rememberSaveable { mutableStateOf(false) }
+    var showSplashStatus by remember { mutableStateOf(false) }
+    val epgByChannel by repository.epgByChannel.collectAsState()
+    val dvrEntries by repository.dvrEntries.collectAsState()
+    val startupReady = !currentProfile.isConfigured || isStartupSyncReady(
+        startTab = currentStartScreen.tab,
+        connectionState = connectionState,
+        hasChannels = channels.isNotEmpty(),
+        hasEpg = epgByChannel.isNotEmpty(),
+        hasRecordings = dvrEntries.isNotEmpty(),
+    )
+    LaunchedEffect(hasExitedStartupSplash) {
+        if (!hasExitedStartupSplash) {
+            delay(STARTUP_SPLASH_STATUS_DELAY_MS)
+            showSplashStatus = true
+        }
+    }
+    LaunchedEffect(hasExitedStartupSplash) {
+        if (!hasExitedStartupSplash) {
+            delay(STARTUP_SPLASH_TIMEOUT_MS)
+            hasExitedStartupSplash = true
+        }
+    }
+    LaunchedEffect(startupReady) {
+        if (startupReady && !hasExitedStartupSplash) {
+            // Wait one frame so newly populated lists/grids settle before the exit animation starts.
+            withFrameNanos { }
+            hasExitedStartupSplash = true
+        }
     }
 
     var route by remember(currentProfile.isConfigured) {
@@ -204,7 +244,8 @@ fun MobileRoot(
 
     val offsetMs = (connectionState as? ConnectionState.Connected)?.serverClockOffsetMs ?: 0L
 
-    when (route) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        when (route) {
         MobileRoute.ONBOARDING -> {
             BackHandler(enabled = currentProfile.isConfigured) {
                 route = MobileRoute.MAIN
@@ -297,10 +338,9 @@ fun MobileRoot(
                             )
                         }
                         MainTab.GUIDE -> {
-                            val epgByChannel by repository.epgByChannel.collectAsState()
-                            val dvrEntries by repository.dvrEntries.collectAsState()
                             val nowEpochSec = rememberNowEpochSec(offsetMs)
                             MobileGuideScreen(
+                                connectionState = connectionState,
                                 channels = channels,
                                 epgByChannel = epgByChannel,
                                 dvrEntries = dvrEntries,
@@ -322,9 +362,9 @@ fun MobileRoot(
                             )
                         }
                         MainTab.RECORDINGS -> {
-                            val dvrEntries by repository.dvrEntries.collectAsState()
                             val nowEpochSec = rememberNowEpochSec(offsetMs)
                             MobileRecordingsScreen(
+                                connectionState = connectionState,
                                 dvrEntries = dvrEntries,
                                 channels = channels,
                                 nowEpochSec = nowEpochSec,
@@ -454,6 +494,27 @@ fun MobileRoot(
                     },
                 )
             }
+        }
+        }
+
+        AnimatedVisibility(
+            visible = !hasExitedStartupSplash,
+            enter = EnterTransition.None,
+            exit = fadeOut(animationSpec = tween(durationMillis = STARTUP_SPLASH_EXIT_DURATION_MS)) +
+                scaleOut(
+                    targetScale = STARTUP_SPLASH_EXIT_SCALE,
+                    animationSpec = tween(durationMillis = STARTUP_SPLASH_EXIT_DURATION_MS),
+                ),
+        ) {
+            val splashStatus = when (connectionState) {
+                ConnectionState.Connecting, is ConnectionState.Syncing -> "Synchronizing…"
+                else -> "Connecting…"
+            }
+            MuxGridSplashScreen(
+                backgroundColor = MuxGridColors.CanvasPhone,
+                statusText = splashStatus,
+                showStatus = showSplashStatus && !hasExitedStartupSplash,
+            )
         }
     }
 }
@@ -989,20 +1050,20 @@ private fun MobileLiveChannelsTab(
             if (channels.isEmpty()) {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     item {
-                        Box(
-                            modifier = Modifier.fillParentMaxSize(),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            val emptyText = when {
-                                hasAnyChannels -> "No channels match this filter"
-                                connectionState is ConnectionState.Connecting ||
-                                    connectionState is ConnectionState.Syncing -> "Syncing channels from Tvheadend…"
-                                connectionState is ConnectionState.Disconnected -> "Connecting to Tvheadend…"
-                                connectionState is ConnectionState.Error -> connectionState.message
-                                else -> "No channels synced yet"
-                            }
-                            Text(emptyText, style = MuxGridType.CardSubtitle)
+                        val (emptyText, showSpinner) = if (hasAnyChannels) {
+                            "No channels match this filter" to false
+                        } else {
+                            syncStatusMessage(
+                                connectionState = connectionState,
+                                emptyLabel = "No channels available",
+                            )
                         }
+                        MuxGridSyncingState(
+                            message = emptyText,
+                            showSpinner = showSpinner,
+                            isTv = false,
+                            modifier = Modifier.fillParentMaxSize(),
+                        )
                     }
                 }
             } else if (gridColumns > 1) {

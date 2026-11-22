@@ -95,7 +95,9 @@ import io.github.corebonts.muxgrid.core.designsystem.dvrConfirmSpec
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridRadii
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridSyncingState
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
+import io.github.corebonts.muxgrid.core.designsystem.syncStatusMessage
 import io.github.corebonts.muxgrid.core.designsystem.TimelineRowTrack
 import io.github.corebonts.muxgrid.core.designsystem.TimelineRuler
 import io.github.corebonts.muxgrid.core.designsystem.buildAvailableGuideDays
@@ -577,15 +579,16 @@ internal fun TvGuideScreen(
                 }
             }
         } else if (channels.isEmpty()) {
-            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                val emptyText = when (connectionState) {
-                    is ConnectionState.Connecting, is ConnectionState.Syncing -> "Syncing channels from Tvheadend…"
-                    is ConnectionState.Disconnected -> "Connecting to Tvheadend…"
-                    is ConnectionState.Error -> connectionState.message
-                    is ConnectionState.Connected -> "No channels synced yet"
-                }
-                Text(emptyText, style = MuxGridType.CardSubtitle, fontSize = 16.sp)
-            }
+            val (emptyText, showSpinner) = syncStatusMessage(
+                connectionState = connectionState,
+                emptyLabel = "No channels available",
+            )
+            MuxGridSyncingState(
+                message = emptyText,
+                showSpinner = showSpinner,
+                isTv = true,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
         } else {
             // Sticky time ruler + continuous broadcast horizontal timeline rows starting at Now
             val pxPerSec = remember(density) { with(density) { TV_TIMELINE_DP_PER_HOUR.toPx() / 3600f } }

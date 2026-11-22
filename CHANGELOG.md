@@ -2,6 +2,13 @@
 
 All notable changes to **MuxGrid** are documented in this file.
 
+## [0.8.1] — 2026-11-22 — Ready for a splash?
+
+### Cold-Start Splash & Unified Syncing UX
+- Aligned the native Android launch window (`launch_splash_dark`, `launch_splash_light`) with a `220.dp` `MuxGridLogo` (`ic_launcher_foreground`) to eliminate the cold-start static spinner arc and resize pop on Mobile and Android TV.
+- Added a one-shot startup splash (`MuxGridSplashScreen`) with a `2.2 s` timeout, start-screen-aware readiness check (`isStartupSyncReady`), delayed non-technical status indicator (`"Connecting…"` / `"Synchronizing…"`), and a `500 ms` `1.8x` scale-out + fade-out exit transition.
+- Unified empty and syncing states (`MuxGridSyncingState`) across Mobile and TV Live, Guide, and Recordings screens (`MobileGuideScreen`, `MobileRecordingsScreen`, `TvGuideScreen`, `TvRecordingsScreen`).
+
 ## [0.8.0] — 2026-11-22 — Guide me to the good part
 
 ### Continuous Program Guide (EPG) & Show Details

@@ -93,7 +93,9 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridModalSheet
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridSyncingState
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
+import io.github.corebonts.muxgrid.core.designsystem.syncStatusMessage
 import io.github.corebonts.muxgrid.core.designsystem.TimelineNoOpBringIntoViewSpec
 import io.github.corebonts.muxgrid.core.designsystem.TimelineRowTrack
 import io.github.corebonts.muxgrid.core.designsystem.TimelineRuler
@@ -114,6 +116,7 @@ import io.github.corebonts.muxgrid.core.designsystem.scrollItemIntoViewport
 import io.github.corebonts.muxgrid.core.designsystem.searchEpgEvents
 import io.github.corebonts.muxgrid.core.designsystem.timelineStickyTextOffset
 import io.github.corebonts.muxgrid.core.model.Channel
+import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.EpgEvent
@@ -127,6 +130,7 @@ import java.time.ZoneId
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MobileGuideScreen(
+    connectionState: ConnectionState,
     channels: List<Channel>,
     epgByChannel: Map<Long, List<EpgEvent>>,
     dvrEntries: Map<Long, DvrEntry>,
@@ -408,6 +412,7 @@ internal fun MobileGuideScreen(
 
             if (trimmedQuery.isEmpty()) {
                 MobileTimelineGrid(
+                    connectionState = connectionState,
                     channels = channels,
                     epgByChannel = epgByChannel,
                     dvrIndex = dvrIndex,
@@ -848,6 +853,7 @@ private fun TimelineNowChip(
 
 @Composable
 private fun MobileTimelineGrid(
+    connectionState: ConnectionState,
     channels: List<Channel>,
     epgByChannel: Map<Long, List<EpgEvent>>,
     dvrIndex: DvrLookupIndex,
@@ -867,9 +873,16 @@ private fun MobileTimelineGrid(
     modifier: Modifier = Modifier,
 ) {
     if (channels.isEmpty()) {
-        Box(modifier = modifier, contentAlignment = Alignment.Center) {
-            Text(text = "No channels synced yet", style = MuxGridType.CardSubtitle)
-        }
+        val (emptyText, showSpinner) = syncStatusMessage(
+            connectionState = connectionState,
+            emptyLabel = "No channels available",
+        )
+        MuxGridSyncingState(
+            message = emptyText,
+            showSpinner = showSpinner,
+            isTv = false,
+            modifier = modifier,
+        )
         return
     }
 

@@ -58,6 +58,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridModalSheet
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridSyncingState
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.dvrConfirmSpec
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
@@ -65,7 +66,9 @@ import io.github.corebonts.muxgrid.core.designsystem.formatDurationMs
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochDayHm
 import io.github.corebonts.muxgrid.core.designsystem.formatFileSize
 import io.github.corebonts.muxgrid.core.designsystem.groupCompletedDvrEntries
+import io.github.corebonts.muxgrid.core.designsystem.syncStatusMessage
 import io.github.corebonts.muxgrid.core.model.Channel
+import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import kotlinx.coroutines.launch
@@ -79,6 +82,7 @@ private enum class RecordingsFilter(val label: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MobileRecordingsScreen(
+    connectionState: ConnectionState,
     dvrEntries: Map<Long, DvrEntry>,
     channels: List<Channel>,
     nowEpochSec: Long,
@@ -178,15 +182,16 @@ internal fun MobileRecordingsScreen(
             if (!showRecordingNow && !showCompleted && !showScheduled && !showFailed) {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     item {
-                        Box(
+                        val (emptyText, showSpinner) = syncStatusMessage(
+                            connectionState = connectionState,
+                            emptyLabel = "No recordings or scheduled timers",
+                        )
+                        MuxGridSyncingState(
+                            message = emptyText,
+                            showSpinner = showSpinner,
+                            isTv = false,
                             modifier = Modifier.fillParentMaxSize(),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = "No recordings or scheduled timers",
-                                style = MuxGridType.CardSubtitle,
-                            )
-                        }
+                        )
                     }
                 }
             } else {

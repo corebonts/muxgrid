@@ -66,12 +66,14 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridRadii
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridSyncingState
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.dvrConfirmSpec
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMs
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochDayHm
 import io.github.corebonts.muxgrid.core.designsystem.formatFileSize
+import io.github.corebonts.muxgrid.core.designsystem.syncStatusMessage
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.DvrEntry
@@ -198,15 +200,16 @@ internal fun TvRecordingsScreen(
     }
 
     if (shelves.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            val emptyText = when (connectionState) {
-                is ConnectionState.Connecting, is ConnectionState.Syncing -> "Syncing recordings from Tvheadend…"
-                is ConnectionState.Disconnected -> "Connecting to Tvheadend…"
-                is ConnectionState.Error -> connectionState.message
-                is ConnectionState.Connected -> "No recordings or scheduled timers"
-            }
-            Text(emptyText, style = MuxGridType.CardSubtitle, fontSize = 16.sp)
-        }
+        val (emptyText, showSpinner) = syncStatusMessage(
+            connectionState = connectionState,
+            emptyLabel = "No recordings or scheduled timers",
+        )
+        MuxGridSyncingState(
+            message = emptyText,
+            showSpinner = showSpinner,
+            isTv = true,
+            modifier = Modifier.fillMaxSize(),
+        )
         return
     }
 

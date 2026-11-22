@@ -2,8 +2,12 @@ package io.github.corebonts.muxgrid.feature.tv
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -55,6 +59,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -129,9 +134,15 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridDurations
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridRadii
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridSplashScreen
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridSyncingState
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
+import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_EXIT_DURATION_MS
+import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_EXIT_SCALE
+import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_STATUS_DELAY_MS
+import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_TIMEOUT_MS
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
 import io.github.corebonts.muxgrid.core.designsystem.collectDebugEnvironmentSnapshot
 import io.github.corebonts.muxgrid.core.designsystem.connectionStatusColor
@@ -142,9 +153,11 @@ import io.github.corebonts.muxgrid.core.designsystem.filterChannels
 import io.github.corebonts.muxgrid.core.designsystem.formatDebugInfoReport
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
 import io.github.corebonts.muxgrid.core.designsystem.icon
+import io.github.corebonts.muxgrid.core.designsystem.isStartupSyncReady
 import io.github.corebonts.muxgrid.core.designsystem.label
 import io.github.corebonts.muxgrid.core.designsystem.rememberNowEpochSec
 import io.github.corebonts.muxgrid.core.designsystem.serverHeadline
+import io.github.corebonts.muxgrid.core.designsystem.syncStatusMessage
 import io.github.corebonts.muxgrid.core.model.AppAttribution
 import io.github.corebonts.muxgrid.core.model.AppBuildInfo
 import io.github.corebonts.muxgrid.core.model.AppNotices
@@ -522,15 +535,39 @@ private fun TvContent(
     val currentProfile = profile
     val currentStartScreen = startScreen
     if (currentProfile == null || currentStartScreen == null) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MuxGridColors.CanvasTv),
-            contentAlignment = Alignment.Center,
-        ) {
-            CircularProgressIndicator(color = MuxGridColors.AccentSoft)
-        }
+        MuxGridSplashScreen(backgroundColor = MuxGridColors.CanvasTv)
         return
+    }
+
+    var hasExitedStartupSplash by rememberSaveable { mutableStateOf(false) }
+    var showSplashStatus by remember { mutableStateOf(false) }
+    val epgByChannel by repository.epgByChannel.collectAsState()
+    val dvrEntries by repository.dvrEntries.collectAsState()
+    val startupReady = !currentProfile.isConfigured || isStartupSyncReady(
+        startTab = currentStartScreen.tab,
+        connectionState = connectionState,
+        hasChannels = channels.isNotEmpty(),
+        hasEpg = epgByChannel.isNotEmpty(),
+        hasRecordings = dvrEntries.isNotEmpty(),
+    )
+    LaunchedEffect(hasExitedStartupSplash) {
+        if (!hasExitedStartupSplash) {
+            kotlinx.coroutines.delay(STARTUP_SPLASH_STATUS_DELAY_MS)
+            showSplashStatus = true
+        }
+    }
+    LaunchedEffect(hasExitedStartupSplash) {
+        if (!hasExitedStartupSplash) {
+            kotlinx.coroutines.delay(STARTUP_SPLASH_TIMEOUT_MS)
+            hasExitedStartupSplash = true
+        }
+    }
+    LaunchedEffect(startupReady) {
+        if (startupReady && !hasExitedStartupSplash) {
+            // Wait one frame so newly populated grids/timelines settle before the exit animation starts.
+            withFrameNanos { }
+            hasExitedStartupSplash = true
+        }
     }
 
     var route by remember(currentProfile.isConfigured) {
@@ -556,7 +593,8 @@ private fun TvContent(
     var contentFocusRequestNonce by remember { mutableIntStateOf(0) }
     var isGuideSearchOpen by remember { mutableStateOf(false) }
 
-    when (route) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        when (route) {
         TvRoute.ONBOARDING -> {
             BackHandler(enabled = currentProfile.isConfigured) {
                 route = TvRoute.MAIN
@@ -950,6 +988,27 @@ private fun TvContent(
                 )
             }
         }
+        }
+
+        AnimatedVisibility(
+            visible = !hasExitedStartupSplash,
+            enter = EnterTransition.None,
+            exit = fadeOut(animationSpec = tween(durationMillis = STARTUP_SPLASH_EXIT_DURATION_MS)) +
+                scaleOut(
+                    targetScale = STARTUP_SPLASH_EXIT_SCALE,
+                    animationSpec = tween(durationMillis = STARTUP_SPLASH_EXIT_DURATION_MS),
+                ),
+        ) {
+            val splashStatus = when (connectionState) {
+                ConnectionState.Connecting, is ConnectionState.Syncing -> "Synchronizing…"
+                else -> "Connecting…"
+            }
+            MuxGridSplashScreen(
+                backgroundColor = MuxGridColors.CanvasTv,
+                statusText = splashStatus,
+                showStatus = showSplashStatus && !hasExitedStartupSplash,
+            )
+        }
     }
 }
 
@@ -1215,20 +1274,20 @@ private fun TvLiveChannelsTab(
         Spacer(Modifier.height(6.dp))
 
         if (channels.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                val emptyText = when {
-                    hasAnyChannels -> "No channels match this filter"
-                    connectionState is ConnectionState.Connecting ||
-                        connectionState is ConnectionState.Syncing -> "Syncing channels from Tvheadend…"
-                    connectionState is ConnectionState.Disconnected -> "Connecting to Tvheadend…"
-                    connectionState is ConnectionState.Error -> connectionState.message
-                    else -> "No channels synced yet"
-                }
-                Text(emptyText, style = MuxGridType.CardSubtitle, fontSize = 16.sp)
+            val (emptyText, showSpinner) = if (hasAnyChannels) {
+                "No channels match this filter" to false
+            } else {
+                syncStatusMessage(
+                    connectionState = connectionState,
+                    emptyLabel = "No channels available",
+                )
             }
+            MuxGridSyncingState(
+                message = emptyText,
+                showSpinner = showSpinner,
+                isTv = true,
+                modifier = Modifier.fillMaxSize(),
+            )
         } else {
             LazyVerticalGrid(
                 state = gridState,
