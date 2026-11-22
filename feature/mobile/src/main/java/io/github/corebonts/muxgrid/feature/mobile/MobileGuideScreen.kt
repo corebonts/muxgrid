@@ -1,5 +1,6 @@
 package io.github.corebonts.muxgrid.feature.mobile
 
+import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -54,10 +55,13 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -99,7 +103,6 @@ import io.github.corebonts.muxgrid.core.designsystem.buildContinuousTimelineCell
 import io.github.corebonts.muxgrid.core.designsystem.computeDayJumpWindowStart
 import io.github.corebonts.muxgrid.core.designsystem.computeGuideEventBounds
 import io.github.corebonts.muxgrid.core.designsystem.dvrConfirmSpec
-import io.github.corebonts.muxgrid.core.designsystem.filterEpgEventsForDay
 import io.github.corebonts.muxgrid.core.designsystem.findAdjacentEpgEvent
 import io.github.corebonts.muxgrid.core.designsystem.floorToHalfHour
 import io.github.corebonts.muxgrid.core.designsystem.formatDayLabel
@@ -130,7 +133,6 @@ internal fun MobileGuideScreen(
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     initialSelectedChannelId: Long?,
-    useTimelineGrid: Boolean = false,
     bottomContentPadding: Dp = 84.dp,
     onWatchChannel: (Channel) -> Unit,
     onPlayRecording: (DvrEntry, Channel?, Long) -> Unit,
@@ -144,13 +146,9 @@ internal fun MobileGuideScreen(
         Instant.ofEpochSecond(nowEpochSec).atZone(activeZone).toLocalDate()
     }
     val todayStartHalfHour = floorToHalfHour(nowEpochSec)
-    var selectedDay by remember { mutableStateOf(todayDate) }
     val timelineScrollState = rememberTimelineScrollState(initialEpochSec = nowEpochSec)
     val bucketedStartSec by remember(timelineScrollState) {
         derivedStateOf { floorToHalfHour(timelineScrollState.visibleStartEpochSec) }
-    }
-    var selectedChannelId by remember(initialSelectedChannelId) {
-        mutableStateOf(initialSelectedChannelId ?: channels.firstOrNull()?.id)
     }
     val searchState = rememberTextFieldState()
     var isSearchExpanded by remember { mutableStateOf(false) }
@@ -176,34 +174,11 @@ internal fun MobileGuideScreen(
     val channelById = remember(channels) { channels.associateBy { it.id } }
     val dvrIndex = remember(dvrEntries) { DvrLookupIndex(dvrEntries) }
 
-    // Ensure selectedChannelId stays valid if channel list loads after initial render
-    val effectiveChannelId = when {
-        selectedChannelId != null && channelById.containsKey(selectedChannelId) -> selectedChannelId
-        else -> channels.firstOrNull()?.id
+    val days = remember(epgByChannel, nowEpochSec / 3600L) {
+        buildAvailableGuideDays(epgByChannel, nowEpochSec, activeZone)
     }
-
-    val days = remember(useTimelineGrid, effectiveChannelId, epgByChannel, nowEpochSec / 3600L) {
-        if (useTimelineGrid) {
-            buildAvailableGuideDays(epgByChannel, nowEpochSec, activeZone)
-        } else {
-            val events = effectiveChannelId?.let { epgByChannel[it] }.orEmpty()
-            buildAvailableGuideDays(events, nowEpochSec, activeZone)
-        }
-    }
-    val windowDate = remember(bucketedStartSec) {
+    val activeDay = remember(bucketedStartSec) {
         Instant.ofEpochSecond(bucketedStartSec).atZone(activeZone).toLocalDate()
-    }
-    LaunchedEffect(useTimelineGrid, windowDate) {
-        if (useTimelineGrid) {
-            selectedDay = windowDate
-        }
-    }
-    val activeDay = if (useTimelineGrid) {
-        windowDate
-    } else if (selectedDay in days) {
-        selectedDay
-    } else {
-        todayDate
     }
     val selectedDayIndex = remember(days, activeDay) {
         val exact = days.indexOf(activeDay)
@@ -213,29 +188,18 @@ internal fun MobileGuideScreen(
             days.indexOfLast { !it.isAfter(activeDay) }.coerceAtLeast(0)
         }
     }
-    val selectedChannelIndex = remember(channels, effectiveChannelId) {
-        channels.indexOfFirst { it.id == effectiveChannelId }
-    }
 
     val dayListState = rememberLazyListState()
-    val channelListState = rememberLazyListState()
     val agendaListState = rememberLazyListState()
     val timelineListState = rememberLazyListState()
     var hasScrolledDayOnce by remember { mutableStateOf(false) }
-    var hasScrolledChannelOnce by remember { mutableStateOf(false) }
 
     LaunchedEffect(selectedDayIndex, days.size, dayListState.layoutInfo.viewportSize.width) {
         scrollItemIntoViewport(dayListState, selectedDayIndex, animate = hasScrolledDayOnce)
         hasScrolledDayOnce = true
     }
-    LaunchedEffect(useTimelineGrid, selectedChannelIndex, channels.size, channelListState.layoutInfo.viewportSize.width) {
-        if (!useTimelineGrid && selectedChannelIndex >= 0) {
-            scrollItemIntoViewport(channelListState, selectedChannelIndex, animate = hasScrolledChannelOnce)
-            hasScrolledChannelOnce = true
-        }
-    }
-    LaunchedEffect(useTimelineGrid, initialSelectedChannelId, channels.size) {
-        if (useTimelineGrid && initialSelectedChannelId != null) {
+    LaunchedEffect(initialSelectedChannelId, channels.size) {
+        if (initialSelectedChannelId != null) {
             val idx = channels.indexOfFirst { it.id == initialSelectedChannelId }
             if (idx >= 0) {
                 timelineListState.scrollToItem(idx)
@@ -264,72 +228,23 @@ internal fun MobileGuideScreen(
             }
         }
     }
-    val dayAgendaItems = remember(
-        useTimelineGrid,
-        trimmedQuery.isEmpty(),
-        effectiveChannelId,
-        activeDay,
-        epgByChannel,
-        channelById,
-        activeZone,
-    ) {
-        if (useTimelineGrid || trimmedQuery.isNotEmpty()) {
-            emptyList()
-        } else {
-            val ch = effectiveChannelId?.let { channelById[it] }
-            val events = effectiveChannelId?.let { epgByChannel[it] }.orEmpty()
-            filterEpgEventsForDay(events, activeDay, activeZone).map { it to ch }
-        }
-    }
-    val agendaItems: List<Pair<EpgEvent, Channel?>> = if (trimmedQuery.isNotEmpty()) {
-        searchResults
-    } else {
-        dayAgendaItems
-    }
 
-    var lastAgendaAnchorKey by remember { mutableStateOf<Triple<LocalDate, Long?, Boolean>?>(null) }
-    var hasAnchoredAgenda by remember { mutableStateOf(false) }
-    LaunchedEffect(useTimelineGrid, activeDay, effectiveChannelId, trimmedQuery.isEmpty(), agendaItems.size) {
-        if (useTimelineGrid && trimmedQuery.isEmpty()) return@LaunchedEffect
-        val anchorKey = Triple(activeDay, effectiveChannelId, trimmedQuery.isEmpty())
-        if (anchorKey != lastAgendaAnchorKey) {
-            lastAgendaAnchorKey = anchorKey
-            hasAnchoredAgenda = false
-        }
-        if (!hasAnchoredAgenda && agendaItems.isNotEmpty()) {
-            val targetIdx = if (trimmedQuery.isEmpty() && activeDay == todayDate) {
-                agendaItems.indexOfFirst { it.first.stopEpochSec > nowEpochSec }.coerceAtLeast(0)
-            } else {
-                0
-            }
-            agendaListState.scrollToItem(targetIdx)
-            hasAnchoredAgenda = true
+    LaunchedEffect(trimmedQuery) {
+        if (trimmedQuery.isNotEmpty()) {
+            agendaListState.scrollToItem(0)
         }
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val isPortrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
         val isWideTimeline = maxWidth >= 760.dp
-        val eventBounds = remember(useTimelineGrid, epgByChannel, nowEpochSec / 3600L) {
-            if (useTimelineGrid) computeGuideEventBounds(epgByChannel, nowEpochSec, activeZone) else null
+        val eventBounds = remember(epgByChannel, nowEpochSec / 3600L) {
+            computeGuideEventBounds(epgByChannel, nowEpochSec, activeZone)
         }
         val timelineOriginSec = nowEpochSec
         val timelineEndSec = remember(eventBounds, todayStartHalfHour) {
             val latest = eventBounds?.second ?: (todayStartHalfHour + 24L * 3600L)
             maxOf(todayStartHalfHour + 6L * 3600L, floorToHalfHour(latest) + HALF_HOUR_SEC)
-        }
-
-        LaunchedEffect(useTimelineGrid) {
-            if (useTimelineGrid && windowDate != selectedDay) {
-                val target = computeDayJumpWindowStart(
-                    dayDate = selectedDay,
-                    todayDate = todayDate,
-                    todayStartHalfHour = nowEpochSec,
-                    epgByChannel = epgByChannel,
-                    windowDurationSec = timelineScrollState.visibleDurationSec,
-                    zoneId = activeZone,
-                )
-                timelineScrollState.scrollToEpoch(target)
-            }
         }
 
         Column(modifier = Modifier.fillMaxSize()) {
@@ -445,40 +360,32 @@ internal fun MobileGuideScreen(
                                 label = formatDayLabel(day, nowEpochSec),
                                 selected = idx == selectedDayIndex,
                                 onClick = {
-                                    if (useTimelineGrid) {
-                                        val target = computeDayJumpWindowStart(
-                                            dayDate = day,
-                                            todayDate = todayDate,
-                                            todayStartHalfHour = nowEpochSec,
-                                            epgByChannel = epgByChannel,
-                                            windowDurationSec = timelineScrollState.visibleDurationSec,
-                                            zoneId = activeZone,
-                                        )
-                                        selectedDay = day
-                                        scope.launch { timelineScrollState.animateScrollToEpoch(target) }
-                                    } else {
-                                        selectedDay = day
-                                    }
+                                    val target = computeDayJumpWindowStart(
+                                        dayDate = day,
+                                        todayDate = todayDate,
+                                        todayStartHalfHour = nowEpochSec,
+                                        epgByChannel = epgByChannel,
+                                        windowDurationSec = timelineScrollState.visibleDurationSec,
+                                        zoneId = activeZone,
+                                    )
+                                    scope.launch { timelineScrollState.animateScrollToEpoch(target) }
                                 },
                                 modifier = Modifier.fillMaxHeight(),
                             )
                         }
                     }
-                    if (useTimelineGrid) {
-                        val isAtNow by remember(timelineScrollState) {
-                            derivedStateOf {
-                                timelineScrollState.visibleStartEpochSec - timelineScrollState.originEpochSec < HALF_HOUR_SEC
-                            }
+                    val isAtNow by remember(timelineScrollState) {
+                        derivedStateOf {
+                            timelineScrollState.visibleStartEpochSec - timelineScrollState.originEpochSec < HALF_HOUR_SEC
                         }
-                        Box(modifier = Modifier.padding(end = 6.dp)) {
-                            TimelineNowChip(
-                                highlighted = !isAtNow,
-                                onClick = {
-                                    selectedDay = todayDate
-                                    scope.launch { timelineScrollState.animateScrollToEpoch(nowEpochSec) }
-                                },
-                            )
-                        }
+                    }
+                    Box(modifier = Modifier.padding(end = 6.dp)) {
+                        TimelineNowChip(
+                            highlighted = !isAtNow,
+                            onClick = {
+                                scope.launch { timelineScrollState.animateScrollToEpoch(nowEpochSec) }
+                            },
+                        )
                     }
                     Box(
                         modifier = Modifier
@@ -499,7 +406,7 @@ internal fun MobileGuideScreen(
                 MuxGridDivider()
             }
 
-            if (useTimelineGrid && trimmedQuery.isEmpty()) {
+            if (trimmedQuery.isEmpty()) {
                 MobileTimelineGrid(
                     channels = channels,
                     epgByChannel = epgByChannel,
@@ -511,6 +418,7 @@ internal fun MobileGuideScreen(
                     scrollState = timelineScrollState,
                     zoneId = activeZone,
                     channelColWidth = if (isWideTimeline) 156.dp else 124.dp,
+                    isPortrait = isPortrait,
                     bottomContentPadding = bottomContentPadding,
                     listState = timelineListState,
                     imageLoader = imageLoader,
@@ -522,55 +430,13 @@ internal fun MobileGuideScreen(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
             } else {
-                if (trimmedQuery.isEmpty()) {
-                    // Compact borderless channel strip (portrait agenda mode)
-                    LazyRow(
-                        state = channelListState,
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        items(
-                            items = channels,
-                            key = { it.id },
-                        ) { ch ->
-                            val selected = ch.id == effectiveChannelId
-                            Row(
-                                modifier = Modifier
-                                    .clip(MuxGridShapes.Sm)
-                                    .background(if (selected) MuxGridColors.CardSurfaceElevated else Color.Transparent)
-                                    .clickable { selectedChannelId = ch.id }
-                                    .padding(horizontal = 8.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(7.dp),
-                            ) {
-                                ChannelPiconBadge(
-                                    channelNumber = ch.formattedNumber,
-                                    channelName = ch.name,
-                                    piconModel = ch.icon?.let { PiconModel(ch.id, it) },
-                                    imageLoader = imageLoader,
-                                    size = 22.dp,
-                                )
-                                Text(
-                                    text = ch.name,
-                                    color = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextSecondary,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                    maxLines = 1,
-                                )
-                            }
-                        }
-                    }
-                    MuxGridDivider()
-                }
-
-                if (agendaItems.isEmpty()) {
+                if (searchResults.isEmpty()) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            text = if (trimmedQuery.isNotEmpty()) "No programs match \"$trimmedQuery\"" else "No EPG data for this day",
+                            text = "No programs match \"$trimmedQuery\"",
                             style = MuxGridType.CardSubtitle,
                         )
                     }
@@ -580,7 +446,7 @@ internal fun MobileGuideScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(top = 2.dp, bottom = bottomContentPadding),
                     ) {
-                        items(agendaItems, key = { it.first.id }) { (event, channel) ->
+                        items(searchResults, key = { it.first.id }) { (event, channel) ->
                             val linkedDvr = dvrIndex.findMatch(event)
                             val isLiveNow = nowEpochSec in event.startEpochSec until event.stopEpochSec
                             val isPast = event.stopEpochSec <= nowEpochSec
@@ -661,27 +527,11 @@ internal fun MobileGuideScreen(
                                                     )
                                                 }
                                             }
-                                            if (trimmedQuery.isNotEmpty() && channel != null) {
-                                                Text(
-                                                    text = "${channel.name} · ${formatEpochDayHm(event.startEpochSec, nowEpochSec)}",
-                                                    style = MuxGridType.TabularSmall,
-                                                    color = if (isPast) MuxGridColors.TextMuted else MuxGridColors.AccentSoft,
-                                                )
-                                            } else if (!event.subtitle.isNullOrBlank()) {
-                                                Text(
-                                                    text = event.subtitle!!,
-                                                    style = MuxGridType.CardSubtitle,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                            } else if (!event.summary.isNullOrBlank()) {
-                                                Text(
-                                                    text = event.summary!!,
-                                                    style = MuxGridType.CardSubtitle,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                            }
+                                            Text(
+                                                text = "${channel.name} · ${formatEpochDayHm(event.startEpochSec, nowEpochSec)}",
+                                                style = MuxGridType.TabularSmall,
+                                                color = if (isPast) MuxGridColors.TextMuted else MuxGridColors.AccentSoft,
+                                            )
                                             if (isLiveNow) {
                                                 Spacer(Modifier.height(6.dp))
                                                 LiveProgressBar(
@@ -1008,6 +858,7 @@ private fun MobileTimelineGrid(
     scrollState: TimelineScrollState,
     zoneId: ZoneId,
     channelColWidth: Dp,
+    isPortrait: Boolean,
     bottomContentPadding: Dp,
     listState: LazyListState,
     imageLoader: ImageLoader,
@@ -1053,7 +904,27 @@ private fun MobileTimelineGrid(
                 ),
         ) {
             CompositionLocalProvider(LocalBringIntoViewSpec provides defaultBringIntoViewSpec) {
-        val trackWidth = (maxWidth - channelColWidth).coerceAtLeast(220.dp)
+        val expandedColPx = with(density) { channelColWidth.toPx() }
+        // Icon (28dp) + horizontal padding (7dp * 2) + trailing gap (4dp)
+        val collapsedColPx = with(density) { 46.dp.toPx() }
+        val maxCollapsePx = if (isPortrait) (expandedColPx - collapsedColPx).coerceAtLeast(0f) else 0f
+        val collapsePx by remember(isPortrait, maxCollapsePx, scrollState) {
+            derivedStateOf {
+                if (isPortrait && maxCollapsePx > 0f) {
+                    scrollState.scrollOffsetPx.coerceIn(0f, maxCollapsePx)
+                } else {
+                    0f
+                }
+            }
+        }
+        val currentChannelColWidth = if (isPortrait && maxCollapsePx > 0f) {
+            with(density) { (expandedColPx - collapsePx).toDp() }
+        } else {
+            channelColWidth
+        }
+        val collapseFraction = if (maxCollapsePx > 0f) (collapsePx / maxCollapsePx).coerceIn(0f, 1f) else 0f
+        val textAlpha = (1f - collapseFraction * 1.6f).coerceIn(0f, 1f)
+        val trackWidth = (maxWidth - currentChannelColWidth).coerceAtLeast(220.dp)
         val trackWidthPx = with(density) { trackWidth.toPx() }
         SideEffect {
             scrollState.updateBounds(
@@ -1077,12 +948,14 @@ private fun MobileTimelineGrid(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
-                    modifier = Modifier.width(channelColWidth).padding(start = 6.dp),
+                    modifier = Modifier.width(currentChannelColWidth).padding(start = 6.dp),
                 ) {
-                    Text(
-                        text = "CHANNELS",
-                        style = MuxGridType.Eyebrow,
-                    )
+                    if (!isPortrait) {
+                        Text(
+                            text = "CHANNELS",
+                            style = MuxGridType.Eyebrow,
+                        )
+                    }
                 }
                 TimelineRuler(
                     scrollState = scrollState,
@@ -1138,7 +1011,7 @@ private fun MobileTimelineGrid(
                         var chFocused by remember(channel.id) { mutableStateOf(false) }
                         Row(
                             modifier = Modifier
-                                .width(channelColWidth)
+                                .width(currentChannelColWidth)
                                 .fillMaxHeight()
                                 .padding(end = 4.dp)
                                 .clip(MuxGridShapes.Sm)
@@ -1154,7 +1027,6 @@ private fun MobileTimelineGrid(
                                 .clickable { onWatchChannel(channel) }
                                 .padding(horizontal = 7.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(7.dp),
                         ) {
                             ChannelPiconBadge(
                                 channelNumber = channel.formattedNumber,
@@ -1163,22 +1035,33 @@ private fun MobileTimelineGrid(
                                 imageLoader = imageLoader,
                                 size = 28.dp,
                             )
-                            Column(modifier = Modifier.weight(1f)) {
-                                if (channel.number > 0) {
+                            if (textAlpha > 0.01f) {
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(start = 7.dp)
+                                        .clipToBounds()
+                                        .graphicsLayer { alpha = textAlpha },
+                                ) {
+                                    if (channel.number > 0) {
+                                        Text(
+                                            text = channel.formattedNumber,
+                                            style = MuxGridType.TabularSmall,
+                                            color = MuxGridColors.TextMuted,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                        )
+                                    }
                                     Text(
-                                        text = channel.formattedNumber,
-                                        style = MuxGridType.TabularSmall,
-                                        color = MuxGridColors.TextMuted,
+                                        text = channel.name,
+                                        color = MuxGridColors.TextPrimary,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
-                                Text(
-                                    text = channel.name,
-                                    color = MuxGridColors.TextPrimary,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
                             }
                         }
 

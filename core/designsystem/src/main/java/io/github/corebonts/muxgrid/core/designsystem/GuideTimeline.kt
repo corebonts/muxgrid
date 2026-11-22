@@ -97,6 +97,9 @@ class TimelineScrollState(
             return
         }
 
+        val preserveExactOffset = hasInitializedBounds &&
+            originEpochSec == newOriginSec &&
+            pxPerSec == safePxPerSec
         val anchorEpochSec = if (hasInitializedBounds) visibleStartEpochSec else initialTargetEpochSec
         originEpochSec = newOriginSec
         endEpochSec = safeEndSec
@@ -104,7 +107,11 @@ class TimelineScrollState(
         pxPerSec = safePxPerSec
 
         val newMax = ((safeEndSec - newOriginSec) * safePxPerSec - safeViewportPx).coerceAtLeast(0f)
-        scrollOffsetPx = ((anchorEpochSec - newOriginSec) * safePxPerSec).coerceIn(0f, newMax)
+        scrollOffsetPx = if (preserveExactOffset) {
+            scrollOffsetPx.coerceIn(0f, newMax)
+        } else {
+            ((anchorEpochSec - newOriginSec) * safePxPerSec).coerceIn(0f, newMax)
+        }
         if (safeViewportPx > 0f) {
             hasInitializedBounds = true
         }
