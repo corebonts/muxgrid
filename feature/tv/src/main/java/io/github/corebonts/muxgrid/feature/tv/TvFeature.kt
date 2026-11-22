@@ -127,7 +127,6 @@ import io.github.corebonts.muxgrid.core.designsystem.connectionStatusDotColor
 import io.github.corebonts.muxgrid.core.designsystem.connectionStatusText
 import io.github.corebonts.muxgrid.core.designsystem.copyTextToClipboard
 import io.github.corebonts.muxgrid.core.designsystem.filterChannels
-import io.github.corebonts.muxgrid.core.designsystem.floorToHalfHour
 import io.github.corebonts.muxgrid.core.designsystem.formatDebugInfoReport
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
 import io.github.corebonts.muxgrid.core.designsystem.icon
@@ -385,7 +384,7 @@ private fun TvContent(
     var hasUserAdjustedGuideWindow by remember { mutableStateOf(false) }
     LaunchedEffect(activeTab, offsetMs) {
         if (activeTab == MainTab.GUIDE && !hasUserAdjustedGuideWindow) {
-            guideWindowStartEpochSec = floorToHalfHour((System.currentTimeMillis() + offsetMs) / 1000L)
+            guideWindowStartEpochSec = (System.currentTimeMillis() + offsetMs) / 1000L
         }
     }
     val recordingsListState = rememberLazyListState()
@@ -610,7 +609,7 @@ private fun TvContent(
                                     nowEpochSec = nowEpochSec,
                                     imageLoader = repository.imageLoader,
                                     listState = guideListState,
-                                    windowStartEpochSec = guideWindowStartEpochSec.takeIf { it > 0L } ?: floorToHalfHour(nowEpochSec),
+                                    windowStartEpochSec = guideWindowStartEpochSec.takeIf { it > 0L } ?: nowEpochSec,
                                     onWindowStartChange = {
                                         hasUserAdjustedGuideWindow = true
                                         guideWindowStartEpochSec = it

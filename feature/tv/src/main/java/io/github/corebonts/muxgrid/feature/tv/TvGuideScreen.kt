@@ -84,6 +84,7 @@ import io.github.corebonts.muxgrid.core.designsystem.DvrConfirmKind
 import io.github.corebonts.muxgrid.core.designsystem.DvrLookupIndex
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.HALF_HOUR_SEC
+import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
@@ -130,7 +131,7 @@ internal fun TvGuideScreen(
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     listState: LazyListState = rememberLazyListState(),
-    windowStartEpochSec: Long = floorToHalfHour(nowEpochSec),
+    windowStartEpochSec: Long = nowEpochSec,
     onWindowStartChange: (Long) -> Unit = {},
     focusMemory: TvFocusMemory = remember { TvFocusMemory() },
     focusRequestNonce: Int = 0,
@@ -155,10 +156,7 @@ internal fun TvGuideScreen(
         computeGuideEventBounds(epgByChannel, nowEpochSec, activeZone)
     }
     val todayStartHalfHour = floorToHalfHour(nowEpochSec)
-    val timelineOriginSec = remember(eventBounds, todayStartHalfHour) {
-        val earliest = eventBounds?.first ?: (todayStartHalfHour - 3600L)
-        minOf(floorToHalfHour(earliest), todayStartHalfHour - 3600L)
-    }
+    val timelineOriginSec = nowEpochSec
     val timelineEndSec = remember(eventBounds, todayStartHalfHour) {
         val latest = eventBounds?.second ?: (todayStartHalfHour + 24L * 3600L)
         maxOf(todayStartHalfHour + 6L * 3600L, floorToHalfHour(latest) + HALF_HOUR_SEC)
@@ -169,7 +167,7 @@ internal fun TvGuideScreen(
         derivedStateOf { floorToHalfHour(timelineScrollState.visibleStartEpochSec) }
     }
     LaunchedEffect(bucketedStartSec) {
-        if (bucketedStartSec != windowStartEpochSec) {
+        if (bucketedStartSec != floorToHalfHour(windowStartEpochSec)) {
             onWindowStartChange(bucketedStartSec)
         }
     }
@@ -334,13 +332,14 @@ internal fun TvGuideScreen(
         }
     }
 
-    val fallbackPreviewEvent = remember(searchOpen, trimmedQuery, searchResults, channels, epgByChannel, bucketedStartSec) {
+    val fallbackPreviewEvent = remember(searchOpen, trimmedQuery, searchResults, channels, epgByChannel, bucketedStartSec, timelineOriginSec) {
         if (searchOpen && trimmedQuery.isNotEmpty()) {
             searchResults.firstOrNull()?.first
         } else {
-            val endSec = bucketedStartSec + timelineScrollState.visibleDurationSec
+            val startSec = maxOf(bucketedStartSec, timelineOriginSec)
+            val endSec = startSec + timelineScrollState.visibleDurationSec
             channels.firstNotNullOfOrNull { ch ->
-                epgByChannel[ch.id]?.firstOrNull { it.stopEpochSec > bucketedStartSec && it.startEpochSec < endSec }
+                epgByChannel[ch.id]?.firstOrNull { it.stopEpochSec > startSec && it.startEpochSec < endSec }
             }
         }
     }
@@ -434,7 +433,7 @@ internal fun TvGuideScreen(
             ) {
                 Button(
                     onClick = {
-                        scope.launch { timelineScrollState.animateScrollToEpoch(todayStartHalfHour) }
+                        scope.launch { timelineScrollState.animateScrollToEpoch(nowEpochSec) }
                     },
                     modifier = Modifier.focusRequester(nowButtonFocusRequester),
                     shape = tvButtonShape(),
@@ -466,7 +465,7 @@ internal fun TvGuideScreen(
                                 val targetWindow = computeDayJumpWindowStart(
                                     dayDate = dayDate,
                                     todayDate = todayDate,
-                                    todayStartHalfHour = todayStartHalfHour,
+                                    todayStartHalfHour = nowEpochSec,
                                     epgByChannel = epgByChannel,
                                     windowDurationSec = timelineScrollState.visibleDurationSec,
                                     zoneId = activeZone,
@@ -612,7 +611,7 @@ internal fun TvGuideScreen(
                 Text(emptyText, style = MuxGridType.CardSubtitle, fontSize = 16.sp)
             }
         } else {
-            // Sticky time ruler + continuous broadcast horizontal timeline rows with red "Now" hairline
+            // Sticky time ruler + continuous broadcast horizontal timeline rows starting at Now
             val pxPerSec = remember(density) { with(density) { TV_TIMELINE_DP_PER_HOUR.toPx() / 3600f } }
             BoxWithConstraints(
                 modifier = Modifier
@@ -679,12 +678,14 @@ internal fun TvGuideScreen(
                                 channelEvents,
                                 bufferStartSec,
                                 bufferEndSec,
+                                timelineOriginSec,
                             ) {
                                 buildContinuousTimelineCells(
                                     channelId = channel.id,
                                     events = channelEvents,
                                     rangeStart = bufferStartSec,
                                     rangeEnd = bufferEndSec,
+                                    minStartEpochSec = timelineOriginSec,
                                 )
                             }
                             val isEvenRow = rowIndex % 2 == 0
@@ -779,7 +780,6 @@ internal fun TvGuideScreen(
                                 TimelineRowTrack(
                                     cells = rowCells,
                                     scrollState = timelineScrollState,
-                                    nowEpochSec = nowEpochSec,
                                     modifier = Modifier
                                         .width(trackWidth)
                                         .fillMaxHeight(),
@@ -825,7 +825,7 @@ internal fun TvGuideScreen(
                                             isLiveNow -> MuxGridColors.CardSurfaceElevated
                                             else -> baseCellBg
                                         }
-                                        Column(
+                                        Box(
                                             modifier = Modifier
                                                 .fillMaxSize()
                                                 .clip(MuxGridShapes.Xs)
@@ -894,39 +894,62 @@ internal fun TvGuideScreen(
                                                 .clearAndSetSemantics {
                                                     role = Role.Button
                                                     contentDescription = "${ev.title}, $timeRangeLabel"
-                                                }
-                                                .padding(horizontal = 9.dp, vertical = 7.dp),
-                                            verticalArrangement = Arrangement.SpaceBetween,
+                                                },
                                         ) {
-                                            Row(
+                                            Column(
                                                 modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .timelineStickyTextOffset(cell.startEpochSec, cell.stopEpochSec, timelineScrollState),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically,
+                                                    .fillMaxSize()
+                                                    .padding(
+                                                        start = 9.dp,
+                                                        end = 9.dp,
+                                                        top = 7.dp,
+                                                        bottom = if (isLiveNow) 9.dp else 7.dp,
+                                                    ),
+                                                verticalArrangement = Arrangement.SpaceBetween,
                                             ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .timelineStickyTextOffset(cell.startEpochSec, cell.stopEpochSec, timelineScrollState),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Text(
+                                                        text = ev.title,
+                                                        color = if (isPast && !evFocused) MuxGridColors.TextSecondary else MuxGridColors.TextPrimary,
+                                                        fontSize = 12.5.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.weight(1f),
+                                                    )
+                                                    if (linkedDvr != null) {
+                                                        Spacer(Modifier.width(4.dp))
+                                                        DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
+                                                    }
+                                                }
                                                 Text(
-                                                    text = ev.title,
-                                                    color = if (isPast && !evFocused) MuxGridColors.TextSecondary else MuxGridColors.TextPrimary,
-                                                    fontSize = 12.5.sp,
-                                                    fontWeight = FontWeight.SemiBold,
+                                                    text = timeRangeLabel,
+                                                    style = MuxGridType.TabularSmall,
+                                                    color = MuxGridColors.TextMuted,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis,
-                                                    modifier = Modifier.weight(1f),
+                                                    modifier = Modifier.timelineStickyTextOffset(cell.startEpochSec, cell.stopEpochSec, timelineScrollState),
                                                 )
-                                                if (linkedDvr != null) {
-                                                    Spacer(Modifier.width(4.dp))
-                                                    DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
-                                                }
                                             }
-                                            Text(
-                                                text = timeRangeLabel,
-                                                style = MuxGridType.TabularSmall,
-                                                color = MuxGridColors.TextMuted,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.timelineStickyTextOffset(cell.startEpochSec, cell.stopEpochSec, timelineScrollState),
-                                            )
+                                            if (isLiveNow) {
+                                                LiveProgressBar(
+                                                    progress = ev.progressFraction(nowEpochSec),
+                                                    fillColor = if (linkedDvr?.state == DvrState.RECORDING) {
+                                                        MuxGridColors.CoralLive
+                                                    } else {
+                                                        MuxGridColors.ProgressFill
+                                                    },
+                                                    modifier = Modifier
+                                                        .align(Alignment.BottomCenter)
+                                                        .fillMaxWidth(),
+                                                )
+                                            }
                                         }
                                     }
                                 }

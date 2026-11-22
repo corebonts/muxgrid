@@ -144,7 +144,7 @@ internal fun MobileGuideScreen(
     }
     val todayStartHalfHour = floorToHalfHour(nowEpochSec)
     var selectedDay by remember { mutableStateOf(todayDate) }
-    val timelineScrollState = rememberTimelineScrollState(initialEpochSec = todayStartHalfHour)
+    val timelineScrollState = rememberTimelineScrollState(initialEpochSec = nowEpochSec)
     val bucketedStartSec by remember(timelineScrollState) {
         derivedStateOf { floorToHalfHour(timelineScrollState.visibleStartEpochSec) }
     }
@@ -311,10 +311,7 @@ internal fun MobileGuideScreen(
         val eventBounds = remember(useTimelineGrid, epgByChannel, nowEpochSec / 3600L) {
             if (useTimelineGrid) computeGuideEventBounds(epgByChannel, nowEpochSec, activeZone) else null
         }
-        val timelineOriginSec = remember(eventBounds, todayStartHalfHour) {
-            val earliest = eventBounds?.first ?: (todayStartHalfHour - 3600L)
-            minOf(floorToHalfHour(earliest), todayStartHalfHour - 3600L)
-        }
+        val timelineOriginSec = nowEpochSec
         val timelineEndSec = remember(eventBounds, todayStartHalfHour) {
             val latest = eventBounds?.second ?: (todayStartHalfHour + 24L * 3600L)
             maxOf(todayStartHalfHour + 6L * 3600L, floorToHalfHour(latest) + HALF_HOUR_SEC)
@@ -325,7 +322,7 @@ internal fun MobileGuideScreen(
                 val target = computeDayJumpWindowStart(
                     dayDate = selectedDay,
                     todayDate = todayDate,
-                    todayStartHalfHour = todayStartHalfHour,
+                    todayStartHalfHour = nowEpochSec,
                     epgByChannel = epgByChannel,
                     windowDurationSec = timelineScrollState.visibleDurationSec,
                     zoneId = activeZone,
@@ -451,7 +448,7 @@ internal fun MobileGuideScreen(
                                         val target = computeDayJumpWindowStart(
                                             dayDate = day,
                                             todayDate = todayDate,
-                                            todayStartHalfHour = todayStartHalfHour,
+                                            todayStartHalfHour = nowEpochSec,
                                             epgByChannel = epgByChannel,
                                             windowDurationSec = timelineScrollState.visibleDurationSec,
                                             zoneId = activeZone,
@@ -467,13 +464,17 @@ internal fun MobileGuideScreen(
                         }
                     }
                     if (useTimelineGrid) {
-                        val isAtNow = kotlin.math.abs(bucketedStartSec - todayStartHalfHour) < HALF_HOUR_SEC
+                        val isAtNow by remember(timelineScrollState) {
+                            derivedStateOf {
+                                timelineScrollState.visibleStartEpochSec - timelineScrollState.originEpochSec < HALF_HOUR_SEC
+                            }
+                        }
                         Box(modifier = Modifier.padding(end = 6.dp)) {
                             TimelineNowChip(
                                 highlighted = !isAtNow,
                                 onClick = {
                                     selectedDay = todayDate
-                                    scope.launch { timelineScrollState.animateScrollToEpoch(todayStartHalfHour) }
+                                    scope.launch { timelineScrollState.animateScrollToEpoch(nowEpochSec) }
                                 },
                             )
                         }
@@ -682,10 +683,8 @@ internal fun MobileGuideScreen(
                                             }
                                             if (isLiveNow) {
                                                 Spacer(Modifier.height(6.dp))
-                                                val dur = (event.stopEpochSec - event.startEpochSec).coerceAtLeast(1L)
-                                                val frac = (nowEpochSec - event.startEpochSec).toFloat() / dur.toFloat()
                                                 LiveProgressBar(
-                                                    progress = frac,
+                                                    progress = event.progressFraction(nowEpochSec),
                                                     fillColor = if (isRecording) MuxGridColors.CoralLive else MuxGridColors.ProgressFill,
                                                     modifier = Modifier.fillMaxWidth(),
                                                 )
@@ -1104,12 +1103,14 @@ private fun MobileTimelineGrid(
                         channelEvents,
                         bufferStartSec,
                         bufferEndSec,
+                        timelineOriginSec,
                     ) {
                         buildContinuousTimelineCells(
                             channelId = channel.id,
                             events = channelEvents,
                             rangeStart = bufferStartSec,
                             rangeEnd = bufferEndSec,
+                            minStartEpochSec = timelineOriginSec,
                         )
                     }
                     val isEvenRow = rowIndex % 2 == 0
@@ -1176,7 +1177,6 @@ private fun MobileTimelineGrid(
                         TimelineRowTrack(
                             cells = rowCells,
                             scrollState = scrollState,
-                            nowEpochSec = nowEpochSec,
                             modifier = Modifier
                                 .width(trackWidth)
                                 .fillMaxHeight(),
@@ -1222,7 +1222,7 @@ private fun MobileTimelineGrid(
                                     isLiveNow -> MuxGridColors.CardSurfaceElevated
                                     else -> baseCellBg
                                 }
-                                Column(
+                                Box(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .clip(MuxGridShapes.Xs)
@@ -1271,39 +1271,62 @@ private fun MobileTimelineGrid(
                                             val focused = state.isFocused
                                             if (evFocused != focused) evFocused = focused
                                         }
-                                        .clickable { onSelectEvent(ev) }
-                                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                                    verticalArrangement = Arrangement.SpaceBetween,
+                                        .clickable { onSelectEvent(ev) },
                                 ) {
-                                    Row(
+                                    Column(
                                         modifier = Modifier
-                                            .fillMaxWidth()
-                                            .timelineStickyTextOffset(cell.startEpochSec, cell.stopEpochSec, scrollState),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically,
+                                            .fillMaxSize()
+                                            .padding(
+                                                start = 8.dp,
+                                                end = 8.dp,
+                                                top = 6.dp,
+                                                bottom = if (isLiveNow) 8.dp else 6.dp,
+                                            ),
+                                        verticalArrangement = Arrangement.SpaceBetween,
                                     ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .timelineStickyTextOffset(cell.startEpochSec, cell.stopEpochSec, scrollState),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(
+                                                text = ev.title,
+                                                color = if (isPast && !evFocused) MuxGridColors.TextSecondary else MuxGridColors.TextPrimary,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                            if (linkedDvr != null) {
+                                                Spacer(Modifier.width(4.dp))
+                                                DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
+                                            }
+                                        }
                                         Text(
-                                            text = ev.title,
-                                            color = if (isPast && !evFocused) MuxGridColors.TextSecondary else MuxGridColors.TextPrimary,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.SemiBold,
+                                            text = timeRangeLabel,
+                                            style = MuxGridType.TabularSmall,
+                                            color = MuxGridColors.TextMuted,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier.timelineStickyTextOffset(cell.startEpochSec, cell.stopEpochSec, scrollState),
                                         )
-                                        if (linkedDvr != null) {
-                                            Spacer(Modifier.width(4.dp))
-                                            DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
-                                        }
                                     }
-                                    Text(
-                                        text = timeRangeLabel,
-                                        style = MuxGridType.TabularSmall,
-                                        color = MuxGridColors.TextMuted,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.timelineStickyTextOffset(cell.startEpochSec, cell.stopEpochSec, scrollState),
-                                    )
+                                    if (isLiveNow) {
+                                        LiveProgressBar(
+                                            progress = ev.progressFraction(nowEpochSec),
+                                            fillColor = if (linkedDvr?.state == DvrState.RECORDING) {
+                                                MuxGridColors.CoralLive
+                                            } else {
+                                                MuxGridColors.ProgressFill
+                                            },
+                                            modifier = Modifier
+                                                .align(Alignment.BottomCenter)
+                                                .fillMaxWidth(),
+                                        )
+                                    }
                                 }
                             }
                         }

@@ -1,13 +1,8 @@
 package io.github.corebonts.muxgrid.core.designsystem
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
@@ -235,6 +230,7 @@ fun buildContinuousTimelineCells(
     events: List<EpgEvent>,
     rangeStart: Long,
     rangeEnd: Long,
+    minStartEpochSec: Long = Long.MIN_VALUE,
 ): List<TimelineCell> {
     if (rangeEnd <= rangeStart) return emptyList()
     if (events.isEmpty()) {
@@ -249,7 +245,7 @@ fun buildContinuousTimelineCells(
         )
     }
 
-    val safeMin = rangeStart - 4L * 3600L
+    val safeMin = maxOf(rangeStart - 4L * 3600L, minStartEpochSec)
     val safeMax = rangeEnd + 4L * 3600L
     val cells = ArrayList<TimelineCell>()
     var cursor = rangeStart
@@ -340,8 +336,8 @@ fun findAdjacentEpgEvent(
 }
 
 /**
- * Renders half-hour time markers and a live coral "Now" indicator synchronized with
- * [scrollState] in the layout phase (zero recomposition per scroll pixel).
+ * Renders half-hour time markers synchronized with [scrollState] in the layout phase
+ * (zero recomposition per scroll pixel).
  */
 @Composable
 fun TimelineRuler(
@@ -352,10 +348,11 @@ fun TimelineRuler(
     zoneId: ZoneId,
     modifier: Modifier = Modifier,
 ) {
-    val slotStarts = remember(bucketStartEpochSec, bucketEndEpochSec) {
-        val first = floorToHalfHour(bucketStartEpochSec)
-        val count = (((bucketEndEpochSec - first) / HALF_HOUR_SEC).toInt() + 2).coerceIn(1, 32)
-        List(count) { idx -> first + idx * HALF_HOUR_SEC }
+    val firstSlot = floorToHalfHour(bucketStartEpochSec)
+    val lastSlot = floorToHalfHour(bucketEndEpochSec) + HALF_HOUR_SEC
+    val slotStarts = remember(firstSlot, lastSlot) {
+        val count = (((lastSlot - firstSlot) / HALF_HOUR_SEC).toInt() + 1).coerceIn(1, 32)
+        List(count) { idx -> firstSlot + idx * HALF_HOUR_SEC }
     }
     val slotMeta = remember(slotStarts, nowEpochSec / 3600L, zoneId) {
         slotStarts.map { sec ->
@@ -382,19 +379,12 @@ fun TimelineRuler(
                     maxLines = 1,
                 )
             }
-            Box(
-                modifier = Modifier
-                    .width(2.dp)
-                    .height(16.dp)
-                    .background(MuxGridColors.CoralLive),
-            )
         },
     ) { measurables, constraints ->
         val widthPx = constraints.maxWidth
         val heightPx = 18.dp.roundToPx()
         val labelConstraints = Constraints(maxWidth = widthPx, maxHeight = heightPx)
-        val labelPlaceables = measurables.dropLast(1).map { it.measure(labelConstraints) }
-        val nowPlaceable = measurables.last().measure(Constraints(maxWidth = widthPx, maxHeight = heightPx))
+        val labelPlaceables = measurables.map { it.measure(labelConstraints) }
 
         layout(widthPx, heightPx) {
             val origin = scrollState.originEpochSec
@@ -403,15 +393,12 @@ fun TimelineRuler(
 
             labelPlaceables.forEachIndexed { idx, placeable ->
                 val sec = slotMeta[idx].first
-                val x = ((sec - origin) * pxPerSec - scrollPx).roundToInt()
-                if (x + placeable.width > 0 && x < widthPx) {
-                    placeable.placeRelative(x = x, y = (heightPx - placeable.height) / 2)
+                if (sec >= origin) {
+                    val x = ((sec - origin) * pxPerSec - scrollPx).roundToInt()
+                    if (x + placeable.width > 0 && x < widthPx) {
+                        placeable.placeRelative(x = x, y = (heightPx - placeable.height) / 2)
+                    }
                 }
-            }
-
-            val nowX = ((nowEpochSec - origin) * pxPerSec - scrollPx).roundToInt()
-            if (nowX in 0..widthPx) {
-                nowPlaceable.placeRelative(x = nowX, y = (heightPx - nowPlaceable.height) / 2)
             }
         }
     }
@@ -439,17 +426,15 @@ fun Modifier.timelineStickyTextOffset(
 }
 
 /**
- * Places a channel row's [cells] and live coral "Now" hairline in exact pixel lockstep with
- * [scrollState]. Each cell is measured once at its natural width (without reading
- * [TimelineScrollState.scrollOffsetPx] during measure), and [scrollState.scrollOffsetPx] is read
- * strictly during placement (`layout { ... }`) so horizontal scrolling performs zero per-frame
- * re-measurement or text re-layout.
+ * Places a channel row's [cells] in exact pixel lockstep with [scrollState]. Each cell is measured
+ * once at its natural width (without reading [TimelineScrollState.scrollOffsetPx] during measure),
+ * and [scrollState.scrollOffsetPx] is read strictly during placement (`layout { ... }`) so
+ * horizontal scrolling performs zero per-frame re-measurement or text re-layout.
  */
 @Composable
 fun TimelineRowTrack(
     cells: List<TimelineCell>,
     scrollState: TimelineScrollState,
-    nowEpochSec: Long,
     cellGap: Dp = 2.dp,
     modifier: Modifier = Modifier,
     cellContent: @Composable (TimelineCell) -> Unit,
@@ -462,12 +447,6 @@ fun TimelineRowTrack(
                     cellContent(cell)
                 }
             }
-            Box(
-                modifier = Modifier
-                    .width(2.dp)
-                    .fillMaxHeight()
-                    .background(MuxGridColors.CoralLive),
-            )
         },
     ) { measurables, constraints ->
         val widthPx = constraints.maxWidth
@@ -476,16 +455,13 @@ fun TimelineRowTrack(
         val pxPerSec = scrollState.pxPerSec
         val maxCellWidthPx = (widthPx * 4).coerceAtLeast(widthPx)
 
-        val cellMeasurables = measurables.dropLast(1)
-        val cellPlaceables = ArrayList<androidx.compose.ui.layout.Placeable>(cellMeasurables.size)
-        cellMeasurables.forEachIndexed { idx, measurable ->
+        val cellPlaceables = ArrayList<androidx.compose.ui.layout.Placeable>(measurables.size)
+        measurables.forEachIndexed { idx, measurable ->
             val cell = cells[idx]
             val naturalWidthPx = (((cell.stopEpochSec - cell.startEpochSec) * pxPerSec).roundToInt() - gapPx)
                 .coerceIn(4, maxCellWidthPx)
             cellPlaceables.add(measurable.measure(Constraints.fixed(naturalWidthPx, heightPx)))
         }
-
-        val nowPlaceable = measurables.last().measure(Constraints.fixed(2.dp.roundToPx(), heightPx))
 
         layout(widthPx, heightPx) {
             val origin = scrollState.originEpochSec
@@ -496,10 +472,6 @@ fun TimelineRowTrack(
                 if (rawLeft + placeable.width > 0 && rawLeft < widthPx) {
                     placeable.placeRelative(x = rawLeft, y = 0)
                 }
-            }
-            val nowX = ((nowEpochSec - origin) * pxPerSec - scrollPx).roundToInt()
-            if (nowX in 0..widthPx) {
-                nowPlaceable.placeRelative(x = nowX, y = 0)
             }
         }
     }

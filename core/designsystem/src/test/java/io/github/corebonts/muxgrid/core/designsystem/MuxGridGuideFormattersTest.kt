@@ -372,4 +372,88 @@ class MuxGridGuideFormattersTest {
             ),
         )
     }
+
+    @Test
+    fun `EpgEvent progressFraction clamps elapsed progress within event bounds`() {
+        val ev = EpgEvent(
+            id = 1L,
+            channelId = 1L,
+            startEpochSec = 1_000L,
+            stopEpochSec = 2_000L,
+            title = "Show",
+        )
+        assertEquals(0f, ev.progressFraction(900L))
+        assertEquals(0.5f, ev.progressFraction(1_500L))
+        assertEquals(1f, ev.progressFraction(2_500L))
+
+        val zeroDur = ev.copy(stopEpochSec = 1_000L)
+        assertEquals(0f, zeroDur.progressFraction(1_000L))
+    }
+
+    @Test
+    fun `buildContinuousTimelineCells clamps live start to minStartEpochSec when now is origin`() {
+        val now = today.atStartOfDay(zone).toEpochSecond() + 18L * 3600L + 900L
+        val rangeEnd = now + 4L * 3600L
+        val ended = EpgEvent(id = 1L, channelId = 1L, startEpochSec = now - 3600L, stopEpochSec = now, title = "Ended")
+        val live = EpgEvent(id = 2L, channelId = 1L, startEpochSec = now - 900L, stopEpochSec = now + 2700L, title = "Live")
+        val next = EpgEvent(id = 3L, channelId = 1L, startEpochSec = now + 2700L, stopEpochSec = now + 6300L, title = "Next")
+
+        val cells = buildContinuousTimelineCells(
+            channelId = 1L,
+            events = listOf(ended, live, next),
+            rangeStart = now,
+            rangeEnd = rangeEnd,
+            minStartEpochSec = now,
+        )
+        assertEquals(3, cells.size)
+        assertEquals(2L, cells[0].event?.id)
+        assertEquals(now, cells[0].startEpochSec)
+        assertEquals(now + 2700L, cells[0].stopEpochSec)
+        assertEquals(3L, cells[1].event?.id)
+        assertEquals(now + 2700L, cells[1].startEpochSec)
+        assertNull(cells[2].event)
+        assertEquals(now + 6300L, cells[2].startEpochSec)
+        assertEquals(rangeEnd, cells[2].stopEpochSec)
+    }
+
+    @Test
+    fun `TimelineScrollState limits left scroll to now origin and keeps origin pinned on tick`() {
+        val origin = 10_000L
+        val state = TimelineScrollState(initialEpochSec = origin)
+        state.updateBounds(
+            newOriginSec = origin,
+            newEndSec = origin + 6L * 3600L,
+            newViewportWidthPx = 600f,
+            newPxPerSec = 0.1f,
+        )
+
+        // Cannot scroll left past origin
+        state.scrollToEpoch(origin - 1_800L)
+        assertEquals(0f, state.scrollOffsetPx)
+        assertEquals(origin, state.visibleStartEpochSec)
+        assertEquals(0f, state.scrollableState.dispatchRawDelta(-250f))
+        assertEquals(0f, state.scrollOffsetPx)
+
+        // Advancing now advances origin while keeping scrollOffsetPx at 0
+        state.updateBounds(
+            newOriginSec = origin + 30L,
+            newEndSec = origin + 6L * 3600L,
+            newViewportWidthPx = 600f,
+            newPxPerSec = 0.1f,
+        )
+        assertEquals(0f, state.scrollOffsetPx)
+        assertEquals(origin + 30L, state.visibleStartEpochSec)
+
+        // Scrolled into future stays anchored to visibleStartEpochSec when now ticks
+        state.scrollToEpoch(origin + 3_630L)
+        assertEquals(360f, state.scrollOffsetPx)
+        state.updateBounds(
+            newOriginSec = origin + 60L,
+            newEndSec = origin + 6L * 3600L,
+            newViewportWidthPx = 600f,
+            newPxPerSec = 0.1f,
+        )
+        assertEquals(357f, state.scrollOffsetPx)
+        assertEquals(origin + 3_630L, state.visibleStartEpochSec)
+    }
 }

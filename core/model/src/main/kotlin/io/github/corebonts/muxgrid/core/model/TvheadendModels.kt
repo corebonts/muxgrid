@@ -34,18 +34,20 @@ data class EpgEvent(
     val description: String? = null,
     val nextEventId: Long? = null,
     val dvrId: Long? = null,
-)
+) {
+    fun progressFraction(nowEpochSec: Long): Float {
+        val duration = (stopEpochSec - startEpochSec).coerceAtLeast(1L)
+        val elapsed = (nowEpochSec - startEpochSec).coerceIn(0L, duration)
+        return elapsed.toFloat() / duration.toFloat()
+    }
+}
 
 data class NowNextProgram(
     val now: EpgEvent? = null,
     val next: EpgEvent? = null,
 ) {
-    fun progressFraction(nowEpochSec: Long): Float {
-        val current = now ?: return 0f
-        val duration = (current.stopEpochSec - current.startEpochSec).coerceAtLeast(1L)
-        val elapsed = (nowEpochSec - current.startEpochSec).coerceIn(0L, duration)
-        return elapsed.toFloat() / duration.toFloat()
-    }
+    fun progressFraction(nowEpochSec: Long): Float =
+        now?.progressFraction(nowEpochSec) ?: 0f
 
     fun remainingMinutes(nowEpochSec: Long): Int? {
         val current = now ?: return null
