@@ -93,7 +93,7 @@ Designed strictly for **10-foot viewing** and a standard TV remote (`D-pad`, `OK
 
 ### Screen Layouts
 - **Live Screen:** Multi-column grid of large legible channel cards + focusable filter chips above the grid.
-- **Guide (EPG) Screen:** Continuous horizontal timeline grid (anchored with **Now** as the left-side scroll origin, sticky channel column, synchronized half-hour time ruler, and bottom progress bars on live cells) where D-pad Left/Right moves across shows with the viewport smoothly following focus, paired with **Now** / day jump chips, top-bar program search, and a fixed-height bottom details bar showing title, air time, and synopsis of the currently focused program.
+- **Guide (EPG) Screen:** Continuous horizontal timeline grid (anchored with **Now** as the left-side scroll origin, sticky channel column that tunes directly, synchronized half-hour time ruler, and bottom progress bars on live cells) where D-pad Left/Right moves across shows with the viewport smoothly following focus, paired with **Now** / day jump chips, top-bar program search, and a fixed-height bottom details bar showing title, air time, and synopsis of the currently focused program. Selecting any program opens the details & actions modal (**Watch Live** / **Watch Channel**, **Watch from Start** / **Resume Chase Play**, **Record** / **Record Now**, **Stop & Save**, **Abort**, **Cancel Timer**, or **Play** / **Resume Recording**).
 - **Recordings Screen:** Horizontal shelves (`Recording Now`, `Continue Watching`, `All Recordings`, `Scheduled`).
 
 ### TV Fullscreen Player (Zero-Friction Remote Controls)

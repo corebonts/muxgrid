@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,10 +31,12 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -883,12 +888,8 @@ internal fun TvGuideScreen(
                                                     indication = null,
                                                     onClick = {
                                                         focusMemory.guideTarget = TvGuideFocusTarget(channel.id, ev.id)
-                                                        if (isLiveNow && linkedDvr == null) {
-                                                            onWatchChannel(channel)
-                                                        } else {
-                                                            actionError = null
-                                                            actionEventKey = ev.channelId to ev.id
-                                                        }
+                                                        actionError = null
+                                                        actionEventKey = ev.channelId to ev.id
                                                     },
                                                 )
                                                 .clearAndSetSemantics {
@@ -1023,19 +1024,71 @@ internal fun TvGuideScreen(
                 )
             }
 
-            val desc = ev.description ?: ev.summary
-            if (!desc.isNullOrBlank()) {
-                Text(
-                    text = desc,
-                    style = MuxGridType.CardSubtitle,
-                    color = MuxGridColors.TextPrimary.copy(alpha = 0.88f),
-                    maxLines = 6,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            val desc = ev.description?.takeIf { it.isNotBlank() } ?: ev.summary?.takeIf { it.isNotBlank() }
+            if (desc != null) {
+                val descScrollState = rememberScrollState()
+                var isDescFocused by remember(ev.id) { mutableStateOf(false) }
+                val canScrollDesc = descScrollState.maxValue in 1 until Int.MAX_VALUE
+                val scrollStepPx = with(density) { 48.dp.toPx() }
+                LaunchedEffect(ev.id) {
+                    descScrollState.scrollTo(0)
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 220.dp)
+                        .then(
+                            if (canScrollDesc) {
+                                Modifier
+                                    .clip(MuxGridShapes.Sm)
+                                    .background(MuxGridColors.CardSurface)
+                                    .border(
+                                        width = if (isDescFocused) MuxGridBorders.Focused else MuxGridBorders.Divider,
+                                        color = if (isDescFocused) MuxGridColors.FocusBorder else MuxGridColors.HairlineBorder,
+                                        shape = MuxGridShapes.Sm,
+                                    )
+                                    .onFocusChanged { isDescFocused = it.isFocused }
+                                    .onPreviewKeyEvent { keyEvent ->
+                                        if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                        when (keyEvent.key) {
+                                            Key.DirectionDown -> {
+                                                if (!descScrollState.canScrollForward) return@onPreviewKeyEvent false
+                                                scope.launch { descScrollState.scrollBy(scrollStepPx) }
+                                                true
+                                            }
+                                            Key.DirectionUp -> {
+                                                if (!descScrollState.canScrollBackward) return@onPreviewKeyEvent false
+                                                scope.launch { descScrollState.scrollBy(-scrollStepPx) }
+                                                true
+                                            }
+                                            else -> false
+                                        }
+                                    }
+                                    .focusable()
+                                    .verticalScroll(descScrollState)
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                            } else {
+                                Modifier.verticalScroll(descScrollState)
+                            },
+                        ),
+                ) {
+                    Text(
+                        text = desc,
+                        style = MuxGridType.CardSubtitle,
+                        color = MuxGridColors.TextPrimary.copy(alpha = 0.88f),
+                        lineHeight = 19.sp,
+                    )
+                }
             }
 
             actionError?.let { err ->
                 Text(err, color = MuxGridColors.CoralLive, fontSize = 13.sp)
+            }
+
+            val hasSecondaryRecordAction = when (linkedDvr?.state) {
+                DvrState.RECORDING, DvrState.SCHEDULED -> true
+                DvrState.COMPLETED -> !linkedDvr.isFileMissing
+                else -> !isPast
             }
 
             FlowRow(
@@ -1104,6 +1157,16 @@ internal fun TvGuideScreen(
                             Spacer(Modifier.width(4.dp))
                             Text("Stop & Save", maxLines = 1, softWrap = false)
                         }
+                        Button(
+                            enabled = !actionBusy,
+                            onClick = { pendingConfirm = DvrConfirmKind.ABORT_RECORDING to linkedDvr },
+                            shape = tvButtonShape(),
+                            colors = tvDialogDestructiveButtonColors(),
+                        ) {
+                            Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Abort", maxLines = 1, softWrap = false)
+                        }
                     }
                     DvrState.SCHEDULED -> {
                         Button(
@@ -1168,6 +1231,11 @@ internal fun TvGuideScreen(
                 Button(
                     enabled = !actionBusy,
                     onClick = { actionEventKey = null },
+                    modifier = if (ch == null && !hasSecondaryRecordAction) {
+                        Modifier.focusRequester(primaryFocusRequester)
+                    } else {
+                        Modifier
+                    },
                     shape = tvButtonShape(),
                     colors = tvDialogSecondaryButtonColors(),
                 ) {
@@ -1196,7 +1264,7 @@ internal fun TvGuideScreen(
                     try {
                         val result = when (kind) {
                             DvrConfirmKind.STOP_AND_SAVE -> onStopRecording(entry.id)
-                            DvrConfirmKind.CANCEL_TIMER -> onCancelRecording(entry.id)
+                            DvrConfirmKind.ABORT_RECORDING, DvrConfirmKind.CANCEL_TIMER -> onCancelRecording(entry.id)
                             else -> Result.success(Unit)
                         }
                         result
