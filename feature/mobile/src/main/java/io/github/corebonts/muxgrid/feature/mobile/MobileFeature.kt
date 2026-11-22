@@ -51,7 +51,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -345,7 +344,6 @@ fun MobileRoot(
                                 onRecordEvent = { eventId -> repository.scheduleRecording(eventId) },
                                 onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
                                 onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
-                                onRefresh = { repository.refresh() },
                             )
                         }
                         MainTab.GUIDE -> {
@@ -393,7 +391,6 @@ fun MobileRoot(
                                 onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
                                 onDeleteRecording = { dvrId -> repository.deleteRecording(dvrId) },
                                 onToggleWatched = { dvrId, watched -> repository.markRecordingWatched(dvrId, watched) },
-                                onRefresh = { repository.refresh() },
                             )
                         }
                         MainTab.SETTINGS -> {
@@ -983,7 +980,6 @@ private fun MobileMiniPlayerBar(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MobileLiveChannelsTab(
     connectionState: ConnectionState,
@@ -1007,7 +1003,6 @@ private fun MobileLiveChannelsTab(
     onRecordEvent: suspend (Long) -> Result<Long>,
     onStopRecording: suspend (Long) -> Result<Unit>,
     onCancelRecording: suspend (Long) -> Result<Unit>,
-    onRefresh: suspend () -> Result<Unit>,
 ) {
     val scope = rememberCoroutineScope()
     val dvrIndex = remember(dvrEntries) { DvrLookupIndex(dvrEntries) }
@@ -1015,24 +1010,6 @@ private fun MobileLiveChannelsTab(
     var pendingConfirm by remember { mutableStateOf<Pair<DvrConfirmKind, DvrEntry>?>(null) }
     var actionBusy by remember { mutableStateOf(false) }
     var actionMessage by remember { mutableStateOf<String?>(null) }
-    var isRefreshing by remember { mutableStateOf(false) }
-    var refreshError by remember { mutableStateOf<String?>(null) }
-
-    val triggerRefresh = {
-        if (!isRefreshing) {
-            scope.launch {
-                isRefreshing = true
-                refreshError = null
-                try {
-                    onRefresh().onFailure {
-                        refreshError = it.message ?: "Failed to refresh channels"
-                    }
-                } finally {
-                    isRefreshing = false
-                }
-            }
-        }
-    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Broadcast Monitor underline filter tabs
@@ -1058,48 +1035,58 @@ private fun MobileLiveChannelsTab(
         }
         MuxGridDivider()
 
-        refreshError?.let { message ->
-            Text(
-                text = message,
-                color = MuxGridColors.CoralLive,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-            )
-        }
-
-        PullToRefreshBox(
-            isRefreshing = isRefreshing,
-            onRefresh = triggerRefresh,
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            if (channels.isEmpty()) {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    item {
-                        val (emptyText, showSpinner) = if (hasAnyChannels) {
-                            "No channels match this filter" to false
-                        } else {
-                            syncStatusMessage(
-                                connectionState = connectionState,
-                                emptyLabel = "No channels available",
-                            )
-                        }
-                        MuxGridSyncingState(
-                            message = emptyText,
-                            showSpinner = showSpinner,
-                            isTv = false,
-                            modifier = Modifier.fillParentMaxSize(),
+        if (channels.isEmpty()) {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                item {
+                    val (emptyText, showSpinner) = if (hasAnyChannels) {
+                        "No channels match this filter" to false
+                    } else {
+                        syncStatusMessage(
+                            connectionState = connectionState,
+                            emptyLabel = "No channels available",
                         )
                     }
+                    MuxGridSyncingState(
+                        message = emptyText,
+                        showSpinner = showSpinner,
+                        isTv = false,
+                        modifier = Modifier.fillParentMaxSize(),
+                    )
                 }
-            } else if (gridColumns > 1) {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(gridColumns),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = bottomContentPadding),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    items(channels, key = { it.id }) { channel ->
+            }
+        } else if (gridColumns > 1) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(gridColumns),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = bottomContentPadding),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(channels, key = { it.id }) { channel ->
+                    MobileChannelCard(
+                        channel = channel,
+                        nowNext = nowNextMap[channel.id],
+                        isRecording = channel.id in activeRecordingsByChannel,
+                        nowEpochSec = nowEpochSec,
+                        isFavorite = channel.id in favorites,
+                        imageLoader = imageLoader,
+                        asCard = true,
+                        onClick = { onChannelClick(channel) },
+                        onLongClick = {
+                            actionMessage = null
+                            actionChannelId = channel.id
+                        },
+                        onToggleFavorite = { onToggleFavorite(channel) },
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = 4.dp, bottom = bottomContentPadding),
+            ) {
+                items(channels, key = { it.id }) { channel ->
+                    Column {
                         MobileChannelCard(
                             channel = channel,
                             nowNext = nowNextMap[channel.id],
@@ -1107,7 +1094,7 @@ private fun MobileLiveChannelsTab(
                             nowEpochSec = nowEpochSec,
                             isFavorite = channel.id in favorites,
                             imageLoader = imageLoader,
-                            asCard = true,
+                            asCard = false,
                             onClick = { onChannelClick(channel) },
                             onLongClick = {
                                 actionMessage = null
@@ -1115,32 +1102,7 @@ private fun MobileLiveChannelsTab(
                             },
                             onToggleFavorite = { onToggleFavorite(channel) },
                         )
-                    }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = 4.dp, bottom = bottomContentPadding),
-                ) {
-                    items(channels, key = { it.id }) { channel ->
-                        Column {
-                            MobileChannelCard(
-                                channel = channel,
-                                nowNext = nowNextMap[channel.id],
-                                isRecording = channel.id in activeRecordingsByChannel,
-                                nowEpochSec = nowEpochSec,
-                                isFavorite = channel.id in favorites,
-                                imageLoader = imageLoader,
-                                asCard = false,
-                                onClick = { onChannelClick(channel) },
-                                onLongClick = {
-                                    actionMessage = null
-                                    actionChannelId = channel.id
-                                },
-                                onToggleFavorite = { onToggleFavorite(channel) },
-                            )
-                            MuxGridDivider(modifier = Modifier.padding(start = 74.dp, end = 16.dp))
-                        }
+                        MuxGridDivider(modifier = Modifier.padding(start = 74.dp, end = 16.dp))
                     }
                 }
             }

@@ -35,7 +35,7 @@ Built as a **single unified codebase** producing ABI-split APKs for Android phon
 - **Live TV & Radio:**
   - Instant channel zapping on LAN via Tvheadend's `pass` (MPEG-TS) stream profile with zero server-side transcoding.
   - Native broadcast decoding via `libmpv`: `1080i` interlaced H.264 (with `bwdif` software deinterlacing on mobile and zero-copy hardware decoding on TV), `MP2`/`AC3`/`AAC` audio track switching, and bitmap DVB subtitles (`DVBSUB`).
-  - Channel filtering (`All`, `TV`, `Radio`, `Favorites`, and server channel tags), pull-to-refresh full metadata resync, and clear tuner-conflict notices on single-tuner servers.
+  - Channel filtering (`All`, `TV`, `Radio`, `Favorites`, and server channel tags), automatic real-time metadata sync, and clear tuner-conflict notices on single-tuner servers.
 - **Live Timeshift (Pause & Rewind):**
   - Disk-backed local `libmpv` ring buffer with configurable size limits in Settings (`Off`, `512 MB`, `1 GB`, `2 GB`, `4 GB`), free-space checks, and automatic recovery when pause reaches the forward buffer cap.
   - Buffered-range seekbar with `-MM:SS · Back to Live` quick jump.

@@ -788,7 +788,6 @@ private fun TvContent(
             BackHandler(enabled = !railHasFocus && !isGuideSearchOpen) {
                 railFocusRequestNonce++
             }
-            var isRefreshing by remember { mutableStateOf(false) }
             val statusDotColor = connectionStatusDotColor(connectionState)
 
             Box(
@@ -817,50 +816,17 @@ private fun TvContent(
                             text = activeTab.label(),
                             style = MuxGridType.ScreenTitle,
                         )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            if (activeTab == MainTab.GUIDE) {
-                                TvIconButton(
-                                    onClick = { isGuideSearchOpen = !isGuideSearchOpen },
-                                    containerColor = if (isGuideSearchOpen) MuxGridColors.CardSurfaceElevated else Color.Transparent,
-                                    contentColor = if (isGuideSearchOpen) MuxGridColors.AccentSoft else MuxGridColors.TextSecondary,
-                                ) {
-                                    Icon(
-                                        imageVector = if (isGuideSearchOpen) MuxGridIcons.Close else MuxGridIcons.Search,
-                                        contentDescription = if (isGuideSearchOpen) "Close search" else "Search programs",
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
-                            }
+                        if (activeTab == MainTab.GUIDE) {
                             TvIconButton(
-                                onClick = {
-                                    if (!isRefreshing) {
-                                        scope.launch {
-                                            isRefreshing = true
-                                            try {
-                                                repository.refresh()
-                                            } finally {
-                                                isRefreshing = false
-                                            }
-                                        }
-                                    }
-                                },
+                                onClick = { isGuideSearchOpen = !isGuideSearchOpen },
+                                containerColor = if (isGuideSearchOpen) MuxGridColors.CardSurfaceElevated else Color.Transparent,
+                                contentColor = if (isGuideSearchOpen) MuxGridColors.AccentSoft else MuxGridColors.TextSecondary,
                             ) {
-                                if (isRefreshing) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MuxGridColors.AccentSoft,
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = MuxGridIcons.Refresh,
-                                        contentDescription = "Refresh",
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
+                                Icon(
+                                    imageVector = if (isGuideSearchOpen) MuxGridIcons.Close else MuxGridIcons.Search,
+                                    contentDescription = if (isGuideSearchOpen) "Close search" else "Search programs",
+                                    modifier = Modifier.size(18.dp),
+                                )
                             }
                         }
                     }

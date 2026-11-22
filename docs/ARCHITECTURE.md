@@ -40,7 +40,7 @@ MuxGrid splits control and media responsibilities across Tvheadend's two protoco
 | **Channel Picons** | Coil 3 `PiconFetcher` + `KeyerImpl` | Normalizes `imagecache/<id>`, `/imagecache/<id>`, and external `http(s)://` URLs; keys Coil's `MemoryCache` and reads/writes Coil's `DiskCache` (`picon_cache`), fetching via HTSP VFS first and falling back to authenticated HTTP (Digest/Basic) if the user lacks `ACCESS_HTSP_RECORDER`. |
 
 ### Reactive In-Memory Store & Atomic Shadow Resync
-`:core:data` holds channels, tags, EPG events, and DVR entries in memory inside `TvheadendStore` (`StateFlow`), avoiding SQLite schema migrations while keeping filtering, search, and Now/Next lookups instantaneous. On reconnect or manual pull-to-refresh (`HtspClient.resync`), `enableAsyncMetadata` writes into temporary shadow maps and swaps them atomically on `initialSyncCompleted` so server-side deletions during downtime are never missed and the UI never blanks out. Persistent preferences and Tink-encrypted server credentials live in Jetpack DataStore.
+`:core:data` holds channels, tags, EPG events, and DVR entries in memory inside `TvheadendStore` (`StateFlow`), avoiding SQLite schema migrations while keeping filtering, search, and Now/Next lookups instantaneous. On reconnect (`HtspClient.resync`), `enableAsyncMetadata` writes into temporary shadow maps and swaps them atomically on `initialSyncCompleted` so server-side deletions during downtime are never missed and the UI never blanks out. Persistent preferences and Tink-encrypted server credentials live in Jetpack DataStore.
 
 ---
 
