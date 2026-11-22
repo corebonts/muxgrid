@@ -40,6 +40,11 @@ data class EpgEvent(
         val elapsed = (nowEpochSec - startEpochSec).coerceIn(0L, duration)
         return elapsed.toFloat() / duration.toFloat()
     }
+
+    fun remainingMinutes(nowEpochSec: Long): Int {
+        val remSec = (stopEpochSec - nowEpochSec).coerceAtLeast(0L)
+        return ((remSec + 59L) / 60L).toInt()
+    }
 }
 
 data class NowNextProgram(
@@ -49,11 +54,8 @@ data class NowNextProgram(
     fun progressFraction(nowEpochSec: Long): Float =
         now?.progressFraction(nowEpochSec) ?: 0f
 
-    fun remainingMinutes(nowEpochSec: Long): Int? {
-        val current = now ?: return null
-        val remSec = (current.stopEpochSec - nowEpochSec).coerceAtLeast(0L)
-        return ((remSec + 59L) / 60L).toInt()
-    }
+    fun remainingMinutes(nowEpochSec: Long): Int? =
+        now?.remainingMinutes(nowEpochSec)
 }
 
 enum class DvrState {

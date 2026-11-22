@@ -93,6 +93,7 @@ import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ChannelTag
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.DvrState
+import io.github.corebonts.muxgrid.core.model.EpgEvent
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LiveFilter
 import io.github.corebonts.muxgrid.core.model.MainTab
@@ -343,6 +344,48 @@ fun LiveProgressBar(
                 }
             },
     )
+}
+
+/**
+ * Full-width live broadcast progress block (`ON NOW` + remaining minutes + [LiveProgressBar])
+ * shared by TV and Mobile EPG show detail overlays.
+ */
+@Composable
+fun EpgLiveProgressSection(
+    event: EpgEvent,
+    nowEpochSec: Long,
+    isRecording: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val remaining = event.remainingMinutes(nowEpochSec)
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "ON NOW",
+                color = MuxGridColors.CoralLive,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "${remaining}m left",
+                style = MuxGridType.TabularSmall,
+                color = MuxGridColors.TextSecondary,
+            )
+        }
+        LiveProgressBar(
+            progress = event.progressFraction(nowEpochSec),
+            fillColor = if (isRecording) MuxGridColors.CoralLive else MuxGridColors.Accent,
+            height = 3.dp,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 @Composable

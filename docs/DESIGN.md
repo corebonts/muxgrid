@@ -60,8 +60,8 @@ Navigation stays minimal and consistent across both form factors:
   - Long-press a channel to Favorite, open its Guide, or jump straight into playback.
 - **Guide (EPG) Screen:**
   - **Portrait Phone:** Vertical per-channel agenda with day underline tabs paired with an icon-only **Search** button on the right (tapping expands a full-width search bar in place of the day chooser) and a compact borderless channel strip below (hidden while searching).
-  - **Landscape / Tablet (`>= 600dp`):** Free 2D-scrolling horizontal multi-channel timeline grid (with left scroll anchored at **Now**) featuring a sticky channel column (tap to tune), synchronized half-hour time ruler, bottom live-program progress bars, **Now** quick jump, keyboard/gamepad Left/Right focus auto-follow, and the same top-bar day tabs and expandable program search.
-  - Tap any program in either layout to open a modal bottom sheet with full description, time, channel, and **Watch Live** / **Record** / **Cancel Recording** actions.
+  - **Landscape / Tablet (`>= 600dp`):** Free 2D-scrolling horizontal multi-channel timeline grid (with left scroll anchored at **Now**) featuring a sticky channel column (tap to tune), synchronized half-hour time ruler, **Now** quick jump, keyboard/gamepad Left/Right focus auto-follow, and the same top-bar day tabs and expandable program search.
+  - Tap any program in either layout to open a modal bottom sheet with full description, time, channel, live progress bar (when currently airing), and **Watch Live** / **Record** / **Cancel Recording** actions.
 - **Recordings Screen:**
   - Underline filter tabs (`All`, `Completed`, `Scheduled`) and stacked sections for **Recording Now** (coral badge, live elapsed duration, **Chase Play** / **Stop** / overflow sheet), **Completed** (grouped by series/title with episode count, resume progress bar, watched badge, Play/Resume/Delete), and **Scheduled** (Cancel).
 
@@ -93,7 +93,7 @@ Designed strictly for **10-foot viewing** and a standard TV remote (`D-pad`, `OK
 
 ### Screen Layouts
 - **Live Screen:** Multi-column grid of large legible channel cards + focusable filter chips above the grid.
-- **Guide (EPG) Screen:** Continuous horizontal timeline grid (anchored with **Now** as the left-side scroll origin, sticky channel column that tunes directly, synchronized half-hour time ruler, and bottom progress bars on live cells) where D-pad Left/Right moves across shows with the viewport smoothly following focus, paired with **Now** / day jump chips, top-bar program search, and a fixed-height bottom details bar showing title, air time, and synopsis of the currently focused program. Selecting any program opens the details & actions modal (**Watch Live** / **Watch Channel**, **Watch from Start** / **Resume Chase Play**, **Record** / **Record Now**, **Stop & Save**, **Abort**, **Cancel Timer**, or **Play** / **Resume Recording**).
+- **Guide (EPG) Screen:** Continuous horizontal timeline grid (anchored with **Now** as the left-side scroll origin, sticky channel column that tunes directly, and synchronized half-hour time ruler) where D-pad Left/Right moves across shows with the viewport smoothly following focus, paired with **Now** / day jump chips, top-bar program search, and a fixed-height bottom details bar showing title, air time, remaining time + top-edge live progress rail (when airing), and synopsis of the currently focused program. Selecting any program opens the details & actions modal (with live progress bar when airing and **Watch Live** / **Watch Channel**, **Watch from Start** / **Resume Chase Play**, **Record** / **Record Now**, **Stop & Save**, **Abort**, **Cancel Timer**, or **Play** / **Resume Recording**).
 - **Recordings Screen:** Horizontal shelves (`Recording Now`, `Continue Watching`, `All Recordings`, `Scheduled`).
 
 ### TV Fullscreen Player (Zero-Friction Remote Controls)

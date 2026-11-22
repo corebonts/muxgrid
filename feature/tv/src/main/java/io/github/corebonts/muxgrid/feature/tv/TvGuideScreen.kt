@@ -85,6 +85,7 @@ import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrConfirmKind
 import io.github.corebonts.muxgrid.core.designsystem.DvrLookupIndex
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
+import io.github.corebonts.muxgrid.core.designsystem.EpgLiveProgressSection
 import io.github.corebonts.muxgrid.core.designsystem.HALF_HOUR_SEC
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
@@ -887,10 +888,8 @@ internal fun TvGuideScreen(
                                                     .fillMaxSize()
                                                     .timelineStickyTextOffset(cell.startEpochSec, cell.stopEpochSec, timelineScrollState)
                                                     .padding(
-                                                        start = 9.dp,
-                                                        end = 9.dp,
-                                                        top = 7.dp,
-                                                        bottom = if (isLiveNow) 9.dp else 7.dp,
+                                                        horizontal = 9.dp,
+                                                        vertical = 7.dp,
                                                     ),
                                                 verticalArrangement = Arrangement.SpaceBetween,
                                             ) {
@@ -919,20 +918,6 @@ internal fun TvGuideScreen(
                                                     color = MuxGridColors.TextMuted,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis,
-                                                )
-                                            }
-                                            if (isLiveNow) {
-                                                LiveProgressBar(
-                                                    progress = ev.progressFraction(nowEpochSec),
-                                                    fillColor = if (isRecording) {
-                                                        MuxGridColors.CoralLive
-                                                    } else {
-                                                        MuxGridColors.ProgressFill
-                                                    },
-                                                    modifier = Modifier
-                                                        .align(Alignment.BottomCenter)
-                                                        .fillMaxWidth()
-                                                        .padding(horizontal = 1.dp),
                                                 )
                                             }
                                         }
@@ -998,6 +983,14 @@ internal fun TvGuideScreen(
                 if (linkedDvr != null) {
                     DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
                 }
+            }
+
+            if (isLiveNow) {
+                EpgLiveProgressSection(
+                    event = ev,
+                    nowEpochSec = nowEpochSec,
+                    isRecording = linkedDvr?.state == DvrState.RECORDING,
+                )
             }
 
             if (!ev.subtitle.isNullOrBlank()) {
@@ -1273,15 +1266,35 @@ private fun TvGuidePreviewBar(
     nowEpochSec: Long,
 ) {
     val previewEvent = focusedEventState.value ?: fallbackEvent
+    val isLiveNow = previewEvent != null && nowEpochSec in previewEvent.startEpochSec until previewEvent.stopEpochSec
+    val dvr = previewEvent?.let { dvrIndex.findMatch(it) }
+    val isRecording = dvr?.state == DvrState.RECORDING
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(MuxGridColors.CardSurface, MuxGridShapes.Sm),
     ) {
-        MuxGridDivider()
+        // Fixed 3.dp slot keeps the bottom bar height invariant when moving between live & upcoming shows
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (isLiveNow) {
+                LiveProgressBar(
+                    progress = previewEvent.progressFraction(nowEpochSec),
+                    fillColor = if (isRecording) MuxGridColors.CoralLive else MuxGridColors.Accent,
+                    height = 3.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                MuxGridDivider()
+            }
+        }
         Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             if (previewEvent != null) {
-                val dvr = dvrIndex.findMatch(previewEvent)
                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1301,8 +1314,15 @@ private fun TvGuidePreviewBar(
                             DvrStateBadge(state = dvr.state, isWatched = dvr.isWatched)
                             Spacer(Modifier.width(10.dp))
                         }
+                        val timeText = buildString {
+                            append("${formatEpochDayHm(previewEvent.startEpochSec, nowEpochSec)}–${formatEpochHm(previewEvent.stopEpochSec)}")
+                            append(" (${formatDurationMinutes(previewEvent.startEpochSec, previewEvent.stopEpochSec)})")
+                            if (isLiveNow) {
+                                append(" · ${previewEvent.remainingMinutes(nowEpochSec)}m left")
+                            }
+                        }
                         Text(
-                            text = "${formatEpochDayHm(previewEvent.startEpochSec, nowEpochSec)}–${formatEpochHm(previewEvent.stopEpochSec)} (${formatDurationMinutes(previewEvent.startEpochSec, previewEvent.stopEpochSec)})",
+                            text = timeText,
                             style = MuxGridType.TabularSmall,
                             color = MuxGridColors.AccentSoft,
                         )

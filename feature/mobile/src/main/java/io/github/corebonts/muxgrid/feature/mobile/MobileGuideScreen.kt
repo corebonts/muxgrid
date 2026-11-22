@@ -78,6 +78,7 @@ import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrConfirmKind
 import io.github.corebonts.muxgrid.core.designsystem.DvrLookupIndex
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
+import io.github.corebonts.muxgrid.core.designsystem.EpgLiveProgressSection
 import io.github.corebonts.muxgrid.core.designsystem.HALF_HOUR_SEC
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MobileTopBarHeight
@@ -744,6 +745,14 @@ internal fun MobileGuideScreen(
                     }
                 }
 
+                if (isLiveNow) {
+                    EpgLiveProgressSection(
+                        event = detailEvent,
+                        nowEpochSec = nowEpochSec,
+                        isRecording = linkedDvr?.state == DvrState.RECORDING,
+                    )
+                }
+
                 if (!detailEvent.subtitle.isNullOrBlank()) {
                     Text(
                         text = detailEvent.subtitle!!,
@@ -1277,10 +1286,8 @@ private fun MobileTimelineGrid(
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .padding(
-                                                start = 8.dp,
-                                                end = 8.dp,
-                                                top = 6.dp,
-                                                bottom = if (isLiveNow) 8.dp else 6.dp,
+                                                horizontal = 8.dp,
+                                                vertical = 6.dp,
                                             ),
                                         verticalArrangement = Arrangement.SpaceBetween,
                                     ) {
@@ -1312,19 +1319,6 @@ private fun MobileTimelineGrid(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.timelineStickyTextOffset(cell.startEpochSec, cell.stopEpochSec, scrollState),
-                                        )
-                                    }
-                                    if (isLiveNow) {
-                                        LiveProgressBar(
-                                            progress = ev.progressFraction(nowEpochSec),
-                                            fillColor = if (linkedDvr?.state == DvrState.RECORDING) {
-                                                MuxGridColors.CoralLive
-                                            } else {
-                                                MuxGridColors.ProgressFill
-                                            },
-                                            modifier = Modifier
-                                                .align(Alignment.BottomCenter)
-                                                .fillMaxWidth(),
                                         )
                                     }
                                 }

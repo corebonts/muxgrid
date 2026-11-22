@@ -391,6 +391,22 @@ class MuxGridGuideFormattersTest {
     }
 
     @Test
+    fun `EpgEvent remainingMinutes rounds partial minutes up and clamps at zero`() {
+        val ev = EpgEvent(
+            id = 1L,
+            channelId = 1L,
+            startEpochSec = 1_000L,
+            stopEpochSec = 2_800L,
+            title = "Show",
+        )
+        assertEquals(30, ev.remainingMinutes(1_000L))
+        assertEquals(30, ev.remainingMinutes(1_001L))
+        assertEquals(1, ev.remainingMinutes(2_799L))
+        assertEquals(0, ev.remainingMinutes(2_800L))
+        assertEquals(0, ev.remainingMinutes(3_000L))
+    }
+
+    @Test
     fun `buildContinuousTimelineCells clamps live start to minStartEpochSec when now is origin`() {
         val now = today.atStartOfDay(zone).toEpochSecond() + 18L * 3600L + 900L
         val rangeEnd = now + 4L * 3600L
