@@ -5,11 +5,14 @@ import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.EpgEvent
+import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.PlaybackError
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -546,6 +549,124 @@ class MuxGridGuideFormattersTest {
         assertEquals(
             40L,
             findAdjacentEpgEvent(list, 30L, +1, base, base + 7_200L, currentStartEpochSec = e3.startEpochSec)?.id,
+        )
+    }
+
+    @Test
+    fun `findActiveRecordingForChannel and buildActiveRecordingsByChannel prefer nowEvent match over earlier overlap`() {
+        val earlierRec = DvrEntry(
+            id = 201L,
+            channelId = 7L,
+            startEpochSec = nowSec - 1_800L,
+            stopEpochSec = nowSec + 300L,
+            title = "Earlier Show",
+            state = DvrState.RECORDING,
+        )
+        val currentRec = DvrEntry(
+            id = 202L,
+            channelId = 7L,
+            startEpochSec = nowSec - 60L,
+            stopEpochSec = nowSec + 3_540L,
+            title = "Current Show",
+            state = DvrState.RECORDING,
+        )
+        val scheduledTimer = DvrEntry(
+            id = 203L,
+            channelId = 8L,
+            startEpochSec = nowSec + 3_600L,
+            stopEpochSec = nowSec + 7_200L,
+            title = "Future Show",
+            state = DvrState.SCHEDULED,
+        )
+        val nowEv = EpgEvent(
+            id = 900L,
+            channelId = 7L,
+            startEpochSec = earlierRec.startEpochSec,
+            stopEpochSec = earlierRec.stopEpochSec,
+            title = "Earlier Show",
+            dvrId = earlierRec.id,
+        )
+        val dvrMap = mapOf(
+            earlierRec.id to earlierRec,
+            currentRec.id to currentRec,
+            scheduledTimer.id to scheduledTimer,
+        )
+
+        // When nowEvent points to earlierRec via dvrId, prefer earlierRec
+        assertEquals(201L, findActiveRecordingForChannel(7L, dvrMap, nowEv)?.id)
+        // Without nowEvent hint, prefer the latest active recording on that channel
+        assertEquals(202L, findActiveRecordingForChannel(7L, dvrMap, null)?.id)
+        // Channel with only a scheduled timer returns null
+        assertNull(findActiveRecordingForChannel(8L, dvrMap, null))
+
+        val byChannelWithNow = buildActiveRecordingsByChannel(
+            dvrEntries = dvrMap,
+            nowNextByChannel = mapOf(7L to NowNextProgram(now = nowEv)),
+        )
+        assertEquals(mapOf(7L to earlierRec), byChannelWithNow)
+
+        val byChannelWithoutNow = buildActiveRecordingsByChannel(dvrEntries = dvrMap)
+        assertEquals(mapOf(7L to currentRec), byChannelWithoutNow)
+    }
+
+    @Test
+    fun `formatProgramModalMeta unifies channel, day-time range, duration, and optional file size`() {
+        val start = today.atStartOfDay(zone).toEpochSecond() + 20L * 3600L
+        val stop = start + 5400L // 1h 30m
+        assertEquals(
+            "BBC One · Today · 20:00–21:30 (1h 30m)",
+            formatProgramModalMeta("BBC One", start, stop, nowSec, dataSizeBytes = 0L, zoneId = zone),
+        )
+        assertEquals(
+            "BBC One · Today · 20:00–21:30 (1h 30m) · 1.5 GB",
+            formatProgramModalMeta(
+                channelName = "BBC One",
+                startEpochSec = start,
+                stopEpochSec = stop,
+                nowEpochSec = nowSec,
+                dataSizeBytes = (1.5 * 1024 * 1024 * 1024).toLong(),
+                zoneId = zone,
+            ),
+        )
+        assertEquals(
+            "Today · 20:00–21:30 (1h 30m)",
+            formatProgramModalMeta(null, start, stop, nowSec, dataSizeBytes = 0L, zoneId = zone),
+        )
+    }
+
+    @Test
+    fun `dvrConfirmSpec uses consistent action labels across all confirmation kinds`() {
+        val stopSpec = dvrConfirmSpec(DvrConfirmKind.STOP_AND_SAVE, "Evening News")
+        assertEquals("Stop & Save", stopSpec.confirmLabel)
+        assertFalse(stopSpec.isDestructive)
+
+        val abortSpec = dvrConfirmSpec(DvrConfirmKind.ABORT_RECORDING, "Evening News")
+        assertEquals("Abort Recording", abortSpec.confirmLabel)
+        assertTrue(abortSpec.isDestructive)
+
+        val cancelSpec = dvrConfirmSpec(DvrConfirmKind.CANCEL_TIMER, "Evening News")
+        assertEquals("Cancel Timer", cancelSpec.confirmLabel)
+        assertTrue(cancelSpec.isDestructive)
+
+        val deleteSpec = dvrConfirmSpec(DvrConfirmKind.DELETE_RECORDING, "Evening News")
+        assertEquals("Delete Recording", deleteSpec.confirmLabel)
+        assertTrue(deleteSpec.isDestructive)
+    }
+
+    @Test
+    fun `resolveModalSubtitleAndDescription promotes long subtitle when description is blank and deduplicates`() {
+        assertEquals(
+            "(magyar sportműsor, 2026)" to "Live match broadcast.",
+            resolveModalSubtitleAndDescription("(magyar sportműsor, 2026)", "Live match broadcast."),
+        )
+        val longSub = "(magyar hírműsor, 2026) A műsor naponta többször jelentkezik a Kárpát-medence és a nagyvilág legfrissebb híreivel."
+        assertEquals(
+            null to longSub,
+            resolveModalSubtitleAndDescription(longSub, null, null),
+        )
+        assertEquals(
+            null to "same text",
+            resolveModalSubtitleAndDescription("Same text", "same text"),
         )
     }
 }

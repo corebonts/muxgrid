@@ -5,6 +5,7 @@ import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.EpgEvent
+import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.PlaybackError
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.ServerProfile
@@ -92,6 +93,113 @@ fun findMatchingDvrEntry(
         }
     }
     return best
+}
+
+/**
+ * Resolves the active [DvrState.RECORDING] entry on [channelId], preferring the entry linked to
+ * [nowEvent] (`nowEvent.dvrId` or matching `startEpochSec`), and falling back to the most recent
+ * active recording on that channel.
+ */
+fun findActiveRecordingForChannel(
+    channelId: Long,
+    dvrEntries: Map<Long, DvrEntry>,
+    nowEvent: EpgEvent? = null,
+): DvrEntry? {
+    nowEvent?.dvrId?.let { id ->
+        dvrEntries[id]?.takeIf { it.channelId == channelId && it.state == DvrState.RECORDING }?.let { return it }
+    }
+    var best: DvrEntry? = null
+    for (entry in dvrEntries.values) {
+        if (entry.channelId != channelId || entry.state != DvrState.RECORDING) continue
+        if (nowEvent != null && entry.startEpochSec == nowEvent.startEpochSec) {
+            return entry
+        }
+        if (best == null || entry.startEpochSec >= best.startEpochSec) {
+            best = entry
+        }
+    }
+    return best
+}
+
+/**
+ * Builds a `channelId -> DvrEntry` map of currently active ([DvrState.RECORDING]) recordings,
+ * preferring the active recording matching each channel's current [NowNextProgram.now] event when
+ * multiple recordings overlap on the same channel.
+ */
+fun buildActiveRecordingsByChannel(
+    dvrEntries: Map<Long, DvrEntry>,
+    nowNextByChannel: Map<Long, NowNextProgram> = emptyMap(),
+): Map<Long, DvrEntry> {
+    if (dvrEntries.isEmpty()) return emptyMap()
+    val result = HashMap<Long, DvrEntry>()
+    for (entry in dvrEntries.values) {
+        if (entry.state != DvrState.RECORDING) continue
+        val chId = entry.channelId
+        val nowEvent = nowNextByChannel[chId]?.now
+        val existing = result[chId]
+        val entryMatchesNow = nowEvent != null &&
+            (nowEvent.dvrId == entry.id || nowEvent.startEpochSec == entry.startEpochSec)
+        val existingMatchesNow = existing != null && nowEvent != null &&
+            (nowEvent.dvrId == existing.id || nowEvent.startEpochSec == existing.startEpochSec)
+        when {
+            existing == null -> result[chId] = entry
+            entryMatchesNow && !existingMatchesNow -> result[chId] = entry
+            !existingMatchesNow && entry.startEpochSec >= existing.startEpochSec -> result[chId] = entry
+        }
+    }
+    return result
+}
+
+/**
+ * Unified subtitle metadata line for EPG program modals, DVR recording modals, and Live channel
+ * overlays: `"Channel · Today · 20:00–21:00 (1h)"` (plus `" · 1.2 GB"` when [dataSizeBytes] > 0).
+ */
+fun formatProgramModalMeta(
+    channelName: String?,
+    startEpochSec: Long,
+    stopEpochSec: Long,
+    nowEpochSec: Long,
+    dataSizeBytes: Long = 0L,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): String = buildString {
+    if (!channelName.isNullOrBlank()) {
+        append(channelName)
+        append(" · ")
+    }
+    append(formatEpochDayHm(startEpochSec, nowEpochSec, zoneId))
+    append('–')
+    append(formatEpochHm(stopEpochSec, zoneId))
+    append(" (")
+    append(formatDurationMinutes(startEpochSec, stopEpochSec))
+    append(')')
+    val sizeText = formatFileSize(dataSizeBytes)
+    if (sizeText.isNotEmpty()) {
+        append(" · ")
+        append(sizeText)
+    }
+}
+
+/**
+ * Normalizes a program's `(subtitle, description)` pair for detail modals:
+ * - Trims blank strings to `null`.
+ * - When [description] and [summary] are both blank and [subtitle] is a full sentence/synopsis
+ *   (> 70 chars, as common in some DVB EPG providers), promotes [subtitle] to the body text so it
+ *   is not rendered as a multi-line bold accent heading.
+ * - Deduplicates when [subtitle] and the body text are identical.
+ */
+fun resolveModalSubtitleAndDescription(
+    subtitle: String?,
+    description: String?,
+    summary: String? = null,
+): Pair<String?, String?> {
+    val cleanSub = subtitle?.trim()?.takeIf { it.isNotEmpty() }
+    val cleanBody = description?.trim()?.takeIf { it.isNotEmpty() }
+        ?: summary?.trim()?.takeIf { it.isNotEmpty() }
+    return when {
+        cleanBody == null && cleanSub != null && cleanSub.length > 70 -> null to cleanSub
+        cleanSub != null && cleanBody != null && cleanSub.equals(cleanBody, ignoreCase = true) -> null to cleanBody
+        else -> cleanSub to cleanBody
+    }
 }
 
 const val EPG_FUTURE_WEEKS = 2L

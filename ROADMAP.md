@@ -5,7 +5,6 @@ Planned improvements and upcoming milestones for **MuxGrid**:
 ## Near-Term (Pre-Announcement & Community Readiness)
 - **Onboarding Preflight Server Diagnostics:** Extend server Test Connection to verify HTTP (`9981/tcp`), `pass` stream profile availability, and `HTSP DVR` (`ACCESS_HTSP_RECORDER`) permissions upfront, surfacing clear setup warnings (and read-only mode notes) before playback.
 - **In-Player Audio-Only Toggle (Mobile & TV):** Add an explicit **Audio-Only** toggle in both the mobile and Android TV player HUDs (reusing `PlaybackEngine.setAudioOnly` / `vid=no`) for hands-free listening without leaving the player or keeping TV displays illuminated.
-- **Seamless Live ↔ Chase-Play Handoff & "Start Over":** Expose a quick **"Watch Recording from Start / Resume Chase Play"** action from Live channel controls and the player HUD when an active DVR recording is running on the tuned channel, and add a **"Start Over"** button alongside **"Resume Chase Play"** on in-progress recordings.
 - **Startup Cache Hygiene:** Prune orphaned `libmpv` disk-cache files in `context.cacheDir/mpv-cache` on app startup in case of unexpected process termination.
 - **On-Device Hardware Verification Matrix:** Complete and document multi-hour soak tests for background audio, PiP transitions, long-paused growing DVR chase-play (including `RECORDING → COMPLETED` transitions mid-pause), and Android TV remote ergonomics across target devices.
 

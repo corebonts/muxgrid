@@ -98,6 +98,7 @@ import io.github.corebonts.muxgrid.core.designsystem.formatDurationSec
 import io.github.corebonts.muxgrid.core.designsystem.rememberStableDurationSec
 import io.github.corebonts.muxgrid.core.designsystem.streamBadgeText
 import io.github.corebonts.muxgrid.core.model.Channel
+import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
@@ -149,6 +150,8 @@ internal fun MobilePlayerScreen(
     onPlaybackCompleted: () -> Unit,
     onStop: () -> Unit,
     onExit: () -> Unit,
+    activeRecording: DvrEntry? = null,
+    onPlayRecording: ((DvrEntry, Long) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -730,10 +733,28 @@ internal fun MobilePlayerScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (playbackState.isGrowingRecording) {
-                                DvrStateBadge(state = DvrState.RECORDING)
-                            } else {
-                                Spacer(Modifier.width(1.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (playbackState.isGrowingRecording) {
+                                    DvrStateBadge(state = DvrState.RECORDING)
+                                    if (activeChannel != null) {
+                                        MuxGridCompactButton(
+                                            text = "Watch Live",
+                                            leadingIcon = MuxGridIcons.Live,
+                                            containerColor = MuxGridColors.ScrimSurface,
+                                            contentColor = Color.White,
+                                            borderColor = Color.White.copy(alpha = MuxGridAlphas.ScrimBorder),
+                                            onClick = {
+                                                hudInteractionNonce++
+                                                onSelectChannel(activeChannel)
+                                            },
+                                        )
+                                    }
+                                } else {
+                                    Spacer(Modifier.width(1.dp))
+                                }
                             }
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -799,40 +820,61 @@ internal fun MobilePlayerScreen(
                     } else {
                         val streamStatsText = if (!isAudioStage) playbackState.streamBadgeText() else null
 
-                        // Live status / Back to Live button + Channels drawer button
+                        // Live status / Back to Live button + Chase-Play handoff + Channels drawer button
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (playbackState.isBehindLive) {
-                                val stableLiveOffsetSec = rememberStableDurationSec(
-                                    playbackState.liveEdgeOffsetMs,
-                                    playbackState.channelId,
-                                )
-                                MuxGridCompactButton(
-                                    text = "-${formatDurationSec(stableLiveOffsetSec)} · Back to Live",
-                                    leadingIcon = MuxGridIcons.Sensors,
-                                    containerColor = MuxGridColors.Accent,
-                                    contentColor = MuxGridColors.OnAccent,
-                                    onClick = { playbackEngine.seekToLiveEdge() },
-                                )
-                            } else {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(MuxGridColors.CoralLive),
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                if (playbackState.isBehindLive) {
+                                    val stableLiveOffsetSec = rememberStableDurationSec(
+                                        playbackState.liveEdgeOffsetMs,
+                                        playbackState.channelId,
                                     )
-                                    Text(
-                                        text = if (playbackState.isRadio) "RADIO" else "LIVE",
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
+                                    MuxGridCompactButton(
+                                        text = "-${formatDurationSec(stableLiveOffsetSec)} · Back to Live",
+                                        leadingIcon = MuxGridIcons.Sensors,
+                                        containerColor = MuxGridColors.Accent,
+                                        contentColor = MuxGridColors.OnAccent,
+                                        onClick = { playbackEngine.seekToLiveEdge() },
+                                    )
+                                } else {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(CircleShape)
+                                                .background(MuxGridColors.CoralLive),
+                                        )
+                                        Text(
+                                            text = if (playbackState.isRadio) "RADIO" else "LIVE",
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                        if (activeRecording != null) {
+                                            DvrStateBadge(state = DvrState.RECORDING)
+                                        }
+                                    }
+                                }
+                                if (activeRecording != null && onPlayRecording != null) {
+                                    MuxGridCompactButton(
+                                        text = if (activeRecording.hasResumePosition) "Resume Chase Play" else "Watch from Start",
+                                        leadingIcon = if (activeRecording.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
+                                        containerColor = MuxGridColors.ScrimSurface,
+                                        contentColor = MuxGridColors.AccentSoft,
+                                        borderColor = MuxGridColors.AccentSoft.copy(alpha = MuxGridAlphas.BorderSubtle),
+                                        onClick = {
+                                            hudInteractionNonce++
+                                            onPlayRecording(activeRecording, activeRecording.effectiveStartSec)
+                                        },
                                     )
                                 }
                             }

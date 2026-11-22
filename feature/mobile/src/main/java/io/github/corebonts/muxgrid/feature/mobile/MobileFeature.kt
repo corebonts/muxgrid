@@ -91,12 +91,17 @@ import io.github.corebonts.muxgrid.core.data.TvheadendRepository
 import io.github.corebonts.muxgrid.core.designsystem.BroadcastUnderlineTab
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.ConnectionStatusDot
+import io.github.corebonts.muxgrid.core.designsystem.DvrConfirmKind
+import io.github.corebonts.muxgrid.core.designsystem.DvrLookupIndex
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
+import io.github.corebonts.muxgrid.core.designsystem.EpgLiveProgressSection
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MobileTopBarHeight
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridAlphas
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridConfirmDialog
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridDetailModalLayout
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridModalSheet
@@ -110,8 +115,13 @@ import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_EXIT_DURATIO
 import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_EXIT_SCALE
 import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_STATUS_DELAY_MS
 import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_TIMEOUT_MS
+import io.github.corebonts.muxgrid.core.designsystem.buildActiveRecordingsByChannel
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
+import io.github.corebonts.muxgrid.core.designsystem.dvrConfirmSpec
+import io.github.corebonts.muxgrid.core.designsystem.findActiveRecordingForChannel
+import io.github.corebonts.muxgrid.core.designsystem.formatProgramModalMeta
 import io.github.corebonts.muxgrid.core.designsystem.isStartupSyncReady
+import io.github.corebonts.muxgrid.core.designsystem.resolveModalSubtitleAndDescription
 import io.github.corebonts.muxgrid.core.designsystem.syncStatusMessage
 import kotlinx.coroutines.delay
 import io.github.corebonts.muxgrid.core.designsystem.collectDebugEnvironmentSnapshot
@@ -298,10 +308,8 @@ fun MobileRoot(
                             val tags by repository.tags.collectAsState()
                             val nowNextMap by repository.nowNextByChannel.collectAsState()
                             val dvrEntries by repository.dvrEntries.collectAsState()
-                            val activeRecordingsByChannel = remember(dvrEntries) {
-                                dvrEntries.values
-                                    .filter { it.state == DvrState.RECORDING }
-                                    .associateBy { it.channelId }
+                            val activeRecordingsByChannel = remember(dvrEntries, nowNextMap) {
+                                buildActiveRecordingsByChannel(dvrEntries, nowNextMap)
                             }
                             val nowEpochSec = rememberNowEpochSec(offsetMs)
                             MobileLiveChannelsTab(
@@ -312,6 +320,7 @@ fun MobileRoot(
                                 activeFilter = activeFilter,
                                 favorites = favorites,
                                 nowNextMap = nowNextMap,
+                                dvrEntries = dvrEntries,
                                 activeRecordingsByChannel = activeRecordingsByChannel,
                                 nowEpochSec = nowEpochSec,
                                 imageLoader = repository.imageLoader,
@@ -334,6 +343,8 @@ fun MobileRoot(
                                     activeTab = MainTab.GUIDE
                                 },
                                 onRecordEvent = { eventId -> repository.scheduleRecording(eventId) },
+                                onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
+                                onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
                                 onRefresh = { repository.refresh() },
                             )
                         }
@@ -436,6 +447,11 @@ fun MobileRoot(
             val nowEpochSec = rememberNowEpochSec(offsetMs)
             val activeChannel = channels.firstOrNull { it.id == playbackState.channelId }
             val activeNowNext = activeChannel?.let { nowNextMap[it.id] }
+            val activeRecording = remember(activeChannel?.id, dvrEntries, activeNowNext?.now?.id, activeNowNext?.now?.dvrId) {
+                activeChannel?.let { ch ->
+                    findActiveRecordingForChannel(ch.id, dvrEntries, activeNowNext?.now)
+                }
+            }
             BackHandler(enabled = !isInPictureInPictureMode) {
                 playbackEngine.setAudioOnly(true)
                 route = MobileRoute.MAIN
@@ -447,6 +463,7 @@ fun MobileRoot(
                     playbackState = playbackState,
                     activeChannel = activeChannel,
                     nowNext = activeNowNext,
+                    activeRecording = activeRecording,
                     channels = zapPool,
                     nowNextMap = nowNextMap,
                     nowEpochSec = nowEpochSec,
@@ -458,6 +475,9 @@ fun MobileRoot(
                     onEnterPip = onEnterPip,
                     onSelectChannel = { channel ->
                         playbackEngine.playChannel(channel, hwDecPreset)
+                    },
+                    onPlayRecording = { entry, startPosSec ->
+                        playbackEngine.playDvrEntry(entry, activeChannel, hwDecPreset, startPosSec)
                     },
                     onZapPrevious = {
                         if (zapPool.isNotEmpty()) {
@@ -973,6 +993,7 @@ private fun MobileLiveChannelsTab(
     activeFilter: LiveFilter,
     favorites: Set<Long>,
     nowNextMap: Map<Long, NowNextProgram>,
+    dvrEntries: Map<Long, DvrEntry>,
     activeRecordingsByChannel: Map<Long, DvrEntry>,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
@@ -984,10 +1005,14 @@ private fun MobileLiveChannelsTab(
     onToggleFavorite: (Channel) -> Unit,
     onOpenGuideForChannel: (Channel) -> Unit,
     onRecordEvent: suspend (Long) -> Result<Long>,
+    onStopRecording: suspend (Long) -> Result<Unit>,
+    onCancelRecording: suspend (Long) -> Result<Unit>,
     onRefresh: suspend () -> Result<Unit>,
 ) {
     val scope = rememberCoroutineScope()
+    val dvrIndex = remember(dvrEntries) { DvrLookupIndex(dvrEntries) }
     var actionChannelId by remember { mutableStateOf<Long?>(null) }
+    var pendingConfirm by remember { mutableStateOf<Pair<DvrConfirmKind, DvrEntry>?>(null) }
     var actionBusy by remember { mutableStateOf(false) }
     var actionMessage by remember { mutableStateOf<String?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
@@ -1124,115 +1149,283 @@ private fun MobileLiveChannelsTab(
 
     val actionChannel = actionChannelId?.let { id -> channels.firstOrNull { it.id == id } }
     actionChannel?.let { ch ->
-        val nowEvent = nowNextMap[ch.id]?.now
+        val chNowNext = nowNextMap[ch.id]
+        val nowEvent = chNowNext?.now
         val activeRecording = activeRecordingsByChannel[ch.id]
+        val linkedNowDvr = activeRecording ?: nowEvent?.let { dvrIndex.findMatch(it) }
         val isFav = ch.id in favorites
+        val isLiveNow = nowEvent != null && nowEpochSec in nowEvent.startEpochSec until nowEvent.stopEpochSec
+        val headlineText = if (ch.number > 0) "${ch.formattedNumber} · ${ch.name}" else ch.name
+        val metaText = when {
+            nowEvent != null -> formatProgramModalMeta(
+                channelName = nowEvent.title,
+                startEpochSec = nowEvent.startEpochSec,
+                stopEpochSec = nowEvent.stopEpochSec,
+                nowEpochSec = nowEpochSec,
+            )
+            activeRecording != null -> formatProgramModalMeta(
+                channelName = activeRecording.title,
+                startEpochSec = activeRecording.startEpochSec,
+                stopEpochSec = activeRecording.stopEpochSec,
+                nowEpochSec = nowEpochSec,
+                dataSizeBytes = activeRecording.dataSize,
+            )
+            ch.isRadio -> "Live Radio"
+            else -> "Live TV"
+        }
+        val (subtitleText, bodyText) = resolveModalSubtitleAndDescription(
+            subtitle = nowEvent?.subtitle ?: activeRecording?.subtitle,
+            description = nowEvent?.description ?: activeRecording?.description,
+            summary = nowEvent?.summary,
+        )
         MuxGridModalSheet(
             onDismissRequest = { if (!actionBusy) actionChannelId = null },
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                ChannelPiconBadge(
-                    channelNumber = ch.formattedNumber,
-                    channelName = ch.name,
-                    piconModel = ch.icon?.let { PiconModel(ch.id, it) },
-                    imageLoader = imageLoader,
-                    size = 44.dp,
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(ch.name, style = MuxGridType.Title, fontSize = 18.sp)
-                    nowEvent?.let { Text("On Now: ${it.title}", style = MuxGridType.CardSubtitle) }
-                }
-            }
-            actionMessage?.let { Text(it, color = MuxGridColors.CoralLive, fontSize = 13.sp) }
+            MuxGridDetailModalLayout(
+                detailsContent = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        ChannelPiconBadge(
+                            channelNumber = ch.formattedNumber,
+                            channelName = ch.name,
+                            piconModel = ch.icon?.let { PiconModel(ch.id, it) },
+                            imageLoader = imageLoader,
+                            size = 44.dp,
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(headlineText, style = MuxGridType.Title, fontSize = 18.sp)
+                            Text(metaText, style = MuxGridType.TabularSmall)
+                        }
+                        if (linkedNowDvr != null) {
+                            DvrStateBadge(state = linkedNowDvr.state, isWatched = linkedNowDvr.isWatched)
+                        }
+                    }
 
-            Button(
-                enabled = !actionBusy,
-                onClick = {
-                    actionChannelId = null
-                    onChannelClick(ch)
+                    if (nowEvent != null && isLiveNow) {
+                        EpgLiveProgressSection(
+                            event = nowEvent,
+                            nowEpochSec = nowEpochSec,
+                            isRecording = activeRecording != null,
+                        )
+                    }
+
+                    if (subtitleText != null) {
+                        Text(
+                            text = subtitleText,
+                            style = MuxGridType.CardTitle,
+                            color = MuxGridColors.AccentSoft,
+                        )
+                    }
+
+                    if (bodyText != null) {
+                        Text(
+                            text = bodyText,
+                            style = MuxGridType.CardSubtitle,
+                            color = MuxGridColors.TextPrimary.copy(alpha = MuxGridAlphas.SynopsisText),
+                            lineHeight = 19.sp,
+                        )
+                    }
+
+                    chNowNext?.next?.let { nextEv ->
+                        Text(
+                            text = "Next ${formatEpochHm(nextEv.startEpochSec)} · ${nextEv.title}",
+                            style = MuxGridType.TabularSmall,
+                            color = MuxGridColors.TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    actionMessage?.let { Text(it, color = MuxGridColors.CoralLive, fontSize = 13.sp) }
                 },
-                shape = MuxGridShapes.Sm,
-                colors = ButtonDefaults.buttonColors(containerColor = MuxGridColors.Accent, contentColor = MuxGridColors.OnAccent),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Watch Live", fontWeight = FontWeight.SemiBold)
-            }
-            if (activeRecording != null) {
-                OutlinedButton(
-                    enabled = !actionBusy,
-                    onClick = {
-                        actionChannelId = null
-                        onPlayRecording(activeRecording, ch, 0L)
-                    },
-                    shape = MuxGridShapes.Sm,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(MuxGridIcons.Replay10, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Watch from Start (Recording)", color = MuxGridColors.CoralLive, fontWeight = FontWeight.SemiBold)
-                }
-            }
-            OutlinedButton(
-                enabled = !actionBusy,
-                onClick = {
-                    onToggleFavorite(ch)
-                    actionChannelId = null
-                },
-                shape = MuxGridShapes.Sm,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(
-                    imageVector = if (isFav) MuxGridIcons.StarFilled else MuxGridIcons.Star,
-                    contentDescription = null,
-                    tint = if (isFav) MuxGridColors.AmberWarn else MuxGridColors.TextPrimary,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(if (isFav) "Remove from Favorites" else "Add to Favorites", color = MuxGridColors.TextPrimary)
-            }
-            OutlinedButton(
-                enabled = !actionBusy,
-                onClick = {
-                    actionChannelId = null
-                    onOpenGuideForChannel(ch)
-                },
-                shape = MuxGridShapes.Sm,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(MuxGridIcons.Guide, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("View EPG Guide", color = MuxGridColors.TextPrimary)
-            }
-            if (activeRecording == null && nowEvent != null && nowEvent.dvrId == null) {
-                OutlinedButton(
-                    enabled = !actionBusy,
-                    onClick = {
-                        scope.launch {
-                            actionBusy = true
-                            actionMessage = null
-                            try {
-                                onRecordEvent(nowEvent.id)
-                                    .onSuccess { actionChannelId = null }
-                                    .onFailure { actionMessage = it.message ?: "Failed to record" }
-                            } finally {
-                                actionBusy = false
+                actionsContent = {
+                    Button(
+                        enabled = !actionBusy,
+                        onClick = {
+                            actionChannelId = null
+                            onChannelClick(ch)
+                        },
+                        shape = MuxGridShapes.Sm,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MuxGridColors.Accent,
+                            contentColor = MuxGridColors.OnAccent,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Watch Live", fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    }
+                    if (activeRecording != null) {
+                        OutlinedButton(
+                            enabled = !actionBusy,
+                            onClick = {
+                                actionChannelId = null
+                                onPlayRecording(activeRecording, ch, activeRecording.effectiveStartSec)
+                            },
+                            shape = MuxGridShapes.Sm,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(
+                                imageVector = if (activeRecording.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
+                                contentDescription = null,
+                                tint = MuxGridColors.AccentSoft,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = if (activeRecording.hasResumePosition) "Resume Chase Play" else "Watch from Start",
+                                color = MuxGridColors.AccentSoft,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                            )
+                        }
+                        if (activeRecording.hasResumePosition) {
+                            OutlinedButton(
+                                enabled = !actionBusy,
+                                onClick = {
+                                    actionChannelId = null
+                                    onPlayRecording(activeRecording, ch, 0L)
+                                },
+                                shape = MuxGridShapes.Sm,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Start Over", color = MuxGridColors.TextPrimary, maxLines = 1)
                             }
                         }
-                    },
-                    shape = MuxGridShapes.Sm,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(MuxGridIcons.Record, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Record Current Show", color = MuxGridColors.CoralLive)
-                }
-            }
+                        OutlinedButton(
+                            enabled = !actionBusy,
+                            onClick = {
+                                pendingConfirm = DvrConfirmKind.STOP_AND_SAVE to activeRecording
+                            },
+                            shape = MuxGridShapes.Sm,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(MuxGridIcons.Stop, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Stop & Save", color = MuxGridColors.TextPrimary, maxLines = 1)
+                        }
+                        OutlinedButton(
+                            enabled = !actionBusy,
+                            onClick = {
+                                pendingConfirm = DvrConfirmKind.ABORT_RECORDING to activeRecording
+                            },
+                            shape = MuxGridShapes.Sm,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Abort Recording", color = MuxGridColors.CoralLive, maxLines = 1)
+                        }
+                    } else if (linkedNowDvr?.state == DvrState.SCHEDULED) {
+                        OutlinedButton(
+                            enabled = !actionBusy,
+                            onClick = {
+                                pendingConfirm = DvrConfirmKind.CANCEL_TIMER to linkedNowDvr
+                            },
+                            shape = MuxGridShapes.Sm,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Cancel Timer", color = MuxGridColors.CoralLive, maxLines = 1)
+                        }
+                    } else if (nowEvent != null) {
+                        OutlinedButton(
+                            enabled = !actionBusy,
+                            onClick = {
+                                scope.launch {
+                                    actionBusy = true
+                                    actionMessage = null
+                                    try {
+                                        onRecordEvent(nowEvent.id)
+                                            .onSuccess { actionChannelId = null }
+                                            .onFailure { actionMessage = it.message ?: "Failed to schedule recording" }
+                                    } finally {
+                                        actionBusy = false
+                                    }
+                                }
+                            },
+                            shape = MuxGridShapes.Sm,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(MuxGridIcons.Record, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Record Now", color = MuxGridColors.CoralLive, maxLines = 1)
+                        }
+                    }
+                    OutlinedButton(
+                        enabled = !actionBusy,
+                        onClick = {
+                            onToggleFavorite(ch)
+                            actionChannelId = null
+                        },
+                        shape = MuxGridShapes.Sm,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            imageVector = if (isFav) MuxGridIcons.StarFilled else MuxGridIcons.Star,
+                            contentDescription = null,
+                            tint = if (isFav) MuxGridColors.AmberWarn else MuxGridColors.TextPrimary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (isFav) "Remove from Favorites" else "Add to Favorites", color = MuxGridColors.TextPrimary, maxLines = 1)
+                    }
+                    OutlinedButton(
+                        enabled = !actionBusy,
+                        onClick = {
+                            actionChannelId = null
+                            onOpenGuideForChannel(ch)
+                        },
+                        shape = MuxGridShapes.Sm,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(MuxGridIcons.Guide, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("View in Guide", color = MuxGridColors.TextPrimary, maxLines = 1)
+                    }
+                },
+            )
         }
+    }
+
+    pendingConfirm?.let { (kind, entry) ->
+        val spec = dvrConfirmSpec(kind, entry.title)
+        MuxGridConfirmDialog(
+            title = spec.title,
+            message = spec.message,
+            confirmLabel = spec.confirmLabel,
+            isDestructive = spec.isDestructive,
+            enabled = !actionBusy,
+            onDismiss = { pendingConfirm = null },
+            onConfirm = {
+                val targetId = entry.id
+                pendingConfirm = null
+                scope.launch {
+                    actionBusy = true
+                    actionMessage = null
+                    try {
+                        val result = when (kind) {
+                            DvrConfirmKind.STOP_AND_SAVE -> onStopRecording(targetId)
+                            DvrConfirmKind.ABORT_RECORDING, DvrConfirmKind.CANCEL_TIMER -> onCancelRecording(targetId)
+                            else -> Result.success(Unit)
+                        }
+                        result
+                            .onSuccess { actionChannelId = null }
+                            .onFailure { err ->
+                                actionMessage = err.message ?: spec.failureFallbackMessage
+                            }
+                    } finally {
+                        actionBusy = false
+                    }
+                }
+            },
+        )
     }
 }
 

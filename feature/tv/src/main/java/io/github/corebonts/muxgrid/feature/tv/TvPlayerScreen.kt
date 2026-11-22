@@ -89,6 +89,7 @@ import io.github.corebonts.muxgrid.core.designsystem.formatDurationSec
 import io.github.corebonts.muxgrid.core.designsystem.rememberStableDurationSec
 import io.github.corebonts.muxgrid.core.designsystem.streamBadgeText
 import io.github.corebonts.muxgrid.core.model.Channel
+import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
@@ -119,6 +120,8 @@ internal fun TvPlayerScreen(
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectAspectMode: (VideoAspectMode) -> Unit,
     onExit: () -> Unit,
+    activeRecording: DvrEntry? = null,
+    onPlayRecording: ((DvrEntry, Long) -> Unit)? = null,
 ) {
     var hudVisible by remember { mutableStateOf(false) }
     var hudInteractionNonce by remember { mutableIntStateOf(0) }
@@ -619,13 +622,22 @@ internal fun TvPlayerScreen(
                     } else {
                         nowNext?.now?.let { now ->
                             Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = now.title,
-                                color = MuxGridColors.TextSecondary,
-                                fontSize = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = now.title,
+                                    color = MuxGridColors.TextSecondary,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                if (activeRecording != null) {
+                                    DvrStateBadge(state = DvrState.RECORDING)
+                                }
+                            }
                             Spacer(Modifier.height(6.dp))
                             LiveProgressBar(
                                 progress = nowNext.progressFraction(nowEpochSec),
@@ -817,7 +829,7 @@ internal fun TvPlayerScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            if (playbackState.isGrowingRecording) {
+                            if (playbackState.isGrowingRecording || (!playbackState.isRecordingPlayback && activeRecording != null)) {
                                 DvrStateBadge(state = DvrState.RECORDING)
                             }
                             playbackState.streamBadgeText(includeDeinterlace = true)?.let { streamBadge ->
@@ -933,6 +945,9 @@ internal fun TvPlayerScreen(
                         isPaused = playbackState.isPaused,
                         isBehindLive = playbackState.isBehindLive,
                         isRecordingPlayback = playbackState.isRecordingPlayback,
+                        isGrowingRecording = playbackState.isGrowingRecording,
+                        activeChannel = activeChannel,
+                        activeRecording = activeRecording,
                         canZap = canZap,
                         playPauseFocusRequester = playPauseFocusRequester,
                         trackButtonFocusRequester = trackButtonFocusRequester,
@@ -942,6 +957,16 @@ internal fun TvPlayerScreen(
                         onTogglePause = { playbackEngine.togglePause() },
                         onSeekToLiveEdge = { playbackEngine.seekToLiveEdge() },
                         onBackToLiveFocusChanged = { backToLiveFocused = it },
+                        onSwitchToLive = if (activeChannel != null) {
+                            { onSelectChannel(activeChannel) }
+                        } else {
+                            null
+                        },
+                        onSwitchToChasePlay = if (activeRecording != null && onPlayRecording != null) {
+                            { onPlayRecording(activeRecording, activeRecording.effectiveStartSec) }
+                        } else {
+                            null
+                        },
                         onZapDelta = onZapDelta,
                         onToggleTrackPanel = { trackPanelOpen = !trackPanelOpen },
                         onToggleInfoPanel = { infoPanelOpen = !infoPanelOpen },
@@ -1019,6 +1044,9 @@ private fun TvHudControlsRow(
     isPaused: Boolean,
     isBehindLive: Boolean,
     isRecordingPlayback: Boolean,
+    isGrowingRecording: Boolean,
+    activeChannel: Channel?,
+    activeRecording: DvrEntry?,
     canZap: Boolean,
     playPauseFocusRequester: FocusRequester,
     trackButtonFocusRequester: FocusRequester,
@@ -1028,6 +1056,8 @@ private fun TvHudControlsRow(
     onTogglePause: () -> Unit,
     onSeekToLiveEdge: () -> Unit,
     onBackToLiveFocusChanged: (Boolean) -> Unit,
+    onSwitchToLive: (() -> Unit)?,
+    onSwitchToChasePlay: (() -> Unit)?,
     onZapDelta: (Int) -> Unit,
     onToggleTrackPanel: () -> Unit,
     onToggleInfoPanel: () -> Unit,
@@ -1120,6 +1150,40 @@ private fun TvHudControlsRow(
                 )
                 Spacer(Modifier.width(6.dp))
                 Text("Back to Live", fontWeight = FontWeight.SemiBold)
+            }
+        }
+        if (!isRecordingPlayback && activeRecording != null && onSwitchToChasePlay != null) {
+            Button(
+                onClick = onSwitchToChasePlay,
+                shape = buttonShape,
+                colors = secondaryColors,
+            ) {
+                Icon(
+                    imageVector = if (activeRecording.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = if (activeRecording.hasResumePosition) "Resume Chase Play" else "Watch from Start",
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+        }
+        if (isRecordingPlayback && isGrowingRecording && activeChannel != null && onSwitchToLive != null) {
+            Button(
+                onClick = onSwitchToLive,
+                shape = buttonShape,
+                colors = secondaryColors,
+            ) {
+                Icon(
+                    imageVector = MuxGridIcons.Live,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("Watch Live", maxLines = 1, softWrap = false)
             }
         }
         if (!isRecordingPlayback && canZap) {

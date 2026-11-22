@@ -105,7 +105,7 @@ fun PlaybackInfoPanel(
             .focusProperties { onExit = { cancelFocusChange() } }
             .focusGroup()
             .verticalScroll(scrollState)
-            .padding(20.dp),
+            .padding(22.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         // Header
@@ -123,13 +123,13 @@ fun PlaybackInfoPanel(
                     imageVector = MuxGridIcons.Info,
                     contentDescription = null,
                     tint = MuxGridColors.AccentSoft,
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier.size(20.dp),
                 )
                 Column {
                     Text(
                         text = "Playback Info",
                         style = MuxGridType.Title,
-                        fontSize = 19.sp,
+                        fontSize = 18.sp,
                     )
                     val titleLine = buildString {
                         val name = playbackState.displayTitle(
@@ -168,24 +168,10 @@ fun PlaybackInfoPanel(
                         )
                     },
                 )
-                var closeFocused by remember { mutableStateOf(false) }
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .focusRequester(closeFocusRequester)
-                        .onFocusChanged { closeFocused = it.isFocused }
-                        .clip(MuxGridShapes.Sm)
-                        .background(if (closeFocused) MuxGridColors.FocusBorder else MuxGridColors.CardSurfaceElevated)
-                        .clickable(onClick = onClose),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = MuxGridIcons.Close,
-                        contentDescription = "Close",
-                        tint = if (closeFocused) MuxGridColors.OnFocusBorder else MuxGridColors.TextSecondary,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
+                ModalCloseIconButton(
+                    onClick = onClose,
+                    modifier = Modifier.focusRequester(closeFocusRequester),
+                )
             }
         }
 

@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.content.res.Configuration
 import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
@@ -70,9 +71,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -80,6 +85,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -705,6 +711,30 @@ fun PlayerErrorToast(
 }
 
 @Composable
+fun ModalCloseIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var closeFocused by remember { mutableStateOf(false) }
+    Box(
+        modifier = modifier
+            .size(36.dp)
+            .onFocusChanged { closeFocused = it.isFocused }
+            .clip(MuxGridShapes.Sm)
+            .background(if (closeFocused) MuxGridColors.FocusBorder else MuxGridColors.CardSurfaceElevated)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = MuxGridIcons.Close,
+            contentDescription = "Close",
+            tint = if (closeFocused) MuxGridColors.OnFocusBorder else MuxGridColors.TextSecondary,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+@Composable
 fun TrackAndPresetPanel(
     audioTracks: List<MediaTrack>,
     subtitleTracks: List<MediaTrack>,
@@ -720,7 +750,6 @@ fun TrackAndPresetPanel(
     onSelectAspectMode: ((VideoAspectMode) -> Unit)? = null,
 ) {
     val firstOptionFocusRequester = remember { FocusRequester() }
-    var closeFocused by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         runCatching { firstOptionFocusRequester.requestFocus() }
@@ -757,30 +786,15 @@ fun TrackAndPresetPanel(
                     imageVector = MuxGridIcons.Tracks,
                     contentDescription = null,
                     tint = MuxGridColors.AccentSoft,
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier.size(20.dp),
                 )
                 Text(
                     text = "Display Options",
                     style = MuxGridType.Title,
-                    fontSize = 20.sp,
+                    fontSize = 18.sp,
                 )
             }
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .onFocusChanged { closeFocused = it.isFocused }
-                    .clip(MuxGridShapes.Sm)
-                    .background(if (closeFocused) MuxGridColors.FocusBorder else Color.Transparent)
-                    .clickable(onClick = onClose),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = MuxGridIcons.Close,
-                    contentDescription = "Close",
-                    tint = if (closeFocused) MuxGridColors.OnFocusBorder else MuxGridColors.TextSecondary,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
+            ModalCloseIconButton(onClick = onClose)
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1142,7 +1156,7 @@ fun dvrConfirmSpec(kind: DvrConfirmKind, entryTitle: String): DvrConfirmSpec = w
     DvrConfirmKind.DELETE_RECORDING -> DvrConfirmSpec(
         title = "Delete Recording?",
         message = "Delete \"$entryTitle\" from Tvheadend storage? This cannot be undone.",
-        confirmLabel = "Delete",
+        confirmLabel = "Delete Recording",
         isDestructive = true,
         failureFallbackMessage = "Failed to delete recording",
     )
@@ -1190,6 +1204,19 @@ fun MuxGridConfirmDialog(
     )
 }
 
+private val ConsumeVerticalSheetDragConnection = object : NestedScrollConnection {
+    override fun onPostScroll(
+        consumed: Offset,
+        available: Offset,
+        source: NestedScrollSource,
+    ): Offset = Offset(0f, available.y)
+
+    override suspend fun onPostFling(
+        consumed: Velocity,
+        available: Velocity,
+    ): Velocity = Velocity(0f, available.y)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MuxGridModalSheet(
@@ -1200,18 +1227,74 @@ fun MuxGridModalSheet(
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetMaxWidth = 760.dp,
         shape = MuxGridShapes.SheetTop,
         containerColor = MuxGridColors.CardSurfaceElevated,
         contentColor = MuxGridColors.TextPrimary,
+        dragHandle = null,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp)
-                .padding(bottom = 24.dp),
+                .nestedScroll(ConsumeVerticalSheetDragConnection)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 18.dp)
+                .padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(contentSpacing),
             content = content,
         )
+    }
+}
+
+/**
+ * Unified responsive detail & actions layout shared by Live Channel, EPG Program, and DVR
+ * Recording overlays across Mobile and Android TV:
+ * - On **Android TV** and **Mobile Landscape / Tablet** ([isSplitLayout] = `true`): renders a
+ *   two-column split layout with program/channel details on the left and a vertical stack of
+ *   equal-width action buttons on the right.
+ * - On **Mobile Portrait** ([isSplitLayout] = `false`): renders a single-column vertical stack
+ *   with details on top and action buttons below.
+ */
+@Composable
+fun MuxGridDetailModalLayout(
+    isSplitLayout: Boolean = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE,
+    actionsColumnWidth: Dp = 220.dp,
+    detailsContent: @Composable ColumnScope.() -> Unit,
+    actionsContent: @Composable ColumnScope.() -> Unit,
+) {
+    if (isSplitLayout) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                content = detailsContent,
+            )
+            Column(
+                modifier = Modifier.width(actionsColumnWidth),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                content = actionsContent,
+            )
+        }
+    } else {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                content = detailsContent,
+            )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                content = actionsContent,
+            )
+        }
     }
 }
 

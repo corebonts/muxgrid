@@ -1,5 +1,7 @@
 package io.github.corebonts.muxgrid.feature.tv
 
+import android.os.SystemClock
+import android.view.KeyEvent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -24,6 +26,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -124,11 +128,15 @@ import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.data.TvheadendRepository
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.ConnectionStatusDot
+import io.github.corebonts.muxgrid.core.designsystem.DvrConfirmKind
+import io.github.corebonts.muxgrid.core.designsystem.DvrLookupIndex
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
+import io.github.corebonts.muxgrid.core.designsystem.EpgLiveProgressSection
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridAlphas
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridDetailModalLayout
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDurations
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
@@ -143,19 +151,24 @@ import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_EXIT_DURATIO
 import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_EXIT_SCALE
 import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_STATUS_DELAY_MS
 import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_TIMEOUT_MS
+import io.github.corebonts.muxgrid.core.designsystem.buildActiveRecordingsByChannel
 import io.github.corebonts.muxgrid.core.designsystem.buildLiveFilters
 import io.github.corebonts.muxgrid.core.designsystem.collectDebugEnvironmentSnapshot
 import io.github.corebonts.muxgrid.core.designsystem.connectionStatusColor
 import io.github.corebonts.muxgrid.core.designsystem.connectionStatusDotColor
 import io.github.corebonts.muxgrid.core.designsystem.connectionStatusText
 import io.github.corebonts.muxgrid.core.designsystem.copyTextToClipboard
+import io.github.corebonts.muxgrid.core.designsystem.dvrConfirmSpec
 import io.github.corebonts.muxgrid.core.designsystem.filterChannels
+import io.github.corebonts.muxgrid.core.designsystem.findActiveRecordingForChannel
 import io.github.corebonts.muxgrid.core.designsystem.formatDebugInfoReport
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochHm
+import io.github.corebonts.muxgrid.core.designsystem.formatProgramModalMeta
 import io.github.corebonts.muxgrid.core.designsystem.icon
 import io.github.corebonts.muxgrid.core.designsystem.isStartupSyncReady
 import io.github.corebonts.muxgrid.core.designsystem.label
 import io.github.corebonts.muxgrid.core.designsystem.rememberNowEpochSec
+import io.github.corebonts.muxgrid.core.designsystem.resolveModalSubtitleAndDescription
 import io.github.corebonts.muxgrid.core.designsystem.serverHeadline
 import io.github.corebonts.muxgrid.core.designsystem.syncStatusMessage
 import io.github.corebonts.muxgrid.core.model.AppAttribution
@@ -404,14 +417,83 @@ internal fun tvDialogDestructiveButtonColors() = ButtonDefaults.colors(
 internal fun tvButtonShape() = ButtonDefaults.shape(shape = MuxGridShapes.Sm)
 
 @Composable
+internal fun TvScrollableDescriptionBox(
+    text: String,
+    resetKey: Any?,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val descScrollState = rememberScrollState()
+    var isDescFocused by remember(resetKey) { mutableStateOf(false) }
+    val canScrollDesc = descScrollState.maxValue in 1 until Int.MAX_VALUE
+    val scrollStepPx = with(density) { 48.dp.toPx() }
+    LaunchedEffect(resetKey) {
+        descScrollState.scrollTo(0)
+    }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(max = 220.dp)
+            .then(
+                if (canScrollDesc) {
+                    Modifier
+                        .clip(MuxGridShapes.Sm)
+                        .background(MuxGridColors.CardSurface)
+                        .border(
+                            width = if (isDescFocused) MuxGridBorders.Focused else MuxGridBorders.Divider,
+                            color = if (isDescFocused) MuxGridColors.FocusBorder else MuxGridColors.HairlineBorder,
+                            shape = MuxGridShapes.Sm,
+                        )
+                        .onFocusChanged { isDescFocused = it.isFocused }
+                        .onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                            when (keyEvent.key) {
+                                Key.DirectionDown -> {
+                                    if (!descScrollState.canScrollForward) return@onPreviewKeyEvent false
+                                    scope.launch { descScrollState.scrollBy(scrollStepPx) }
+                                    true
+                                }
+                                Key.DirectionUp -> {
+                                    if (!descScrollState.canScrollBackward) return@onPreviewKeyEvent false
+                                    scope.launch { descScrollState.scrollBy(-scrollStepPx) }
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
+                        .focusable()
+                        .verticalScroll(descScrollState)
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                } else {
+                    Modifier.verticalScroll(descScrollState)
+                },
+            ),
+    ) {
+        Text(
+            text = text,
+            style = MuxGridType.CardSubtitle,
+            color = MuxGridColors.TextPrimary.copy(alpha = MuxGridAlphas.SynopsisText),
+            lineHeight = 19.sp,
+        )
+    }
+}
+
+@Composable
 internal fun TvModalDialog(
     onDismissRequest: () -> Unit,
-    minWidth: Dp = 440.dp,
-    maxWidth: Dp = 680.dp,
+    minWidth: Dp = 560.dp,
+    maxWidth: Dp = 740.dp,
     borderColor: Color = MuxGridColors.HairlineBorder,
     borderWidth: Dp = MuxGridBorders.Hairline,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    // Guard against residual KeyDown repeats or KeyUp events when a dialog is opened by holding
+    // OK/Enter (long-press) on a remote control. Only a fresh KeyDown (repeatCount == 0) that
+    // started after this dialog opened can arm a confirm click inside the dialog.
+    val dialogOpenedAtUptimeMs = remember { SystemClock.uptimeMillis() }
+    var armedByFreshConfirmKeyDown by remember { mutableStateOf(false) }
+
     Dialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -422,6 +504,39 @@ internal fun TvModalDialog(
                 .clip(MuxGridShapes.Dialog)
                 .background(MuxGridColors.CardSurfaceElevated)
                 .border(borderWidth, borderColor, MuxGridShapes.Dialog)
+                .onPreviewKeyEvent { keyEvent ->
+                    val native = keyEvent.nativeKeyEvent
+                    val isConfirmKey = when (native.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_CENTER,
+                        KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_NUMPAD_ENTER,
+                        KeyEvent.KEYCODE_SPACE,
+                        KeyEvent.KEYCODE_BUTTON_A -> true
+                        else -> false
+                    }
+                    if (!isConfirmKey) return@onPreviewKeyEvent false
+
+                    val startedBeforeDialogOpen = native.downTime < dialogOpenedAtUptimeMs + 160L ||
+                        SystemClock.uptimeMillis() - dialogOpenedAtUptimeMs < 180L
+                    when (keyEvent.type) {
+                        KeyEventType.KeyDown -> {
+                            if (startedBeforeDialogOpen || native.repeatCount > 0) {
+                                return@onPreviewKeyEvent !armedByFreshConfirmKeyDown
+                            }
+                            armedByFreshConfirmKeyDown = true
+                            false
+                        }
+                        KeyEventType.KeyUp -> {
+                            if (!armedByFreshConfirmKeyDown || startedBeforeDialogOpen) {
+                                armedByFreshConfirmKeyDown = false
+                                return@onPreviewKeyEvent true
+                            }
+                            armedByFreshConfirmKeyDown = false
+                            false
+                        }
+                        else -> false
+                    }
+                }
                 .verticalScroll(rememberScrollState())
                 .padding(22.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -758,10 +873,8 @@ private fun TvContent(
                                 val tags by repository.tags.collectAsState()
                                 val nowNextMap by repository.nowNextByChannel.collectAsState()
                                 val dvrEntries by repository.dvrEntries.collectAsState()
-                                val activeRecordingsByChannel = remember(dvrEntries) {
-                                    dvrEntries.values
-                                        .filter { it.state == DvrState.RECORDING }
-                                        .associateBy { it.channelId }
+                                val activeRecordingsByChannel = remember(dvrEntries, nowNextMap) {
+                                    buildActiveRecordingsByChannel(dvrEntries, nowNextMap)
                                 }
                                 val nowEpochSec = rememberNowEpochSec(offsetMs)
                                 TvLiveChannelsTab(
@@ -772,6 +885,7 @@ private fun TvContent(
                                     activeFilter = activeFilter,
                                     favorites = favorites,
                                     nowNextMap = nowNextMap,
+                                    dvrEntries = dvrEntries,
                                     activeRecordingsByChannel = activeRecordingsByChannel,
                                     nowEpochSec = nowEpochSec,
                                     imageLoader = repository.imageLoader,
@@ -794,6 +908,20 @@ private fun TvContent(
                                     onToggleFavorite = { channel ->
                                         scope.launch { repository.toggleFavorite(channel.id) }
                                     },
+                                    onOpenGuideForChannel = { channel ->
+                                        focusMemory.liveChannelId = channel.id
+                                        focusMemory.guideTarget = TvGuideFocusTarget(
+                                            channelId = channel.id,
+                                            eventId = nowNextMap[channel.id]?.now?.id,
+                                        )
+                                        focusMemory.guideWindowStartEpochSec = nowEpochSec
+                                        hasDeliveredInitialContentFocus = true
+                                        activeTab = MainTab.GUIDE
+                                        contentFocusRequestNonce++
+                                    },
+                                    onRecordEvent = { eventId -> repository.scheduleRecording(eventId) },
+                                    onStopRecording = { dvrId -> repository.stopRecording(dvrId) },
+                                    onCancelRecording = { dvrId -> repository.cancelRecording(dvrId) },
                                 )
                             }
                             MainTab.GUIDE -> {
@@ -936,6 +1064,11 @@ private fun TvContent(
             val zapList = filteredChannels.ifEmpty { channels }
             val activeChannel = channels.firstOrNull { it.id == playbackState.channelId }
             val activeNowNext = activeChannel?.let { nowNextMap[it.id] }
+            val activeRecording = remember(activeChannel?.id, dvrEntries, activeNowNext?.now?.id, activeNowNext?.now?.dvrId) {
+                activeChannel?.let { ch ->
+                    findActiveRecordingForChannel(ch.id, dvrEntries, activeNowNext?.now)
+                }
+            }
 
             MuxGridTheme(isTv = true, darkTheme = true) {
                 TvPlayerScreen(
@@ -943,6 +1076,7 @@ private fun TvContent(
                     playbackState = playbackState,
                     activeChannel = activeChannel,
                     nowNext = activeNowNext,
+                    activeRecording = activeRecording,
                     channels = zapList,
                     nowNextMap = nowNextMap,
                     nowEpochSec = nowEpochSec,
@@ -951,6 +1085,9 @@ private fun TvContent(
                     canZap = zapList.size > 1,
                     onSelectChannel = { channel ->
                         playbackEngine.playChannel(channel, hwDecPreset)
+                    },
+                    onPlayRecording = { entry, startPosSec ->
+                        playbackEngine.playDvrEntry(entry, activeChannel, hwDecPreset, startPosSec)
                     },
                     onZapDelta = { delta ->
                         if (zapList.isNotEmpty()) {
@@ -1187,7 +1324,7 @@ private fun TvRailItem(
     }
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class, ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalTvMaterial3Api::class, ExperimentalComposeUiApi::class, ExperimentalLayoutApi::class)
 @Composable
 private fun TvLiveChannelsTab(
     connectionState: ConnectionState,
@@ -1197,6 +1334,7 @@ private fun TvLiveChannelsTab(
     activeFilter: LiveFilter,
     favorites: Set<Long>,
     nowNextMap: Map<Long, NowNextProgram>,
+    dvrEntries: Map<Long, DvrEntry>,
     activeRecordingsByChannel: Map<Long, DvrEntry>,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
@@ -1207,13 +1345,32 @@ private fun TvLiveChannelsTab(
     onChannelClick: (Channel) -> Unit,
     onPlayRecording: (DvrEntry, Channel, Long) -> Unit,
     onToggleFavorite: (Channel) -> Unit,
+    onOpenGuideForChannel: (Channel) -> Unit,
+    onRecordEvent: suspend (Long) -> Result<Long>,
+    onStopRecording: suspend (Long) -> Result<Unit>,
+    onCancelRecording: suspend (Long) -> Result<Unit>,
 ) {
+    val scope = rememberCoroutineScope()
+    val dvrIndex = remember(dvrEntries) { DvrLookupIndex(dvrEntries) }
     val activeFilterFocusRequester = remember { FocusRequester() }
     val channelFocusRequesters = remember { mutableMapOf<Long, FocusRequester>() }
     var actionChannelId by remember { mutableStateOf<Long?>(null) }
+    var wasActionDialogOpen by remember { mutableStateOf(false) }
+    var localFocusRestoreNonce by remember { mutableIntStateOf(0) }
+    var pendingConfirm by remember { mutableStateOf<Pair<DvrConfirmKind, DvrEntry>?>(null) }
+    var actionBusy by remember { mutableStateOf(false) }
+    var actionError by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(focusRequestNonce) {
-        if (focusRequestNonce == 0) return@LaunchedEffect
+    LaunchedEffect(actionChannelId) {
+        val isOpen = actionChannelId != null
+        if (!isOpen && wasActionDialogOpen) {
+            localFocusRestoreNonce++
+        }
+        wasActionDialogOpen = isOpen
+    }
+
+    LaunchedEffect(focusRequestNonce, localFocusRestoreNonce) {
+        if (focusRequestNonce == 0 && localFocusRestoreNonce == 0) return@LaunchedEffect
         if (channels.isEmpty()) {
             runCatching { activeFilterFocusRequester.requestFocus() }
             return@LaunchedEffect
@@ -1323,11 +1480,9 @@ private fun TvLiveChannelsTab(
                         onFocused = { focusMemory.liveChannelId = channel.id },
                         onChannelClick = onChannelClick,
                         onLongClick = { ch ->
-                            if (activeRecordingsByChannel[ch.id] != null) {
-                                actionChannelId = ch.id
-                            } else {
-                                onToggleFavorite(ch)
-                            }
+                            focusMemory.liveChannelId = ch.id
+                            actionError = null
+                            actionChannelId = ch.id
                         },
                     )
                 }
@@ -1336,101 +1491,324 @@ private fun TvLiveChannelsTab(
     }
 
     val actionChannel = actionChannelId?.let { id -> channels.firstOrNull { it.id == id } }
-    val actionRecording = actionChannel?.let { activeRecordingsByChannel[it.id] }
-    if (actionChannel != null && actionRecording != null) {
-        val watchStartFocusRequester = remember { FocusRequester() }
+    if (actionChannel != null) {
+        val primaryFocusRequester = remember { FocusRequester() }
+        val chNowNext = nowNextMap[actionChannel.id]
+        val nowEvent = chNowNext?.now
+        val activeRecording = activeRecordingsByChannel[actionChannel.id]
+        val linkedNowDvr = activeRecording ?: nowEvent?.let { dvrIndex.findMatch(it) }
         val isFav = actionChannel.id in favorites
-        LaunchedEffect(actionChannel.id) {
-            runCatching { watchStartFocusRequester.requestFocus() }
+        val isLiveNow = nowEvent != null && nowEpochSec in nowEvent.startEpochSec until nowEvent.stopEpochSec
+        val headlineText = if (actionChannel.number > 0) {
+            "${actionChannel.formattedNumber} · ${actionChannel.name}"
+        } else {
+            actionChannel.name
         }
-        BackHandler { actionChannelId = null }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MuxGridColors.OverlayBackdrop)
-                .padding(36.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(
-                modifier = Modifier
-                    .widthIn(min = 360.dp, max = 500.dp)
-                    .fillMaxWidth()
-                    .clip(MuxGridShapes.Dialog)
-                    .background(MuxGridColors.CardSurfaceElevated)
-                    .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
-                    .focusProperties { this.onExit = { cancelFocusChange() } }
-                    .focusGroup()
-                    .padding(22.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text(
-                        text = actionChannel.name,
-                        style = MuxGridType.Title,
-                        fontSize = 18.sp,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    DvrStateBadge(state = DvrState.RECORDING)
-                }
-                Text(
-                    text = actionRecording.title,
-                    style = MuxGridType.CardSubtitle,
-                    color = MuxGridColors.TextSecondary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Button(
-                    onClick = {
-                        actionChannelId = null
-                        onPlayRecording(actionRecording, actionChannel, 0L)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(watchStartFocusRequester),
-                    shape = tvButtonShape(),
-                    colors = tvPrimaryButtonColors(),
-                ) {
-                    Icon(MuxGridIcons.Replay10, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Watch from Start (Recording)", fontWeight = FontWeight.SemiBold)
-                }
-                Button(
-                    onClick = {
-                        actionChannelId = null
-                        onChannelClick(actionChannel)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = tvButtonShape(),
-                    colors = tvSecondaryButtonColors(),
-                ) {
-                    Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Watch Live")
-                }
-                Button(
-                    onClick = {
-                        onToggleFavorite(actionChannel)
-                        actionChannelId = null
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = tvButtonShape(),
-                    colors = tvSecondaryButtonColors(),
-                ) {
-                    Icon(
-                        imageVector = if (isFav) MuxGridIcons.StarFilled else MuxGridIcons.Star,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (isFav) "Remove from Favorites" else "Add to Favorites")
-                }
+        val metaText = when {
+            nowEvent != null -> formatProgramModalMeta(
+                channelName = nowEvent.title,
+                startEpochSec = nowEvent.startEpochSec,
+                stopEpochSec = nowEvent.stopEpochSec,
+                nowEpochSec = nowEpochSec,
+            )
+            activeRecording != null -> formatProgramModalMeta(
+                channelName = activeRecording.title,
+                startEpochSec = activeRecording.startEpochSec,
+                stopEpochSec = activeRecording.stopEpochSec,
+                nowEpochSec = nowEpochSec,
+                dataSizeBytes = activeRecording.dataSize,
+            )
+            actionChannel.isRadio -> "Live Radio"
+            else -> "Live TV"
+        }
+
+        val (subtitleText, descText) = resolveModalSubtitleAndDescription(
+            subtitle = nowEvent?.subtitle ?: activeRecording?.subtitle,
+            description = nowEvent?.description ?: activeRecording?.description,
+            summary = nowEvent?.summary,
+        )
+
+        LaunchedEffect(actionChannel.id, pendingConfirm == null) {
+            if (pendingConfirm == null) {
+                runCatching { primaryFocusRequester.requestFocus() }
             }
         }
+
+        TvModalDialog(
+            onDismissRequest = { if (!actionBusy) actionChannelId = null },
+        ) {
+            MuxGridDetailModalLayout(
+                isSplitLayout = true,
+                actionsColumnWidth = 224.dp,
+                detailsContent = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        ChannelPiconBadge(
+                            channelNumber = actionChannel.formattedNumber,
+                            channelName = actionChannel.name,
+                            piconModel = actionChannel.icon?.let { PiconModel(actionChannel.id, it) },
+                            imageLoader = imageLoader,
+                            size = 44.dp,
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = headlineText,
+                                style = MuxGridType.Title,
+                                fontSize = 18.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = metaText,
+                                style = MuxGridType.TabularSmall,
+                            )
+                        }
+                        if (linkedNowDvr != null) {
+                            DvrStateBadge(state = linkedNowDvr.state, isWatched = linkedNowDvr.isWatched)
+                        }
+                    }
+
+                    if (nowEvent != null && isLiveNow) {
+                        EpgLiveProgressSection(
+                            event = nowEvent,
+                            nowEpochSec = nowEpochSec,
+                            isRecording = activeRecording != null,
+                        )
+                    }
+
+                    if (subtitleText != null) {
+                        Text(
+                            text = subtitleText,
+                            style = MuxGridType.CardTitle,
+                            color = MuxGridColors.AccentSoft,
+                        )
+                    }
+
+                    if (descText != null) {
+                        TvScrollableDescriptionBox(
+                            text = descText,
+                            resetKey = actionChannel.id to (nowEvent?.id ?: activeRecording?.id),
+                        )
+                    }
+
+                    chNowNext?.next?.let { nextEv ->
+                        Text(
+                            text = "Next ${formatEpochHm(nextEv.startEpochSec)} · ${nextEv.title}",
+                            style = MuxGridType.TabularSmall,
+                            color = MuxGridColors.TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    actionError?.let { err ->
+                        Text(err, color = MuxGridColors.CoralLive, fontSize = 13.sp)
+                    }
+                },
+                actionsContent = {
+                    Button(
+                        enabled = !actionBusy,
+                        onClick = {
+                            actionChannelId = null
+                            onChannelClick(actionChannel)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(primaryFocusRequester),
+                        shape = tvButtonShape(),
+                        colors = tvPrimaryButtonColors(),
+                    ) {
+                        Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Watch Live", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                    }
+
+                    if (activeRecording != null) {
+                        Button(
+                            enabled = !actionBusy,
+                            onClick = {
+                                actionChannelId = null
+                                onPlayRecording(activeRecording, actionChannel, activeRecording.effectiveStartSec)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = tvButtonShape(),
+                            colors = tvDialogSecondaryButtonColors(),
+                        ) {
+                            Icon(
+                                imageVector = if (activeRecording.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = if (activeRecording.hasResumePosition) "Resume Chase Play" else "Watch from Start",
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                        if (activeRecording.hasResumePosition) {
+                            Button(
+                                enabled = !actionBusy,
+                                onClick = {
+                                    actionChannelId = null
+                                    onPlayRecording(activeRecording, actionChannel, 0L)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = tvButtonShape(),
+                                colors = tvDialogSecondaryButtonColors(),
+                            ) {
+                                Icon(MuxGridIcons.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Start Over", maxLines = 1, softWrap = false)
+                            }
+                        }
+                        Button(
+                            enabled = !actionBusy,
+                            onClick = { pendingConfirm = DvrConfirmKind.STOP_AND_SAVE to activeRecording },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = tvButtonShape(),
+                            colors = tvDialogSecondaryButtonColors(),
+                        ) {
+                            Icon(MuxGridIcons.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Stop & Save", maxLines = 1, softWrap = false)
+                        }
+                        Button(
+                            enabled = !actionBusy,
+                            onClick = { pendingConfirm = DvrConfirmKind.ABORT_RECORDING to activeRecording },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = tvButtonShape(),
+                            colors = tvDialogDestructiveButtonColors(),
+                        ) {
+                            Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Abort Recording", maxLines = 1, softWrap = false)
+                        }
+                    } else if (linkedNowDvr?.state == DvrState.SCHEDULED) {
+                        Button(
+                            enabled = !actionBusy,
+                            onClick = { pendingConfirm = DvrConfirmKind.CANCEL_TIMER to linkedNowDvr },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = tvButtonShape(),
+                            colors = tvDialogDestructiveButtonColors(),
+                        ) {
+                            Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Cancel Timer", maxLines = 1, softWrap = false)
+                        }
+                    } else if (nowEvent != null) {
+                        Button(
+                            enabled = !actionBusy,
+                            onClick = {
+                                scope.launch {
+                                    actionBusy = true
+                                    actionError = null
+                                    try {
+                                        onRecordEvent(nowEvent.id)
+                                            .onSuccess { actionChannelId = null }
+                                            .onFailure { actionError = it.message ?: "Failed to schedule recording" }
+                                    } finally {
+                                        actionBusy = false
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = tvButtonShape(),
+                            colors = tvDialogSecondaryButtonColors(),
+                        ) {
+                            Icon(MuxGridIcons.Record, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Record Now", maxLines = 1, softWrap = false)
+                        }
+                    }
+
+                    Button(
+                        enabled = !actionBusy,
+                        onClick = {
+                            onToggleFavorite(actionChannel)
+                            actionChannelId = null
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = tvButtonShape(),
+                        colors = tvDialogSecondaryButtonColors(),
+                    ) {
+                        Icon(
+                            imageVector = if (isFav) MuxGridIcons.StarFilled else MuxGridIcons.Star,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = if (isFav) "Remove from Favorites" else "Add to Favorites",
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+
+                    Button(
+                        enabled = !actionBusy,
+                        onClick = {
+                            actionChannelId = null
+                            onOpenGuideForChannel(actionChannel)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = tvButtonShape(),
+                        colors = tvDialogSecondaryButtonColors(),
+                    ) {
+                        Icon(MuxGridIcons.Guide, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("View in Guide", maxLines = 1, softWrap = false)
+                    }
+
+                    Button(
+                        enabled = !actionBusy,
+                        onClick = { actionChannelId = null },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = tvButtonShape(),
+                        colors = tvDialogSecondaryButtonColors(),
+                    ) {
+                        Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Close", maxLines = 1, softWrap = false)
+                    }
+                },
+            )
+        }
+    }
+
+    pendingConfirm?.let { (kind, entry) ->
+        val spec = dvrConfirmSpec(kind, entry.title)
+        TvConfirmDialog(
+            title = spec.title,
+            message = spec.message,
+            confirmLabel = spec.confirmLabel,
+            isDestructive = spec.isDestructive,
+            enabled = !actionBusy,
+            onDismiss = { pendingConfirm = null },
+            onConfirm = {
+                pendingConfirm = null
+                scope.launch {
+                    actionBusy = true
+                    actionError = null
+                    try {
+                        val result = when (kind) {
+                            DvrConfirmKind.STOP_AND_SAVE -> onStopRecording(entry.id)
+                            DvrConfirmKind.ABORT_RECORDING, DvrConfirmKind.CANCEL_TIMER -> onCancelRecording(entry.id)
+                            else -> Result.success(Unit)
+                        }
+                        result
+                            .onSuccess { actionChannelId = null }
+                            .onFailure { err ->
+                                actionError = err.message ?: spec.failureFallbackMessage
+                            }
+                    } finally {
+                        actionBusy = false
+                    }
+                }
+            },
+        )
     }
 }
 
@@ -1746,7 +2124,11 @@ private fun TvSettingsTab(
 
     debugReport?.let { report ->
         val copyFocusRequester = remember { FocusRequester() }
+        val reportScrollState = rememberScrollState()
+        var isReportFocused by remember { mutableStateOf(false) }
+        val scrollStepPx = with(LocalDensity.current) { 72.dp.toPx() }
         LaunchedEffect(report) {
+            reportScrollState.scrollTo(0)
             runCatching { copyFocusRequester.requestFocus() }
         }
         TvModalDialog(
@@ -1769,9 +2151,33 @@ private fun TvSettingsTab(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(max = 300.dp)
                     .clip(MuxGridShapes.Sm)
                     .background(MuxGridColors.CardSurface)
-                    .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Sm)
+                    .border(
+                        width = if (isReportFocused) MuxGridBorders.Focused else MuxGridBorders.Divider,
+                        color = if (isReportFocused) MuxGridColors.FocusBorder else MuxGridColors.HairlineBorder,
+                        shape = MuxGridShapes.Sm,
+                    )
+                    .onFocusChanged { isReportFocused = it.isFocused }
+                    .onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        when (event.key) {
+                            Key.DirectionDown -> {
+                                if (!reportScrollState.canScrollForward) return@onPreviewKeyEvent false
+                                scope.launch { reportScrollState.scrollBy(scrollStepPx) }
+                                true
+                            }
+                            Key.DirectionUp -> {
+                                if (!reportScrollState.canScrollBackward) return@onPreviewKeyEvent false
+                                scope.launch { reportScrollState.scrollBy(-scrollStepPx) }
+                                true
+                            }
+                            else -> false
+                        }
+                    }
+                    .focusable()
+                    .verticalScroll(reportScrollState)
                     .padding(12.dp),
             ) {
                 Text(

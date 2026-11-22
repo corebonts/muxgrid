@@ -63,6 +63,7 @@ import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridAlphas
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridDetailModalLayout
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridRadii
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
@@ -73,6 +74,8 @@ import io.github.corebonts.muxgrid.core.designsystem.formatDurationMinutes
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationMs
 import io.github.corebonts.muxgrid.core.designsystem.formatEpochDayHm
 import io.github.corebonts.muxgrid.core.designsystem.formatFileSize
+import io.github.corebonts.muxgrid.core.designsystem.formatProgramModalMeta
+import io.github.corebonts.muxgrid.core.designsystem.resolveModalSubtitleAndDescription
 import io.github.corebonts.muxgrid.core.designsystem.syncStatusMessage
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ConnectionState
@@ -246,7 +249,12 @@ internal fun TvRecordingsScreen(
     val selectedEntry = selectedEntryId?.let { dvrEntries[it] }
     selectedEntry?.let { entry ->
         val ch = channelById[entry.channelId]
+        val isLiveWindow = nowEpochSec in entry.startEpochSec until entry.stopEpochSec
         val primaryFocusRequester = remember { FocusRequester() }
+        val (subtitleText, descText) = resolveModalSubtitleAndDescription(
+            subtitle = entry.subtitle,
+            description = entry.description,
+        )
         LaunchedEffect(entry.id, pendingConfirm == null) {
             if (pendingConfirm == null) {
                 runCatching { primaryFocusRequester.requestFocus() }
@@ -256,127 +264,152 @@ internal fun TvRecordingsScreen(
         TvModalDialog(
             onDismissRequest = { if (!actionBusy) selectedEntryId = null },
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (ch != null) {
-                    ChannelPiconBadge(
-                        channelNumber = ch.formattedNumber,
-                        channelName = ch.name,
-                        piconModel = ch.icon?.let { PiconModel(ch.id, it) },
-                        imageLoader = imageLoader,
-                        size = 44.dp,
-                    )
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(entry.title, style = MuxGridType.Title, fontSize = 18.sp)
-                    val meta = listOfNotNull(
-                        ch?.name,
-                        formatEpochDayHm(entry.startEpochSec, nowEpochSec),
-                        formatDurationMinutes(entry.startEpochSec, entry.stopEpochSec),
-                        formatFileSize(entry.dataSize).takeIf { it.isNotEmpty() },
-                    ).joinToString(" · ")
-                    Text(meta, style = MuxGridType.TabularSmall)
-                }
-                DvrStateBadge(state = entry.state, isWatched = entry.isWatched)
-            }
-
-            if (!entry.description.isNullOrBlank()) {
-                Text(
-                    text = entry.description!!,
-                    style = MuxGridType.CardSubtitle,
-                    color = MuxGridColors.TextPrimary.copy(alpha = MuxGridAlphas.BodyText),
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-
-            actionError?.let { err ->
-                Text(err, color = MuxGridColors.CoralLive, fontSize = 13.sp)
-            }
-
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                when (entry.state) {
-                    DvrState.RECORDING -> {
-                        Button(
-                            enabled = !actionBusy,
-                            onClick = {
-                                selectedEntryId = null
-                                onPlayRecording(entry, ch, entry.effectiveStartSec)
-                            },
-                            modifier = Modifier.focusRequester(primaryFocusRequester),
-                            shape = tvButtonShape(),
-                            colors = tvPrimaryButtonColors(),
-                        ) {
-                            Icon(
-                                imageVector = if (entry.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                text = if (entry.hasResumePosition) "Resume Chase Play" else "Watch from Start",
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                softWrap = false,
-                            )
-                        }
+            MuxGridDetailModalLayout(
+                isSplitLayout = true,
+                actionsColumnWidth = 224.dp,
+                detailsContent = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
                         if (ch != null) {
-                            Button(
-                                enabled = !actionBusy,
-                                onClick = {
-                                    selectedEntryId = null
-                                    onWatchLiveChannel(ch)
-                                },
-                                shape = tvButtonShape(),
-                                colors = tvDialogSecondaryButtonColors(),
+                            ChannelPiconBadge(
+                                channelNumber = ch.formattedNumber,
+                                channelName = ch.name,
+                                piconModel = ch.icon?.let { PiconModel(ch.id, it) },
+                                imageLoader = imageLoader,
+                                size = 44.dp,
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(entry.title, style = MuxGridType.Title, fontSize = 18.sp)
+                            val meta = formatProgramModalMeta(
+                                channelName = ch?.name,
+                                startEpochSec = entry.startEpochSec,
+                                stopEpochSec = entry.stopEpochSec,
+                                nowEpochSec = nowEpochSec,
+                                dataSizeBytes = entry.dataSize,
+                            )
+                            Text(meta, style = MuxGridType.TabularSmall)
+                        }
+                        DvrStateBadge(
+                            state = if (entry.isFileMissing) DvrState.INVALID else entry.state,
+                            isWatched = entry.isWatched,
+                        )
+                    }
+
+                    if (entry.state == DvrState.RECORDING) {
+                        val dur = entry.durationSec.coerceAtLeast(1L)
+                        val elapsed = (nowEpochSec - entry.startEpochSec).coerceIn(0L, dur)
+                        val remMins = ((entry.stopEpochSec - nowEpochSec).coerceAtLeast(0L) + 59L) / 60L
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(MuxGridIcons.Live, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Watch Live", maxLines = 1, softWrap = false)
+                                Text(
+                                    text = "RECORDING NOW · ${formatDurationMs(elapsed * 1000L)}",
+                                    color = MuxGridColors.CoralLive,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    text = "${remMins}m left",
+                                    style = MuxGridType.TabularSmall,
+                                    color = MuxGridColors.TextSecondary,
+                                )
                             }
+                            LiveProgressBar(
+                                progress = entry.recordingProgressFraction(nowEpochSec),
+                                fillColor = MuxGridColors.CoralLive,
+                                height = 3.dp,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                         }
-                        Button(
-                            enabled = !actionBusy,
-                            onClick = { pendingConfirm = DvrConfirmKind.STOP_AND_SAVE to entry },
-                            shape = tvButtonShape(),
-                            colors = tvDialogSecondaryButtonColors(),
+                    } else if (entry.state == DvrState.COMPLETED && entry.hasResumePosition && !entry.isFileMissing) {
+                        val remMins = ((entry.durationSec - entry.playPositionSec).coerceAtLeast(0L) + 59L) / 60L
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(5.dp),
                         ) {
-                            Icon(MuxGridIcons.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Stop & Save", maxLines = 1, softWrap = false)
-                        }
-                        Button(
-                            enabled = !actionBusy,
-                            onClick = { pendingConfirm = DvrConfirmKind.ABORT_RECORDING to entry },
-                            shape = tvButtonShape(),
-                            colors = tvDialogDestructiveButtonColors(),
-                        ) {
-                            Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Abort", maxLines = 1, softWrap = false)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "Resume at ${formatDurationMs(entry.playPositionSec * 1000L)}",
+                                    style = MuxGridType.TabularSmall,
+                                    color = MuxGridColors.AccentSoft,
+                                )
+                                Text(
+                                    text = "${remMins}m left",
+                                    style = MuxGridType.TabularSmall,
+                                    color = MuxGridColors.TextSecondary,
+                                )
+                            }
+                            LiveProgressBar(
+                                progress = entry.resumeProgressFraction(),
+                                height = 3.dp,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                         }
                     }
-                    DvrState.COMPLETED -> {
-                        if (!entry.isFileMissing) {
+
+                    if (subtitleText != null) {
+                        Text(
+                            text = subtitleText,
+                            style = MuxGridType.CardTitle,
+                            color = MuxGridColors.AccentSoft,
+                        )
+                    }
+
+                    if (descText != null) {
+                        TvScrollableDescriptionBox(
+                            text = descText,
+                            resetKey = entry.id,
+                        )
+                    }
+
+                    if (!entry.error.isNullOrBlank()) {
+                        Text(
+                            text = entry.error!!,
+                            color = MuxGridColors.CoralLive,
+                            fontSize = 13.sp,
+                        )
+                    }
+
+                    actionError?.let { err ->
+                        Text(err, color = MuxGridColors.CoralLive, fontSize = 13.sp)
+                    }
+                },
+                actionsContent = {
+                    when (entry.state) {
+                        DvrState.RECORDING -> {
                             Button(
                                 enabled = !actionBusy,
                                 onClick = {
                                     selectedEntryId = null
                                     onPlayRecording(entry, ch, entry.effectiveStartSec)
                                 },
-                                modifier = Modifier.focusRequester(primaryFocusRequester),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(primaryFocusRequester),
                                 shape = tvButtonShape(),
                                 colors = tvPrimaryButtonColors(),
                             ) {
-                                Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = if (entry.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
                                 Text(
-                                    text = if (entry.hasResumePosition) "Resume" else "Play",
+                                    text = if (entry.hasResumePosition) "Resume Chase Play" else "Watch from Start",
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
                                     softWrap = false,
@@ -389,87 +422,232 @@ internal fun TvRecordingsScreen(
                                         selectedEntryId = null
                                         onPlayRecording(entry, ch, 0L)
                                     },
+                                    modifier = Modifier.fillMaxWidth(),
                                     shape = tvButtonShape(),
                                     colors = tvDialogSecondaryButtonColors(),
                                 ) {
                                     Icon(MuxGridIcons.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(4.dp))
+                                    Spacer(Modifier.width(6.dp))
                                     Text("Start Over", maxLines = 1, softWrap = false)
+                                }
+                            }
+                            if (ch != null) {
+                                Button(
+                                    enabled = !actionBusy,
+                                    onClick = {
+                                        selectedEntryId = null
+                                        onWatchLiveChannel(ch)
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = tvButtonShape(),
+                                    colors = tvDialogSecondaryButtonColors(),
+                                ) {
+                                    Icon(MuxGridIcons.Live, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Watch Live", maxLines = 1, softWrap = false)
                                 }
                             }
                             Button(
                                 enabled = !actionBusy,
-                                onClick = {
-                                    scope.launch {
-                                        actionBusy = true
-                                        actionError = null
-                                        try {
-                                            onToggleWatched(entry.id, !entry.isWatched)
-                                                .onSuccess { selectedEntryId = null }
-                                                .onFailure { actionError = it.message ?: "Failed to update" }
-                                        } finally {
-                                            actionBusy = false
-                                        }
-                                    }
-                                },
+                                onClick = { pendingConfirm = DvrConfirmKind.STOP_AND_SAVE to entry },
+                                modifier = Modifier.fillMaxWidth(),
                                 shape = tvButtonShape(),
                                 colors = tvDialogSecondaryButtonColors(),
                             ) {
-                                Icon(MuxGridIcons.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text(if (entry.isWatched) "Unwatched" else "Watched", maxLines = 1, softWrap = false)
+                                Icon(MuxGridIcons.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Stop & Save", maxLines = 1, softWrap = false)
+                            }
+                            Button(
+                                enabled = !actionBusy,
+                                onClick = { pendingConfirm = DvrConfirmKind.ABORT_RECORDING to entry },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = tvButtonShape(),
+                                colors = tvDialogDestructiveButtonColors(),
+                            ) {
+                                Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Abort Recording", maxLines = 1, softWrap = false)
                             }
                         }
-                        Button(
-                            enabled = !actionBusy,
-                            onClick = { pendingConfirm = DvrConfirmKind.DELETE_RECORDING to entry },
-                            modifier = if (entry.isFileMissing) Modifier.focusRequester(primaryFocusRequester) else Modifier,
-                            shape = tvButtonShape(),
-                            colors = tvDialogDestructiveButtonColors(),
-                        ) {
-                            Icon(MuxGridIcons.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Delete", maxLines = 1, softWrap = false)
+                        DvrState.COMPLETED -> {
+                            if (!entry.isFileMissing) {
+                                Button(
+                                    enabled = !actionBusy,
+                                    onClick = {
+                                        selectedEntryId = null
+                                        onPlayRecording(entry, ch, entry.effectiveStartSec)
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .focusRequester(primaryFocusRequester),
+                                    shape = tvButtonShape(),
+                                    colors = tvPrimaryButtonColors(),
+                                ) {
+                                    Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = if (entry.hasResumePosition) "Resume Recording" else "Play Recording",
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                    )
+                                }
+                                if (entry.hasResumePosition) {
+                                    Button(
+                                        enabled = !actionBusy,
+                                        onClick = {
+                                            selectedEntryId = null
+                                            onPlayRecording(entry, ch, 0L)
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = tvButtonShape(),
+                                        colors = tvDialogSecondaryButtonColors(),
+                                    ) {
+                                        Icon(MuxGridIcons.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Start Over", maxLines = 1, softWrap = false)
+                                    }
+                                }
+                                Button(
+                                    enabled = !actionBusy,
+                                    onClick = {
+                                        scope.launch {
+                                            actionBusy = true
+                                            actionError = null
+                                            try {
+                                                onToggleWatched(entry.id, !entry.isWatched)
+                                                    .onSuccess { selectedEntryId = null }
+                                                    .onFailure { actionError = it.message ?: "Failed to update watched state" }
+                                            } finally {
+                                                actionBusy = false
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = tvButtonShape(),
+                                    colors = tvDialogSecondaryButtonColors(),
+                                ) {
+                                    Icon(MuxGridIcons.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = if (entry.isWatched) "Mark as Unwatched" else "Mark as Watched",
+                                        maxLines = 1,
+                                        softWrap = false,
+                                    )
+                                }
+                            }
+                            Button(
+                                enabled = !actionBusy,
+                                onClick = { pendingConfirm = DvrConfirmKind.DELETE_RECORDING to entry },
+                                modifier = if (entry.isFileMissing) {
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .focusRequester(primaryFocusRequester)
+                                } else {
+                                    Modifier.fillMaxWidth()
+                                },
+                                shape = tvButtonShape(),
+                                colors = tvDialogDestructiveButtonColors(),
+                            ) {
+                                Icon(MuxGridIcons.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Delete Recording", maxLines = 1, softWrap = false)
+                            }
+                        }
+                        DvrState.SCHEDULED -> {
+                            if (ch != null) {
+                                Button(
+                                    enabled = !actionBusy,
+                                    onClick = {
+                                        selectedEntryId = null
+                                        onWatchLiveChannel(ch)
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .focusRequester(primaryFocusRequester),
+                                    shape = tvButtonShape(),
+                                    colors = tvPrimaryButtonColors(),
+                                ) {
+                                    Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = if (isLiveWindow) "Watch Live" else "Watch Channel",
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                    )
+                                }
+                            }
+                            Button(
+                                enabled = !actionBusy,
+                                onClick = { pendingConfirm = DvrConfirmKind.CANCEL_TIMER to entry },
+                                modifier = if (ch == null) {
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .focusRequester(primaryFocusRequester)
+                                } else {
+                                    Modifier.fillMaxWidth()
+                                },
+                                shape = tvButtonShape(),
+                                colors = tvDialogDestructiveButtonColors(),
+                            ) {
+                                Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Cancel Timer", maxLines = 1, softWrap = false)
+                            }
+                        }
+                        DvrState.MISSED, DvrState.INVALID -> {
+                            if (ch != null) {
+                                Button(
+                                    enabled = !actionBusy,
+                                    onClick = {
+                                        selectedEntryId = null
+                                        onWatchLiveChannel(ch)
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .focusRequester(primaryFocusRequester),
+                                    shape = tvButtonShape(),
+                                    colors = tvPrimaryButtonColors(),
+                                ) {
+                                    Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Watch Channel", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                                }
+                            }
+                            Button(
+                                enabled = !actionBusy,
+                                onClick = { pendingConfirm = DvrConfirmKind.DELETE_RECORDING to entry },
+                                modifier = if (ch == null) {
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .focusRequester(primaryFocusRequester)
+                                } else {
+                                    Modifier.fillMaxWidth()
+                                },
+                                shape = tvButtonShape(),
+                                colors = tvDialogDestructiveButtonColors(),
+                            ) {
+                                Icon(MuxGridIcons.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Delete Recording", maxLines = 1, softWrap = false)
+                            }
                         }
                     }
-                    DvrState.SCHEDULED -> {
-                        Button(
-                            enabled = !actionBusy,
-                            onClick = { pendingConfirm = DvrConfirmKind.CANCEL_TIMER to entry },
-                            modifier = Modifier.focusRequester(primaryFocusRequester),
-                            shape = tvButtonShape(),
-                            colors = tvDialogDestructiveButtonColors(),
-                        ) {
-                            Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Cancel Timer", maxLines = 1, softWrap = false)
-                        }
+                    Button(
+                        enabled = !actionBusy,
+                        onClick = { selectedEntryId = null },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = tvButtonShape(),
+                        colors = tvDialogSecondaryButtonColors(),
+                    ) {
+                        Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Close", maxLines = 1, softWrap = false)
                     }
-                    else -> {
-                        Button(
-                            enabled = !actionBusy,
-                            onClick = { pendingConfirm = DvrConfirmKind.DELETE_RECORDING to entry },
-                            modifier = Modifier.focusRequester(primaryFocusRequester),
-                            shape = tvButtonShape(),
-                            colors = tvDialogDestructiveButtonColors(),
-                        ) {
-                            Icon(MuxGridIcons.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Remove", maxLines = 1, softWrap = false)
-                        }
-                    }
-                }
-                Button(
-                    enabled = !actionBusy,
-                    onClick = { selectedEntryId = null },
-                    shape = tvButtonShape(),
-                    colors = tvDialogSecondaryButtonColors(),
-                ) {
-                    Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Close", maxLines = 1, softWrap = false)
-                }
-            }
+                },
+            )
         }
     }
 
