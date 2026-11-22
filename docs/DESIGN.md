@@ -40,7 +40,7 @@ Navigation stays minimal and consistent across both form factors:
 1. **Live** — Channel cards/rows with Now/Next program, live progress bar, and one-tap/click playback.
 2. **Guide** — Electronic Program Guide (EPG) for browsing upcoming broadcasts and scheduling recordings.
 3. **Recordings** — Active (`Recording Now`), Completed (grouped cleanly by series/title), and Scheduled timers.
-4. **Settings** — Responsive full-width / two-column layout with Server card (connection status, error details, quick Retry & Edit), General (**Start Screen**, **Theme** `Auto` / `Light` / `Dark`), Decoder/Deinterlace preset, Timeshift cache limit, unified mobile **Background Playback** selector (`Off` / `Audio` / `PiP`), and **App Info** (version, build ABI/Git SHA, copyable debug report).
+4. **Settings** — Responsive full-width / two-column layout with Server card (connection status, error details, quick Retry & Edit), General (**Start Screen**, **Theme** `Auto` / `Light` / `Dark`), Decoder/Deinterlace preset, Timeshift cache limit, unified mobile **Background Playback** selector (`Off` / `Audio` / `PiP`), and **App Info** (version, build ABI/Git SHA, **Licenses & Notices** with offline GPLv3 / Apache-2.0 texts, copyable debug report).
 
 ---
 

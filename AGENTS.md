@@ -48,7 +48,7 @@ When deploying to multiple connected Android / Android TV devices:
 
 - **Prefer FOSS libraries:** Use Free and Open Source Software with licenses compatible with this project (Apache-2.0 source code; GPL-3.0-or-later distributed APKs due to `libmpv`/`FFmpeg`). Never introduce proprietary SDKs, closed-source binaries, or telemetry/analytics trackers.
 - **Justify every new dependency:** Do not add a third-party library for trivial functionality—such as a single utility method, small data transformation, or anything already handled by the Kotlin standard library, Jetpack/AndroidX, or existing libraries in [gradle/libs.versions.toml](gradle/libs.versions.toml). Only introduce a new library when it solves a substantial, non-trivial problem whose in-house maintenance cost would be disproportionate.
-- **Catalog & attribution:** Declare approved dependencies in [gradle/libs.versions.toml](gradle/libs.versions.toml) and update [NOTICE](NOTICE) / [README.md](README.md) when required by the library's license.
+- **Catalog & attribution:** Declare approved dependencies in [gradle/libs.versions.toml](gradle/libs.versions.toml) and update [NOTICE](NOTICE), [README.md](README.md), and `AppNotices.attributions` in [AppNotices.kt](core/model/src/main/kotlin/io/github/corebonts/muxgrid/core/model/AppNotices.kt) together when required by the library's license (`AppNoticesTest` verifies that `NOTICE` and `AppNotices.attributions` stay in sync).
 
 ## 5. Architecture & Code Conventions
 

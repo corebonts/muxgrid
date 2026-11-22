@@ -9,7 +9,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -66,7 +69,13 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -124,8 +133,11 @@ import io.github.corebonts.muxgrid.core.designsystem.icon
 import io.github.corebonts.muxgrid.core.designsystem.label
 import io.github.corebonts.muxgrid.core.designsystem.rememberNowEpochSec
 import io.github.corebonts.muxgrid.core.designsystem.serverHeadline
+import io.github.corebonts.muxgrid.core.model.AppAttribution
 import io.github.corebonts.muxgrid.core.model.AppBuildInfo
+import io.github.corebonts.muxgrid.core.model.AppNotices
 import io.github.corebonts.muxgrid.core.model.Channel
+import io.github.corebonts.muxgrid.core.model.GrowingRecordingPrebufferMode
 import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
@@ -648,6 +660,7 @@ private fun TvContent(
                                 val themeMode by repository.themeMode.collectAsState()
                                 val hwDecPreset by repository.hwDecPreset.collectAsState()
                                 val timeshiftWindow by repository.timeshiftWindow.collectAsState()
+                                val growingPrebufferMode by repository.growingRecordingPrebufferMode.collectAsState()
                                 TvSettingsTab(
                                     profile = currentProfile,
                                     connectionState = connectionState,
@@ -655,6 +668,7 @@ private fun TvContent(
                                     themeMode = themeMode,
                                     hwDecPreset = hwDecPreset,
                                     timeshiftWindow = timeshiftWindow,
+                                    growingPrebufferMode = growingPrebufferMode,
                                     appInfo = appInfo,
                                     focusMemory = focusMemory,
                                     focusRequestNonce = contentFocusRequestNonce,
@@ -670,6 +684,9 @@ private fun TvContent(
                                     },
                                     onSelectTimeshiftWindow = { window ->
                                         scope.launch { repository.setTimeshiftWindow(window) }
+                                    },
+                                    onSelectGrowingPrebufferMode = { mode ->
+                                        scope.launch { repository.setGrowingRecordingPrebufferMode(mode) }
                                     },
                                     onRetryConnect = {
                                         focusMemory.settingsTarget = TvSettingsFocusTarget.PRIMARY
@@ -1271,6 +1288,7 @@ private fun TvSettingsTab(
     themeMode: ThemeMode,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
+    growingPrebufferMode: GrowingRecordingPrebufferMode,
     appInfo: AppBuildInfo,
     focusMemory: TvFocusMemory,
     focusRequestNonce: Int,
@@ -1278,6 +1296,7 @@ private fun TvSettingsTab(
     onSelectThemeMode: (ThemeMode) -> Unit,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
+    onSelectGrowingPrebufferMode: (GrowingRecordingPrebufferMode) -> Unit,
     onRetryConnect: () -> Unit,
     onOpenServerSetup: () -> Unit,
 ) {
@@ -1285,6 +1304,7 @@ private fun TvSettingsTab(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var debugReport by remember { mutableStateOf<String?>(null) }
+    var showLicenses by remember { mutableStateOf(false) }
     val isServerError = connectionState is ConnectionState.Error
     val canRetryConnect = isServerError || connectionState is ConnectionState.Disconnected
     val reconnectFocusRequester = remember { FocusRequester() }
@@ -1303,13 +1323,15 @@ private fun TvSettingsTab(
         }
     }
 
-    val onOpenGithub: () -> Unit = {
+    val onOpenUrl: (String) -> Unit = { url ->
         runCatching {
-            uriHandler.openUri(appInfo.githubUrl)
+            uriHandler.openUri(url)
         }.onFailure {
-            Toast.makeText(context, appInfo.githubUrl, Toast.LENGTH_LONG).show()
+            Toast.makeText(context, url, Toast.LENGTH_LONG).show()
         }
     }
+    val onOpenGithub: () -> Unit = { onOpenUrl(appInfo.githubUrl) }
+    val onOpenLicenses: () -> Unit = { showLicenses = true }
     val onOpenDebugInfo: () -> Unit = {
         scope.launch {
             debugReport = withContext(Dispatchers.IO) {
@@ -1375,12 +1397,15 @@ private fun TvSettingsTab(
                         TvDecoderTimeshiftSettingsCard(
                             hwDecPreset = hwDecPreset,
                             timeshiftWindow = timeshiftWindow,
+                            growingPrebufferMode = growingPrebufferMode,
                             onSelectPreset = onSelectPreset,
                             onSelectTimeshiftWindow = onSelectTimeshiftWindow,
+                            onSelectGrowingPrebufferMode = onSelectGrowingPrebufferMode,
                         )
                         TvAppInfoSettingsCard(
                             appInfo = appInfo,
                             onOpenGithub = onOpenGithub,
+                            onOpenLicenses = onOpenLicenses,
                             onOpenDebugInfo = onOpenDebugInfo,
                         )
                     }
@@ -1405,12 +1430,15 @@ private fun TvSettingsTab(
                 TvDecoderTimeshiftSettingsCard(
                     hwDecPreset = hwDecPreset,
                     timeshiftWindow = timeshiftWindow,
+                    growingPrebufferMode = growingPrebufferMode,
                     onSelectPreset = onSelectPreset,
                     onSelectTimeshiftWindow = onSelectTimeshiftWindow,
+                    onSelectGrowingPrebufferMode = onSelectGrowingPrebufferMode,
                 )
                 TvAppInfoSettingsCard(
                     appInfo = appInfo,
                     onOpenGithub = onOpenGithub,
+                    onOpenLicenses = onOpenLicenses,
                     onOpenDebugInfo = onOpenDebugInfo,
                 )
             }
@@ -1483,6 +1511,13 @@ private fun TvSettingsTab(
                 }
             }
         }
+    }
+
+    if (showLicenses) {
+        TvLicensesDialog(
+            onDismiss = { showLicenses = false },
+            onOpenUrl = onOpenUrl,
+        )
     }
 }
 
@@ -1664,8 +1699,10 @@ private fun TvGeneralSettingsCard(
 private fun TvDecoderTimeshiftSettingsCard(
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
+    growingPrebufferMode: GrowingRecordingPrebufferMode,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
+    onSelectGrowingPrebufferMode: (GrowingRecordingPrebufferMode) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -1736,6 +1773,36 @@ private fun TvDecoderTimeshiftSettingsCard(
                 color = MuxGridColors.TextMuted,
             )
         }
+
+        MuxGridDivider()
+
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "Pre-Buffer Ongoing Recordings",
+                style = MuxGridType.CardSubtitle,
+                fontSize = 13.sp,
+            )
+            Row(
+                modifier = Modifier
+                    .focusGroup()
+                    .focusRestorer()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                GrowingRecordingPrebufferMode.entries.forEach { option ->
+                    TvUnderlineOption(
+                        label = option.label,
+                        selected = growingPrebufferMode == option,
+                        onClick = { onSelectGrowingPrebufferMode(option) },
+                    )
+                }
+            }
+            Text(
+                text = "${growingPrebufferMode.description} · applies on next play",
+                style = MuxGridType.TabularSmall,
+                color = MuxGridColors.TextMuted,
+            )
+        }
     }
 }
 
@@ -1743,6 +1810,7 @@ private fun TvDecoderTimeshiftSettingsCard(
 private fun TvAppInfoSettingsCard(
     appInfo: AppBuildInfo,
     onOpenGithub: () -> Unit,
+    onOpenLicenses: () -> Unit,
     onOpenDebugInfo: () -> Unit,
 ) {
     Column(
@@ -1799,11 +1867,193 @@ private fun TvAppInfoSettingsCard(
         )
 
         TvSettingsActionRow(
+            title = "Licenses & Notices",
+            subtitle = "Open-source attributions · GPL-3.0-or-later",
+            contentDescription = "Show Licenses and Notices",
+            onClick = onOpenLicenses,
+        )
+
+        TvSettingsActionRow(
             title = "Debug Info",
             subtitle = "Device, OS, and playback environment",
             contentDescription = "Show Debug Info",
             onClick = onOpenDebugInfo,
         )
+    }
+}
+
+@Composable
+private fun TvLicensesDialog(
+    onDismiss: () -> Unit,
+    onOpenUrl: (String) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var selectedAttribution by remember { mutableStateOf<AppAttribution?>(null) }
+    var documentText by remember { mutableStateOf("") }
+    var isTextFocused by remember { mutableStateOf(false) }
+    val firstRowFocusRequester = remember { FocusRequester() }
+    val textFocusRequester = remember { FocusRequester() }
+    val textScrollState = rememberScrollState()
+    val scrollStepPx = with(LocalDensity.current) { 72.dp.toPx() }
+
+    LaunchedEffect(selectedAttribution) {
+        val selected = selectedAttribution
+        if (selected == null) {
+            documentText = ""
+            runCatching { firstRowFocusRequester.requestFocus() }
+            return@LaunchedEffect
+        }
+        documentText = ""
+        textScrollState.scrollTo(0)
+        documentText = withContext(Dispatchers.IO) { AppNotices.readLicenseText(selected.document) }
+        runCatching { textFocusRequester.requestFocus() }
+    }
+
+    BackHandler(enabled = selectedAttribution != null) { selectedAttribution = null }
+
+    TvModalDialog(
+        onDismissRequest = onDismiss,
+        minWidth = 520.dp,
+        maxWidth = 720.dp,
+    ) {
+        val current = selectedAttribution
+        if (current == null) {
+            Text(
+                text = "Licenses & Notices",
+                style = MuxGridType.Title,
+                fontSize = 18.sp,
+                color = MuxGridColors.TextPrimary,
+            )
+            Text(
+                text = AppNotices.DISTRIBUTION_NOTE,
+                style = MuxGridType.CardSubtitle,
+                fontSize = 13.sp,
+                color = MuxGridColors.TextSecondary,
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 300.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                AppNotices.attributions.forEachIndexed { index, entry ->
+                    TvSettingsActionRow(
+                        title = entry.name,
+                        subtitle = "${entry.license} · ${entry.displayUrl}",
+                        contentDescription = "Show ${entry.name} license",
+                        onClick = { selectedAttribution = entry },
+                        modifier = if (index == 0) Modifier.focusRequester(firstRowFocusRequester) else Modifier,
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+            ) {
+                Button(
+                    onClick = onDismiss,
+                    shape = tvButtonShape(),
+                    colors = tvDialogSecondaryButtonColors(),
+                ) {
+                    Text("Close", maxLines = 1, softWrap = false)
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = current.name,
+                        style = MuxGridType.Title,
+                        fontSize = 18.sp,
+                        color = MuxGridColors.TextPrimary,
+                    )
+                    Text(
+                        text = current.license,
+                        style = MuxGridType.CardSubtitle,
+                        fontSize = 13.sp,
+                        color = MuxGridColors.TextSecondary,
+                    )
+                }
+                TvIconButton(
+                    onClick = { onOpenUrl(current.url) },
+                    size = 40.dp,
+                    containerColor = MuxGridColors.CardSurfaceElevated,
+                    contentColor = MuxGridColors.TextPrimary,
+                ) {
+                    Icon(
+                        imageVector = MuxGridIcons.OpenInNew,
+                        contentDescription = "Open ${current.name} website",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+            Text(
+                text = "Press BACK or ▼ to leave the text.",
+                style = MuxGridType.TabularSmall,
+                color = MuxGridColors.TextMuted,
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 300.dp)
+                    .clip(MuxGridShapes.Sm)
+                    .background(MuxGridColors.CardSurface)
+                    .border(
+                        width = if (isTextFocused) MuxGridBorders.Focused else MuxGridBorders.Divider,
+                        color = if (isTextFocused) MuxGridColors.FocusBorder else MuxGridColors.HairlineBorder,
+                        shape = MuxGridShapes.Sm,
+                    )
+                    .focusRequester(textFocusRequester)
+                    .onFocusChanged { isTextFocused = it.isFocused }
+                    .onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        when (event.key) {
+                            Key.DirectionDown -> {
+                                if (!textScrollState.canScrollForward) return@onPreviewKeyEvent false
+                                scope.launch { textScrollState.scrollBy(scrollStepPx) }
+                                true
+                            }
+                            Key.DirectionUp -> {
+                                if (!textScrollState.canScrollBackward) return@onPreviewKeyEvent false
+                                scope.launch { textScrollState.scrollBy(-scrollStepPx) }
+                                true
+                            }
+                            else -> false
+                        }
+                    }
+                    .focusable()
+                    .verticalScroll(textScrollState)
+                    .padding(12.dp),
+            ) {
+                Text(
+                    text = documentText.ifBlank { "Loading..." },
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MuxGridColors.TextPrimary,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                Button(
+                    onClick = { selectedAttribution = null },
+                    shape = tvButtonShape(),
+                    colors = tvDialogSecondaryButtonColors(),
+                ) {
+                    Text("Back", maxLines = 1, softWrap = false)
+                }
+            }
+        }
     }
 }
 
@@ -1863,10 +2113,11 @@ private fun TvSettingsActionRow(
     subtitle: String,
     contentDescription: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = MuxGridColors.CardSurfaceElevated,

@@ -162,7 +162,7 @@ Alternatively, provide `MUXGRID_KEYSTORE_PATH`, `MUXGRID_KEYSTORE_PASSWORD`, `MU
 - **[Google Material Symbols](https://fonts.google.com/icons)** — Rounded icon vector paths embedded in `:core:designsystem`.
 - **[Android Jetpack](https://developer.android.com/jetpack)** & **[Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines)** — Compose, Compose for TV (`androidx.tv`), Media3 (`MediaSessionService`), and DataStore.
 
-See [NOTICE](./NOTICE) for full third-party copyright and license notices.
+See [NOTICE](./NOTICE) for full third-party copyright and license notices. The same attributions plus the complete **GPLv3** and **Apache-2.0** license texts are bundled and readable offline in **Settings → App Info → Licenses & Notices**.
 
 ### AI Assistance
 Architected, researched, designed, and implemented with the assistance of **Google Antigravity** (powered by **Gemini**), including the clean-room HTSP protocol implementation, SVG iconography, and multi-module Kotlin/Compose codebase.

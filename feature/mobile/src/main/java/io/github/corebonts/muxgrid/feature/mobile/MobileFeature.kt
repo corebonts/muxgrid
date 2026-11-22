@@ -43,6 +43,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -108,10 +109,13 @@ import io.github.corebonts.muxgrid.core.designsystem.icon
 import io.github.corebonts.muxgrid.core.designsystem.label
 import io.github.corebonts.muxgrid.core.designsystem.rememberNowEpochSec
 import io.github.corebonts.muxgrid.core.designsystem.serverHeadline
+import io.github.corebonts.muxgrid.core.model.AppAttribution
 import io.github.corebonts.muxgrid.core.model.AppBuildInfo
+import io.github.corebonts.muxgrid.core.model.AppNotices
 import io.github.corebonts.muxgrid.core.model.BackgroundPlaybackMode
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ConnectionState
+import io.github.corebonts.muxgrid.core.model.GrowingRecordingPrebufferMode
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LiveFilter
 import io.github.corebonts.muxgrid.core.model.MainTab
@@ -333,6 +337,7 @@ fun MobileRoot(
                             val themeMode by repository.themeMode.collectAsState()
                             val hwDecPreset by repository.hwDecPreset.collectAsState()
                             val timeshiftWindow by repository.timeshiftWindow.collectAsState()
+                            val growingPrebufferMode by repository.growingRecordingPrebufferMode.collectAsState()
                             val backgroundPlaybackMode by repository.backgroundPlaybackMode.collectAsState()
                             MobileSettingsTab(
                                 profile = currentProfile,
@@ -341,6 +346,7 @@ fun MobileRoot(
                                 themeMode = themeMode,
                                 hwDecPreset = hwDecPreset,
                                 timeshiftWindow = timeshiftWindow,
+                                growingPrebufferMode = growingPrebufferMode,
                                 backgroundPlaybackMode = backgroundPlaybackMode,
                                 pipSupported = canEnterPip,
                                 appInfo = appInfo,
@@ -357,6 +363,9 @@ fun MobileRoot(
                                 },
                                 onSelectTimeshiftWindow = { window ->
                                     scope.launch { repository.setTimeshiftWindow(window) }
+                                },
+                                onSelectGrowingPrebufferMode = { mode ->
+                                    scope.launch { repository.setGrowingRecordingPrebufferMode(mode) }
                                 },
                                 onSelectBackgroundPlaybackMode = { mode ->
                                     scope.launch { repository.setBackgroundPlaybackMode(mode) }
@@ -1270,6 +1279,7 @@ private fun MobileSettingsTab(
     themeMode: ThemeMode,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
+    growingPrebufferMode: GrowingRecordingPrebufferMode,
     backgroundPlaybackMode: BackgroundPlaybackMode,
     pipSupported: Boolean,
     appInfo: AppBuildInfo,
@@ -1278,6 +1288,7 @@ private fun MobileSettingsTab(
     onSelectThemeMode: (ThemeMode) -> Unit,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
+    onSelectGrowingPrebufferMode: (GrowingRecordingPrebufferMode) -> Unit,
     onSelectBackgroundPlaybackMode: (BackgroundPlaybackMode) -> Unit,
     onRetryConnect: () -> Unit,
     onOpenServerSetup: () -> Unit,
@@ -1286,6 +1297,7 @@ private fun MobileSettingsTab(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var debugReport by remember { mutableStateOf<String?>(null) }
+    var showLicenses by remember { mutableStateOf(false) }
 
     val backgroundModeOptions = if (pipSupported) {
         BackgroundPlaybackMode.entries
@@ -1297,13 +1309,15 @@ private fun MobileSettingsTab(
     } else {
         backgroundPlaybackMode
     }
-    val onOpenGithub: () -> Unit = {
+    val onOpenUrl: (String) -> Unit = { url ->
         runCatching {
-            uriHandler.openUri(appInfo.githubUrl)
+            uriHandler.openUri(url)
         }.onFailure {
-            Toast.makeText(context, appInfo.githubUrl, Toast.LENGTH_LONG).show()
+            Toast.makeText(context, url, Toast.LENGTH_LONG).show()
         }
     }
+    val onOpenGithub: () -> Unit = { onOpenUrl(appInfo.githubUrl) }
+    val onOpenLicenses: () -> Unit = { showLicenses = true }
     val onOpenDebugInfo: () -> Unit = {
         scope.launch {
             debugReport = withContext(Dispatchers.IO) {
@@ -1370,11 +1384,14 @@ private fun MobileSettingsTab(
                         )
                         MobileTimeshiftSection(
                             timeshiftWindow = timeshiftWindow,
+                            growingPrebufferMode = growingPrebufferMode,
                             onSelectTimeshiftWindow = onSelectTimeshiftWindow,
+                            onSelectGrowingPrebufferMode = onSelectGrowingPrebufferMode,
                         )
                         MobileAppInfoSection(
                             appInfo = appInfo,
                             onOpenGithub = onOpenGithub,
+                            onOpenLicenses = onOpenLicenses,
                             onOpenDebugInfo = onOpenDebugInfo,
                         )
                     }
@@ -1403,11 +1420,14 @@ private fun MobileSettingsTab(
                 )
                 MobileTimeshiftSection(
                     timeshiftWindow = timeshiftWindow,
+                    growingPrebufferMode = growingPrebufferMode,
                     onSelectTimeshiftWindow = onSelectTimeshiftWindow,
+                    onSelectGrowingPrebufferMode = onSelectGrowingPrebufferMode,
                 )
                 MobileAppInfoSection(
                     appInfo = appInfo,
                     onOpenGithub = onOpenGithub,
+                    onOpenLicenses = onOpenLicenses,
                     onOpenDebugInfo = onOpenDebugInfo,
                 )
             }
@@ -1478,6 +1498,13 @@ private fun MobileSettingsTab(
                 }
             }
         }
+    }
+
+    if (showLicenses) {
+        MobileLicensesSheet(
+            onDismiss = { showLicenses = false },
+            onOpenUrl = onOpenUrl,
+        )
     }
 }
 
@@ -1763,40 +1790,78 @@ private fun MobileDecoderPresetSection(
 @Composable
 private fun MobileTimeshiftSection(
     timeshiftWindow: TimeshiftWindow,
+    growingPrebufferMode: GrowingRecordingPrebufferMode,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
+    onSelectGrowingPrebufferMode: (GrowingRecordingPrebufferMode) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("LIVE TIMESHIFT CACHE LIMIT", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+        Text("TIMESHIFT & PRE-BUFFER", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(MuxGridShapes.Card)
                 .background(MuxGridColors.CardSurface)
                 .padding(horizontal = 12.dp, vertical = 11.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                TimeshiftWindow.entries.forEach { option ->
-                    BroadcastUnderlineTab(
-                        label = option.shortLabel,
-                        selected = option == timeshiftWindow,
-                        onClick = { onSelectTimeshiftWindow(option) },
-                    )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Live Timeshift Cache Limit",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MuxGridColors.TextPrimary,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    TimeshiftWindow.entries.forEach { option ->
+                        BroadcastUnderlineTab(
+                            label = option.shortLabel,
+                            selected = option == timeshiftWindow,
+                            onClick = { onSelectTimeshiftWindow(option) },
+                        )
+                    }
                 }
+                Text(
+                    text = "${timeshiftWindow.description} · split pause/rewind · applies on next tune",
+                    style = MuxGridType.TabularSmall,
+                    color = MuxGridColors.TextSecondary,
+                )
             }
-            Text(
-                text = "${timeshiftWindow.description} · split pause/rewind · applies on next tune",
-                style = MuxGridType.TabularSmall,
-                color = MuxGridColors.TextSecondary,
-            )
+            MuxGridDivider()
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Pre-Buffer Ongoing Recordings",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MuxGridColors.TextPrimary,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    GrowingRecordingPrebufferMode.entries.forEach { option ->
+                        BroadcastUnderlineTab(
+                            label = option.label,
+                            selected = option == growingPrebufferMode,
+                            onClick = { onSelectGrowingPrebufferMode(option) },
+                        )
+                    }
+                }
+                Text(
+                    text = "${growingPrebufferMode.description} · applies on next play",
+                    style = MuxGridType.TabularSmall,
+                    color = MuxGridColors.TextSecondary,
+                )
+            }
         }
     }
 }
@@ -1805,6 +1870,7 @@ private fun MobileTimeshiftSection(
 private fun MobileAppInfoSection(
     appInfo: AppBuildInfo,
     onOpenGithub: () -> Unit,
+    onOpenLicenses: () -> Unit,
     onOpenDebugInfo: () -> Unit,
 ) {
     Column(
@@ -1835,11 +1901,135 @@ private fun MobileAppInfoSection(
                 onClick = onOpenGithub,
             )
             MobileSettingsActionRow(
+                title = "Licenses & Notices",
+                subtitle = "Open-source attributions · GPL-3.0-or-later",
+                contentDescription = "Show Licenses and Notices",
+                onClick = onOpenLicenses,
+            )
+            MobileSettingsActionRow(
                 title = "Debug Info",
                 subtitle = "Device, OS, and playback environment",
                 contentDescription = "Show Debug Info",
                 onClick = onOpenDebugInfo,
             )
+        }
+    }
+}
+
+@Composable
+private fun MobileLicensesSheet(
+    onDismiss: () -> Unit,
+    onOpenUrl: (String) -> Unit,
+) {
+    var selectedAttribution by remember { mutableStateOf<AppAttribution?>(null) }
+    var documentText by remember { mutableStateOf("") }
+
+    LaunchedEffect(selectedAttribution) {
+        val selected = selectedAttribution
+        if (selected == null) {
+            documentText = ""
+            return@LaunchedEffect
+        }
+        documentText = ""
+        documentText = withContext(Dispatchers.IO) { AppNotices.readLicenseText(selected.document) }
+    }
+
+    BackHandler(enabled = selectedAttribution != null) { selectedAttribution = null }
+
+    MuxGridModalSheet(onDismissRequest = onDismiss) {
+        val current = selectedAttribution
+        if (current == null) {
+            Text(
+                text = "Licenses & Notices",
+                style = MuxGridType.Title,
+                fontSize = 18.sp,
+            )
+            Text(
+                text = AppNotices.DISTRIBUTION_NOTE,
+                style = MuxGridType.CardSubtitle,
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+                    .clip(MuxGridShapes.Card)
+                    .background(MuxGridColors.Divider)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                AppNotices.attributions.forEach { entry ->
+                    MobileSettingsActionRow(
+                        title = entry.name,
+                        subtitle = "${entry.license} · ${entry.displayUrl}",
+                        contentDescription = "Show ${entry.name} license",
+                        onClick = { selectedAttribution = entry },
+                    )
+                }
+            }
+            OutlinedButton(
+                onClick = onDismiss,
+                shape = MuxGridShapes.Sm,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Close", color = MuxGridColors.TextPrimary)
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = current.name,
+                        style = MuxGridType.Title,
+                        fontSize = 18.sp,
+                    )
+                    Text(
+                        text = current.license,
+                        style = MuxGridType.CardSubtitle,
+                    )
+                }
+                IconButton(onClick = { onOpenUrl(current.url) }) {
+                    Icon(
+                        imageVector = MuxGridIcons.OpenInNew,
+                        contentDescription = "Open ${current.name} website",
+                        tint = MuxGridColors.TextSecondary,
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+                    .clip(MuxGridShapes.Sm)
+                    .background(MuxGridColors.CardSurface)
+                    .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Sm)
+                    .verticalScroll(rememberScrollState())
+                    .padding(12.dp),
+            ) {
+                SelectionContainer {
+                    Text(
+                        text = documentText.ifBlank { "Loading..." },
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MuxGridColors.TextPrimary,
+                    )
+                }
+            }
+            OutlinedButton(
+                onClick = { selectedAttribution = null },
+                shape = MuxGridShapes.Sm,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Back", color = MuxGridColors.TextPrimary)
+            }
         }
     }
 }
