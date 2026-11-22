@@ -2,6 +2,26 @@
 
 All notable changes to **MuxGrid** are documented in this file.
 
+## [0.8.0] — 2026-11-22 — Guide me to the good part
+
+### Continuous Program Guide (EPG) & Show Details
+- Enabled the **2D timeline EPG** in mobile portrait with a collapsible channel column (`MobileGuideScreen`).
+- Anchored the EPG timeline origin at **Now** (`GuideTimeline`, `TvGuideScreen`, `MobileGuideScreen`).
+- Added an **EPG show details & DVR actions overlay** on Android TV selection and moved the live progress bar into the details panel (`TvGuideScreen`, `TvFeature`).
+
+### Ongoing Recordings & Fast MKV Seeking
+- Added **fast MKV binary-search seeking** (`GrowingMkvIndexStore`, `GrowingMkvBinarySearcher`) and virtual MKV header splicing (`LocalMediaProxy`) for ongoing Matroska recordings, with cached MPEG-TS skip and cold-resume support in `MpvPlaybackEngine`.
+- Added buffered/target seekbar markers, Back-to-cancel seeking, write-head clamping, and a **Live `REC` badge + "Watch from Start (Recording)"** shortcut on Mobile and TV.
+- Unified the mobile recordings card and row layout (`MobileRecordingsScreen`).
+
+### Android TV Performance & Profiling
+- Optimized Live, Recordings, and EPG scrolling on Android TV (`TvFeature`, `TvGuideScreen`, `TvRecordingsScreen`) and added TV scroll benchmarking (`scripts/bench_tv_scroll.py`, `docs/ARCHITECTURE.md`).
+
+### Licensing, Branding & Documentation
+- Added an in-app **Licenses & Notices** screen with bundled GPLv3 and Apache-2.0 texts (`AppNotices`, `licenses/gpl-3.0.txt`).
+- Added an **adaptive launcher icon** and PNG Android TV banner.
+- Updated `README.md` with a hero banner and Shields.io badges.
+
 ## [0.7.1] — 2026-11-21 — Next stop - Playing
 
 ### Fixes

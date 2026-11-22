@@ -58,8 +58,8 @@ android {
         applicationId = "io.github.corebonts.muxgrid"
         minSdk = 28
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.7.1"
+        versionCode = 7
+        versionName = "0.8.0"
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
     }
 
