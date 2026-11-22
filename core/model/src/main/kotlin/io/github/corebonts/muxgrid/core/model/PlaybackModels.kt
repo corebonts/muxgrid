@@ -78,6 +78,9 @@ data class PlaybackState(
     val bufferWindowMs: Long = 0L,
     val isTimeshiftSeekable: Boolean = false,
     val isGrowingRecording: Boolean = false,
+    val isSeeking: Boolean = false,
+    val seekTargetMs: Long? = null,
+    val bufferedPositionMs: Long = 0L,
     val timeshiftNotice: String? = null,
     val audioTracks: List<MediaTrack> = emptyList(),
     val subtitleTracks: List<MediaTrack> = emptyList(),
@@ -120,6 +123,15 @@ data class PlaybackState(
             }
             else -> nonNeg
         }
+    }
+
+    /**
+     * Returns true when [requestedMs] would exceed the safe write-head margin of an ongoing recording.
+     */
+    fun isSeekClampedAtGrowingEdge(requestedMs: Long): Boolean {
+        if (!isGrowingRecording || durationMs <= 0L) return false
+        val maxSafe = (durationMs - PlaybackSeekDefaults.GROWING_WRITE_HEAD_SAFETY_MS).coerceAtLeast(0L)
+        return requestedMs > maxSafe
     }
 }
 

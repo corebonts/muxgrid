@@ -64,7 +64,7 @@ class MpvPlaybackEngine(
     dvrTicketProvider: suspend (dvrId: Long) -> StreamTicket = {
         throw UnsupportedOperationException("DVR ticket provider is not configured")
     },
-    growingFileOpener: suspend (dvrId: Long) -> GrowingDvrFile = {
+    private val growingFileOpener: suspend (dvrId: Long) -> GrowingDvrFile = {
         throw UnsupportedOperationException("Growing DVR file opener is not configured")
     },
     private val dvrEntryProvider: (dvrId: Long) -> DvrEntry? = { null },
@@ -80,6 +80,7 @@ class MpvPlaybackEngine(
         Thread(r, "muxgrid-mpv").apply { isDaemon = true }
     }
     private val mpvCacheDir = File(context.cacheDir, "mpv-cache")
+    private val growingIndexStore = GrowingMkvIndexStore()
 
     private val proxy = LocalMediaProxy(
         serverBaseUrlProvider = serverBaseUrlProvider,
@@ -87,6 +88,8 @@ class MpvPlaybackEngine(
         dvrTicketProvider = dvrTicketProvider,
         growingFileOpener = growingFileOpener,
         isDvrRecordingProvider = { dvrId -> dvrEntryProvider(dvrId)?.state == DvrState.RECORDING },
+        growingIndexStore = growingIndexStore,
+        dvrStartEpochProvider = { dvrId -> dvrEntryProvider(dvrId)?.startEpochSec ?: 0L },
         onLiveOpenFailed = { channelId, reason, isEmptyReply ->
             handleProxyFailure(channelId, reason, isEmptyReply)
         },
@@ -144,6 +147,33 @@ class MpvPlaybackEngine(
 
     @Volatile
     private var seekGuardUntilElapsedMs: Long = 0L
+
+    @Volatile
+    private var mpvSeeking: Boolean = false
+
+    @Volatile
+    private var mpvPausedForCache: Boolean = false
+
+    @Volatile
+    private var activeSeekTargetMs: Long? = null
+
+    @Volatile
+    private var seekOriginPositionMs: Long = 0L
+
+    @Volatile
+    private var lastDemuxerCacheStartMs: Long = 0L
+
+    @Volatile
+    private var lastDemuxerCacheTimeMs: Long = 0L
+
+    @Volatile
+    private var activeSpliceStartMs: Long = 0L
+
+    @Volatile
+    private var spliceTimeOffsetMs: Long = 0L
+
+    @Volatile
+    private var spliceOffsetResolved: Boolean = true
 
     @Volatile
     private var pendingLoadGeneration: Long = 0L
@@ -235,6 +265,7 @@ class MpvPlaybackEngine(
 
     private var cacheMonitorJob: Job? = null
     private var noticeClearJob: Job? = null
+    private var activeBinarySeekJob: Job? = null
 
     init {
         submitMpvTask {
@@ -316,6 +347,8 @@ class MpvPlaybackEngine(
             observeProperty("pause", MPV.mpvFormat.MPV_FORMAT_FLAG)
             observeProperty("core-idle", MPV.mpvFormat.MPV_FORMAT_FLAG)
             observeProperty("seekable", MPV.mpvFormat.MPV_FORMAT_FLAG)
+            observeProperty("seeking", MPV.mpvFormat.MPV_FORMAT_FLAG)
+            observeProperty("paused-for-cache", MPV.mpvFormat.MPV_FORMAT_FLAG)
             observeProperty("time-pos", MPV.mpvFormat.MPV_FORMAT_DOUBLE)
             observeProperty("duration", MPV.mpvFormat.MPV_FORMAT_DOUBLE)
             observeProperty("hwdec-current", MPV.mpvFormat.MPV_FORMAT_STRING)
@@ -342,8 +375,7 @@ class MpvPlaybackEngine(
         lastObservedMpvDurationMs = 0L
         lastPositionEmitElapsedMs = 0L
         lastEmittedPosMs = -1L
-        seekGuardUntilElapsedMs = 0L
-        completedSeekSeq = seekRequestSeq.incrementAndGet()
+        resetSeekTracking()
         lastGrowingServerSec = 0L
         lastGrowingTickElapsedMs = 0L
         timeshiftSmoother.reset()
@@ -418,8 +450,7 @@ class MpvPlaybackEngine(
         lastObservedMpvDurationMs = 0L
         lastPositionEmitElapsedMs = 0L
         lastEmittedPosMs = -1L
-        seekGuardUntilElapsedMs = 0L
-        completedSeekSeq = seekRequestSeq.incrementAndGet()
+        resetSeekTracking()
         lastGrowingServerSec = 0L
         lastGrowingTickElapsedMs = 0L
         timeshiftSmoother.reset()
@@ -435,6 +466,33 @@ class MpvPlaybackEngine(
             entry.durationSec * 1000L
         }
         val resumeSec = startPositionSec.coerceAtLeast(0L)
+        var spliceOffset = 0L
+        var needsColdBinarySearch = false
+        activeSpliceStartMs = 0L
+        spliceTimeOffsetMs = 0L
+        spliceOffsetResolved = true
+        if (isGrowing && resumeSec > 0L) {
+            val cachedIndex = growingIndexStore.getOrLoad(entry.id, entry.startEpochSec)
+            val resumeMs = resumeSec * 1000L
+            val cluster = if (cachedIndex.hasHeader) cachedIndex.findClusterAtOrBefore(resumeMs) else null
+            if (cluster != null &&
+                cluster.byteOffset > 0L &&
+                (resumeMs - cluster.timestampMs) <= INDEX_SPLICE_MAX_DELTA_MS
+            ) {
+                spliceOffset = cluster.byteOffset
+                activeSpliceStartMs = cluster.timestampMs
+                spliceOffsetResolved = false
+            } else if (resumeSec > COLD_RESUME_BINARY_SEARCH_MIN_SEC &&
+                cachedIndex.containerKind != GrowingMkvIndex.ContainerKind.NON_MKV
+            ) {
+                needsColdBinarySearch = true
+            }
+        }
+        val mpvStartArg = when {
+            spliceOffset > 0L -> "none"
+            resumeSec > 0L -> "+$resumeSec"
+            else -> "none"
+        }
         _state.update {
             PlaybackState(
                 status = PlaybackStatus.BUFFERING,
@@ -455,13 +513,14 @@ class MpvPlaybackEngine(
             )
         }
 
+        val isRadio = channel?.isRadio == true
         val url = if (isGrowing) {
-            proxy.growingDvrStreamUrl(entry.id)
+            proxy.growingDvrStreamUrl(entry.id, spliceOffset = spliceOffset)
         } else {
             proxy.dvrStreamUrl(entry.id)
         }
         val mode = if (isGrowing) "growing" else "dvr"
-        Log.i(TAG, "playDvrEntry id=${entry.id} (${entry.title}) mode=$mode start=${resumeSec}s")
+        Log.i(TAG, "playDvrEntry id=${entry.id} (${entry.title}) mode=$mode start=${resumeSec}s spliceOffset=$spliceOffset")
         submitMpvTask {
             if (playbackGeneration.get() != gen || explicitlyStopped) return@submitMpvTask
             val instance = ensureMpvLocked() ?: return@submitMpvTask
@@ -469,19 +528,22 @@ class MpvPlaybackEngine(
                 instance.command("stop")
             }
             proxy.stopActiveStream()
+            pendingUrl = null
+            pendingUrlGeneration = 0L
             applyPresetOnInstance(instance, preset)
             applyAspectModeLocked(instance, currentAspectMode)
             applySubtitlePreferenceLocked(instance, currentSubtitlePreference)
             configureDvrCacheLocked(instance, isGrowing)
             instance.setPropertyString("idle", "yes")
-            instance.setPropertyString("start", if (resumeSec > 0L) "+$resumeSec" else "none")
             instance.setPropertyDouble("volume", MPV_VOLUME_FULL)
             instance.setPropertyString("vid", if (explicitAudioOnly) "no" else "auto")
             videoOutputDisabled = explicitAudioOnly
             instance.setPropertyBoolean("pause", false)
-            if (hasSurface || (channel?.isRadio == true)) {
-                pendingUrl = null
-                pendingUrlGeneration = 0L
+            if (needsColdBinarySearch) {
+                return@submitMpvTask
+            }
+            instance.setPropertyString("start", mpvStartArg)
+            if (hasSurface || isRadio) {
                 pendingLoadGeneration = gen
                 val rc = instance.command("loadfile", url)
                 Log.i(TAG, "loadfile DVR immediate id=${entry.id} rc=$rc")
@@ -489,6 +551,46 @@ class MpvPlaybackEngine(
                 pendingUrl = url
                 pendingUrlGeneration = gen
                 Log.i(TAG, "loadfile DVR deferred until surfaceCreated id=${entry.id}")
+            }
+        }
+        if (needsColdBinarySearch) {
+            activeBinarySeekJob = engineScope.launch(Dispatchers.IO) {
+                val index = growingIndexStore.getOrLoad(entry.id, entry.startEpochSec)
+                val found = runCatching {
+                    growingFileOpener(entry.id).use { file ->
+                        GrowingMkvBinarySearcher.findClusterForTarget(
+                            file = file,
+                            index = index,
+                            targetMs = resumeSec * 1000L,
+                            durationMs = initialDurationMs,
+                        )
+                    }
+                }.getOrNull()
+                if (playbackGeneration.get() != gen || explicitlyStopped) return@launch
+                val resolvedOffset = found?.byteOffset ?: 0L
+                val resolvedSpliceMs = found?.timestampMs ?: 0L
+                val resolvedStartArg = if (resolvedOffset > 0L) "none" else "+$resumeSec"
+                val resolvedUrl = proxy.growingDvrStreamUrl(entry.id, spliceOffset = resolvedOffset)
+                activeSpliceStartMs = resolvedSpliceMs
+                spliceTimeOffsetMs = 0L
+                spliceOffsetResolved = resolvedSpliceMs == 0L
+                submitMpvTask {
+                    if (playbackGeneration.get() != gen || explicitlyStopped) return@submitMpvTask
+                    val instance = mpv ?: return@submitMpvTask
+                    if (!instance.isInitialized) return@submitMpvTask
+                    instance.setPropertyString("start", resolvedStartArg)
+                    if (hasSurface || isRadio) {
+                        pendingUrl = null
+                        pendingUrlGeneration = 0L
+                        pendingLoadGeneration = gen
+                        val rc = instance.command("loadfile", resolvedUrl)
+                        Log.i(TAG, "loadfile DVR cold-splice id=${entry.id} spliceOffset=$resolvedOffset rc=$rc")
+                    } else {
+                        pendingUrl = resolvedUrl
+                        pendingUrlGeneration = gen
+                        Log.i(TAG, "loadfile DVR cold-splice deferred until surfaceCreated id=${entry.id}")
+                    }
+                }
             }
         }
         startCacheMonitor(gen)
@@ -505,8 +607,7 @@ class MpvPlaybackEngine(
         activeDvrEntry = null
         lastPositionEmitElapsedMs = 0L
         lastEmittedPosMs = -1L
-        seekGuardUntilElapsedMs = 0L
-        completedSeekSeq = seekRequestSeq.incrementAndGet()
+        resetSeekTracking()
         lastGrowingServerSec = 0L
         lastGrowingTickElapsedMs = 0L
         timeshiftSmoother.reset()
@@ -558,14 +659,206 @@ class MpvPlaybackEngine(
         }
     }
 
+    private fun resetSeekTracking() {
+        activeBinarySeekJob?.cancel()
+        activeBinarySeekJob = null
+        seekGuardUntilElapsedMs = 0L
+        completedSeekSeq = seekRequestSeq.incrementAndGet()
+        mpvSeeking = false
+        mpvPausedForCache = false
+        activeSeekTargetMs = null
+        seekOriginPositionMs = 0L
+        lastDemuxerCacheStartMs = 0L
+        lastDemuxerCacheTimeMs = 0L
+        activeSpliceStartMs = 0L
+        spliceTimeOffsetMs = 0L
+        spliceOffsetResolved = true
+    }
+
+    private fun resolveIndexedSpliceForGrowingSeek(
+        dvrEntry: DvrEntry,
+        targetMs: Long,
+        currentPositionMs: Long? = null,
+    ): Pair<Long, Long>? {
+        val index = growingIndexStore.getOrLoad(dvrEntry.id, dvrEntry.startEpochSec)
+        if (!index.hasHeader) return null
+        val cluster = index.findClusterAtOrBefore(targetMs) ?: return null
+        if (cluster.byteOffset <= 0L) return null
+        if ((targetMs - cluster.timestampMs) > INDEX_SPLICE_MAX_DELTA_MS) return null
+        if (currentPositionMs != null &&
+            targetMs > currentPositionMs + INDEX_SPLICE_JUMP_THRESHOLD_MS &&
+            cluster.timestampMs <= currentPositionMs
+        ) {
+            return null
+        }
+        return cluster.byteOffset to cluster.timestampMs
+    }
+
+    private fun reloadGrowingStreamAtSplice(
+        gen: Long,
+        reqSeq: Long,
+        dvrId: Long,
+        spliceOffset: Long,
+        spliceStartMs: Long,
+        mpvStartArg: String,
+    ) {
+        activeSpliceStartMs = spliceStartMs
+        spliceTimeOffsetMs = 0L
+        spliceOffsetResolved = spliceStartMs == 0L
+        lastDemuxerCacheStartMs = 0L
+        lastDemuxerCacheTimeMs = 0L
+        val url = proxy.growingDvrStreamUrl(dvrId, spliceOffset = spliceOffset)
+        submitMpvTask {
+            if (playbackGeneration.get() != gen || explicitlyStopped) return@submitMpvTask
+            val instance = mpv ?: return@submitMpvTask
+            if (instance.isInitialized) {
+                val wasPaused = runCatching { instance.getPropertyBoolean("pause") }.getOrNull() == true
+                proxy.stopActiveStream()
+                instance.setPropertyString("start", mpvStartArg)
+                instance.setPropertyBoolean("pause", wasPaused)
+                pendingLoadGeneration = gen
+                instance.command("loadfile", url, "replace")
+            }
+            completedSeekSeq = reqSeq
+            if (seekRequestSeq.get() == reqSeq && !mpvSeeking) {
+                seekGuardUntilElapsedMs = SystemClock.elapsedRealtime() + SEEK_GUARD_SETTLE_MS
+            }
+        }
+    }
+
     override fun seekTo(positionMs: Long) {
         val gen = playbackGeneration.get()
         val current = _state.value
         val clampedMs = current.clampSeekPositionMs(positionMs)
+        if (current.isSeekClampedAtGrowingEdge(positionMs)) {
+            postTimeshiftNotice("At live edge", autoClearMs = LIVE_EDGE_NOTICE_MS)
+        }
         val reqSeq = seekRequestSeq.incrementAndGet()
-        seekGuardUntilElapsedMs = SystemClock.elapsedRealtime() + SEEK_GUARD_SUBMIT_MS
+        if (!current.isSeeking) {
+            seekOriginPositionMs = current.positionMs
+        }
+        activeSeekTargetMs = clampedMs
+        val cachedStartMs = lastDemuxerCacheStartMs
+        val cachedMs = lastDemuxerCacheTimeMs
+        val dvrEntry = activeDvrEntry
+        seekGuardUntilElapsedMs = SystemClock.elapsedRealtime() + SEEK_GUARD_MAX_MS
         lastPositionEmitElapsedMs = 0L
         lastEmittedPosMs = clampedMs
+
+        // If seeking in a growing MKV recording outside mpv's active RAM buffer (before active
+        // splice/back-cache or far beyond forward cache), jump via cached MKV index or on-demand
+        // binary search. Non-MKV (e.g. MPEG-TS) streams skip straight to native mpv seeking.
+        activeBinarySeekJob?.cancel()
+        activeBinarySeekJob = null
+        if (current.isGrowingRecording && dvrEntry != null) {
+            val index = growingIndexStore.getOrLoad(dvrEntry.id, dvrEntry.startEpochSec)
+            val beforeSplice = activeSpliceStartMs > 0L && clampedMs < activeSpliceStartMs
+            val beforeBackCache = cachedStartMs > 0L && clampedMs < (cachedStartMs - BACK_CACHE_SEEK_MARGIN_MS)
+            val knownForwardEdgeMs = maxOf(cachedMs, current.positionMs, activeSpliceStartMs)
+            val farBeyondCache = knownForwardEdgeMs > 0L && clampedMs > knownForwardEdgeMs + INDEX_SPLICE_JUMP_THRESHOLD_MS
+            if ((beforeSplice || beforeBackCache || farBeyondCache) &&
+                index.containerKind != GrowingMkvIndex.ContainerKind.NON_MKV
+            ) {
+                val splice = if (clampedMs <= 5_000L) {
+                    0L to 0L
+                } else {
+                    resolveIndexedSpliceForGrowingSeek(dvrEntry, clampedMs, current.positionMs)
+                }
+                if (splice != null) {
+                    val targetSpliceOffset = splice.first
+                    val targetSpliceMs = splice.second
+                    val startArg = if (targetSpliceOffset == 0L && clampedMs > 0L) "+${clampedMs / 1000L}" else "none"
+                    _state.update { state ->
+                        if (state.status == PlaybackStatus.IDLE || state.status == PlaybackStatus.ERROR) {
+                            state
+                        } else {
+                            state.copy(
+                                status = PlaybackStatus.BUFFERING,
+                                positionMs = clampedMs,
+                                isSeeking = true,
+                                seekTargetMs = clampedMs,
+                            )
+                        }
+                    }
+                    reloadGrowingStreamAtSplice(
+                        gen = gen,
+                        reqSeq = reqSeq,
+                        dvrId = dvrEntry.id,
+                        spliceOffset = targetSpliceOffset,
+                        spliceStartMs = targetSpliceMs,
+                        mpvStartArg = startArg,
+                    )
+                    return
+                }
+                // Not yet in index -> binary-search the growing MKV via bounded HTSP fileRead probes
+                // (immediately falls back to native mpv seek for non-MKV / MPEG-TS files).
+                _state.update { state ->
+                    if (state.status == PlaybackStatus.IDLE || state.status == PlaybackStatus.ERROR) {
+                        state
+                    } else {
+                        state.copy(
+                            status = PlaybackStatus.BUFFERING,
+                            positionMs = clampedMs,
+                            isSeeking = true,
+                            seekTargetMs = clampedMs,
+                        )
+                    }
+                }
+                val searchDurationMs = current.durationMs
+                activeBinarySeekJob = engineScope.launch(Dispatchers.IO) {
+                    val found = runCatching {
+                        growingFileOpener(dvrEntry.id).use { file ->
+                            GrowingMkvBinarySearcher.findClusterForTarget(
+                                file = file,
+                                index = index,
+                                targetMs = clampedMs,
+                                durationMs = searchDurationMs,
+                            )
+                        }
+                    }.getOrNull()
+                    if (seekRequestSeq.get() != reqSeq || playbackGeneration.get() != gen || explicitlyStopped) {
+                        return@launch
+                    }
+                    if (found != null) {
+                        reloadGrowingStreamAtSplice(
+                            gen = gen,
+                            reqSeq = reqSeq,
+                            dvrId = dvrEntry.id,
+                            spliceOffset = found.byteOffset,
+                            spliceStartMs = found.timestampMs,
+                            mpvStartArg = "none",
+                        )
+                    } else if (beforeSplice) {
+                        reloadGrowingStreamAtSplice(
+                            gen = gen,
+                            reqSeq = reqSeq,
+                            dvrId = dvrEntry.id,
+                            spliceOffset = 0L,
+                            spliceStartMs = 0L,
+                            mpvStartArg = if (clampedMs > 0L) "+${clampedMs / 1000L}" else "none",
+                        )
+                    } else {
+                        submitMpvTask {
+                            if (playbackGeneration.get() != gen || explicitlyStopped || seekRequestSeq.get() != reqSeq) {
+                                return@submitMpvTask
+                            }
+                            val instance = mpv ?: return@submitMpvTask
+                            if (instance.isInitialized) {
+                                val mpvTargetMs = (clampedMs - spliceTimeOffsetMs).coerceAtLeast(0L)
+                                val secStr = String.format(Locale.US, "%.3f", mpvTargetMs / 1000.0)
+                                instance.command("seek", secStr, "absolute+keyframes")
+                            }
+                            completedSeekSeq = reqSeq
+                            if (seekRequestSeq.get() == reqSeq && !mpvSeeking) {
+                                seekGuardUntilElapsedMs = SystemClock.elapsedRealtime() + SEEK_GUARD_SETTLE_MS
+                            }
+                        }
+                    }
+                }
+                return
+            }
+        }
+
         _state.update { state ->
             if (state.status == PlaybackStatus.IDLE || state.status == PlaybackStatus.ERROR) {
                 state
@@ -573,20 +866,28 @@ class MpvPlaybackEngine(
                 state.copy(
                     positionMs = clampedMs,
                     liveEdgeOffsetMs = (state.bufferEndMs - clampedMs).coerceAtLeast(0L),
+                    isSeeking = true,
+                    seekTargetMs = clampedMs,
                 )
             } else {
-                state.copy(positionMs = clampedMs)
+                state.copy(
+                    positionMs = clampedMs,
+                    isSeeking = true,
+                    seekTargetMs = clampedMs,
+                )
             }
         }
+        val seekFlags = if (current.isGrowingRecording) "absolute+keyframes" else "absolute"
         submitMpvTask {
             if (playbackGeneration.get() != gen || explicitlyStopped) return@submitMpvTask
             val instance = mpv ?: return@submitMpvTask
             if (instance.isInitialized) {
-                val secStr = String.format(Locale.US, "%.3f", clampedMs / 1000.0)
-                instance.command("seek", secStr, "absolute")
+                val mpvTargetMs = (clampedMs - spliceTimeOffsetMs).coerceAtLeast(0L)
+                val secStr = String.format(Locale.US, "%.3f", mpvTargetMs / 1000.0)
+                instance.command("seek", secStr, seekFlags)
             }
             completedSeekSeq = reqSeq
-            if (seekRequestSeq.get() == reqSeq) {
+            if (seekRequestSeq.get() == reqSeq && !mpvSeeking) {
                 seekGuardUntilElapsedMs = SystemClock.elapsedRealtime() + SEEK_GUARD_SETTLE_MS
             }
         }
@@ -594,8 +895,9 @@ class MpvPlaybackEngine(
 
     override fun seekBy(deltaMs: Long) {
         val current = _state.value
-        if (current.isGrowingRecording || (!current.isRecordingPlayback && current.isTimeshiftSeekable)) {
-            seekTo(current.positionMs + deltaMs)
+        if (current.isGrowingRecording || current.isSeeking || (!current.isRecordingPlayback && current.isTimeshiftSeekable)) {
+            val basePosMs = if (current.isSeeking) (current.seekTargetMs ?: current.positionMs) else current.positionMs
+            seekTo(basePosMs + deltaMs)
             return
         }
         submitMpvTask {
@@ -603,6 +905,69 @@ class MpvPlaybackEngine(
             if (instance.isInitialized) {
                 val secStr = String.format(Locale.US, "%.3f", deltaMs / 1000.0)
                 instance.command("seek", secStr, "relative")
+            }
+        }
+    }
+
+    override fun cancelSeek() {
+        val gen = playbackGeneration.get()
+        val current = _state.value
+        if (!current.isSeeking && activeSeekTargetMs == null) return
+        activeBinarySeekJob?.cancel()
+        activeBinarySeekJob = null
+        val originMs = current.clampSeekPositionMs(seekOriginPositionMs)
+        val reqSeq = seekRequestSeq.incrementAndGet()
+        activeSeekTargetMs = null
+        mpvSeeking = false
+        seekGuardUntilElapsedMs = SystemClock.elapsedRealtime() + SEEK_GUARD_SUBMIT_MS
+        lastPositionEmitElapsedMs = 0L
+        lastEmittedPosMs = originMs
+        _state.update { state ->
+            if (state.status == PlaybackStatus.IDLE || state.status == PlaybackStatus.ERROR) {
+                state
+            } else {
+                state.copy(
+                    status = if (state.isPaused) PlaybackStatus.PAUSED else PlaybackStatus.PLAYING,
+                    positionMs = originMs,
+                    isSeeking = false,
+                    seekTargetMs = null,
+                )
+            }
+        }
+        val dvrEntry = activeDvrEntry
+        if (current.isGrowingRecording && dvrEntry != null) {
+            val needBackSplice = activeSpliceStartMs > 0L && originMs < activeSpliceStartMs
+            val needOutOfCacheSplice = (lastDemuxerCacheStartMs > 0L && originMs < lastDemuxerCacheStartMs - BACK_CACHE_SEEK_MARGIN_MS) ||
+                (originMs > maxOf(lastDemuxerCacheTimeMs, activeSpliceStartMs) + INDEX_SPLICE_JUMP_THRESHOLD_MS)
+            if (needBackSplice || needOutOfCacheSplice) {
+                val splice = if (originMs <= 5_000L) 0L to 0L else resolveIndexedSpliceForGrowingSeek(dvrEntry, originMs)
+                if (splice != null || needBackSplice) {
+                    val targetSpliceOffset = splice?.first ?: 0L
+                    val targetSpliceMs = splice?.second ?: 0L
+                    val startArg = if (targetSpliceOffset == 0L && originMs > 0L) "+${originMs / 1000L}" else "none"
+                    reloadGrowingStreamAtSplice(
+                        gen = gen,
+                        reqSeq = reqSeq,
+                        dvrId = dvrEntry.id,
+                        spliceOffset = targetSpliceOffset,
+                        spliceStartMs = targetSpliceMs,
+                        mpvStartArg = startArg,
+                    )
+                    return
+                }
+            }
+        }
+        submitMpvTask {
+            if (playbackGeneration.get() != gen || explicitlyStopped) return@submitMpvTask
+            val instance = mpv ?: return@submitMpvTask
+            if (instance.isInitialized) {
+                val mpvOriginMs = (originMs - spliceTimeOffsetMs).coerceAtLeast(0L)
+                val secStr = String.format(Locale.US, "%.3f", mpvOriginMs / 1000.0)
+                instance.command("seek", secStr, "absolute+keyframes")
+            }
+            completedSeekSeq = reqSeq
+            if (seekRequestSeq.get() == reqSeq && !mpvSeeking) {
+                seekGuardUntilElapsedMs = SystemClock.elapsedRealtime() + SEEK_GUARD_SETTLE_MS
             }
         }
     }
@@ -930,13 +1295,26 @@ class MpvPlaybackEngine(
     }
 
     private fun configureDvrCacheLocked(instance: MPV, isGrowing: Boolean) {
-        effectiveForwardCapBytes = DEFAULT_RAM_CACHE_BYTES
-        currentCacheOnDisk = false
-        instance.setPropertyString("cache-on-disk", "no")
-        instance.setPropertyString("demuxer-seekable-cache", "auto")
-        instance.setPropertyString("demuxer-max-bytes", DEFAULT_RAM_CACHE_ARG)
-        instance.setPropertyString("demuxer-max-back-bytes", DEFAULT_RAM_CACHE_ARG)
-        instance.setPropertyString("force-seekable", if (isGrowing) "yes" else "no")
+        if (isGrowing) {
+            // Keep growing DVR playback light on RAM/GC and zero eMMC flash writes:
+            // 24 MiB forward/back RAM buffer handles smooth 1080i playback + short rewinds,
+            // while longer jumps use instant interpolated binary-search MKV splicing.
+            effectiveForwardCapBytes = GROWING_LIGHT_RAM_CACHE_BYTES
+            currentCacheOnDisk = false
+            instance.setPropertyString("cache-on-disk", "no")
+            instance.setPropertyString("demuxer-seekable-cache", "yes")
+            instance.setPropertyString("demuxer-max-bytes", GROWING_LIGHT_RAM_CACHE_ARG)
+            instance.setPropertyString("demuxer-max-back-bytes", GROWING_LIGHT_RAM_CACHE_ARG)
+            instance.setPropertyString("force-seekable", "yes")
+        } else {
+            effectiveForwardCapBytes = DEFAULT_RAM_CACHE_BYTES
+            currentCacheOnDisk = false
+            instance.setPropertyString("cache-on-disk", "no")
+            instance.setPropertyString("demuxer-seekable-cache", "auto")
+            instance.setPropertyString("demuxer-max-bytes", DEFAULT_RAM_CACHE_ARG)
+            instance.setPropertyString("demuxer-max-back-bytes", DEFAULT_RAM_CACHE_ARG)
+            instance.setPropertyString("force-seekable", "no")
+        }
     }
 
     private fun resolveEffectiveTimeshiftBudget(requested: TimeshiftWindow): Pair<Long, Boolean> {
@@ -959,7 +1337,8 @@ class MpvPlaybackEngine(
         cacheMonitorJob?.cancel()
         cacheMonitorJob = engineScope.launch {
             while (isActive && !explicitlyStopped && playbackGeneration.get() == gen) {
-                delay(CACHE_POLL_INTERVAL_MS)
+                val pollMs = if (mpvSeeking || _state.value.isSeeking) SEEK_POLL_INTERVAL_MS else CACHE_POLL_INTERVAL_MS
+                delay(pollMs)
                 if (explicitlyStopped || playbackGeneration.get() != gen) break
                 if (diagnosticsEnabled) {
                     refreshSystemDiagnosticsOffMpvThread()
@@ -971,7 +1350,7 @@ class MpvPlaybackEngine(
                     val dvrEntry = activeDvrEntry
                     var preloadedCacheMap: Map<String, `is`.xyz.mpv.MPVNode>? = null
                     if (dvrEntry != null) {
-                        updateGrowingDvrStateLocked(dvrEntry)
+                        updateGrowingDvrStateLocked(instance, dvrEntry)
                     } else if (activeChannel != null) {
                         preloadedCacheMap = updateLiveTimeshiftStateLocked(instance)
                     }
@@ -1004,7 +1383,7 @@ class MpvPlaybackEngine(
         }
     }
 
-    private fun updateGrowingDvrStateLocked(entry: DvrEntry) {
+    private fun updateGrowingDvrStateLocked(instance: MPV, entry: DvrEntry) {
         val latest = dvrEntryProvider(entry.id) ?: entry
         val stillRecording = latest.state == DvrState.RECORDING
         val effectiveDurMs = if (stillRecording) {
@@ -1020,6 +1399,23 @@ class MpvPlaybackEngine(
         } else {
             maxOf(lastObservedMpvDurationMs, latest.durationSec * 1000L)
         }
+
+        val (rangeStartSec, rangeEndSec) = readSeekableCacheRangeSecLocked(instance)
+        val cacheTimeSec = rangeEndSec ?: runCatching { instance.getPropertyDouble("demuxer-cache-time") }.getOrNull()
+        val timeOffsetMs = if (spliceOffsetResolved) spliceTimeOffsetMs else 0L
+        val cacheStartMs = rangeStartSec?.takeIf { it.isFinite() && it >= 0.0 }?.let {
+            (it * 1000.0).toLong() + timeOffsetMs
+        }
+        val cacheTimeMs = cacheTimeSec?.takeIf { it.isFinite() && it >= 0.0 }?.let {
+            (it * 1000.0).toLong() + timeOffsetMs
+        }
+        if (cacheStartMs != null && spliceOffsetResolved) {
+            lastDemuxerCacheStartMs = cacheStartMs
+        }
+        if (cacheTimeMs != null && spliceOffsetResolved) {
+            lastDemuxerCacheTimeMs = cacheTimeMs
+        }
+
         _state.update { current ->
             if (current.dvrEntryId != entry.id) {
                 current
@@ -1028,6 +1424,7 @@ class MpvPlaybackEngine(
                     durationMs = effectiveDurMs,
                     isGrowingRecording = stillRecording,
                     isSeekable = stillRecording || current.isSeekable,
+                    bufferedPositionMs = cacheTimeMs?.takeIf { it > 0L } ?: current.bufferedPositionMs,
                 )
             }
         }
@@ -1244,7 +1641,7 @@ class MpvPlaybackEngine(
             "core-idle" -> _state.update { current ->
                 if (current.status == PlaybackStatus.ERROR || current.status == PlaybackStatus.IDLE) {
                     current
-                } else if (!value && !current.isPaused) {
+                } else if (!value && !current.isPaused && !mpvPausedForCache) {
                     current.copy(status = PlaybackStatus.PLAYING)
                 } else {
                     current
@@ -1253,6 +1650,50 @@ class MpvPlaybackEngine(
             "seekable" -> _state.update { current ->
                 if (current.status == PlaybackStatus.IDLE || current.status == PlaybackStatus.ERROR) current
                 else current.copy(isSeekable = value)
+            }
+            "seeking" -> {
+                mpvSeeking = value
+                if (value) {
+                    seekGuardUntilElapsedMs = SystemClock.elapsedRealtime() + SEEK_GUARD_MAX_MS
+                    _state.update { current ->
+                        if (current.status == PlaybackStatus.IDLE || current.status == PlaybackStatus.ERROR) {
+                            current
+                        } else {
+                            current.copy(
+                                isSeeking = true,
+                                seekTargetMs = activeSeekTargetMs ?: current.seekTargetMs,
+                            )
+                        }
+                    }
+                } else if (completedSeekSeq >= seekRequestSeq.get()) {
+                    activeSeekTargetMs = null
+                    seekGuardUntilElapsedMs = 0L
+                    lastPositionEmitElapsedMs = 0L
+                    _state.update { current ->
+                        if (!current.isSeeking && current.seekTargetMs == null) {
+                            current
+                        } else {
+                            current.copy(
+                                isSeeking = false,
+                                seekTargetMs = null,
+                            )
+                        }
+                    }
+                }
+            }
+            "paused-for-cache" -> {
+                mpvPausedForCache = value
+                _state.update { current ->
+                    if (current.status == PlaybackStatus.IDLE || current.status == PlaybackStatus.ERROR) {
+                        current
+                    } else if (value && !current.isPaused) {
+                        current.copy(status = PlaybackStatus.BUFFERING)
+                    } else if (!value) {
+                        current.copy(status = if (current.isPaused) PlaybackStatus.PAUSED else PlaybackStatus.PLAYING)
+                    } else {
+                        current
+                    }
+                }
             }
         }
     }
@@ -1282,7 +1723,12 @@ class MpvPlaybackEngine(
         if (!isCurrentPlaybackEvent()) return
         when (property) {
             "time-pos" -> {
-                val posMs = (value * 1000.0).toLong().coerceAtLeast(0L)
+                val rawPosMs = (value * 1000.0).toLong().coerceAtLeast(0L)
+                if (activeSpliceStartMs > 0L && !spliceOffsetResolved) {
+                    spliceTimeOffsetMs = if (rawPosMs >= activeSpliceStartMs - 5_000L) 0L else activeSpliceStartMs
+                    spliceOffsetResolved = true
+                }
+                val posMs = rawPosMs + spliceTimeOffsetMs
                 val nowElapsed = SystemClock.elapsedRealtime()
                 if (nowElapsed < seekGuardUntilElapsedMs) {
                     return
@@ -1375,13 +1821,39 @@ class MpvPlaybackEngine(
                 } else if (eventId == MPV.mpvEvent.MPV_EVENT_PLAYBACK_RESTART &&
                     completedSeekSeq >= seekRequestSeq.get()
                 ) {
+                    mpvSeeking = false
+                    activeSeekTargetMs = null
                     seekGuardUntilElapsedMs = 0L
                     lastPositionEmitElapsedMs = 0L
+                    _state.update { current ->
+                        if (!current.isSeeking && current.seekTargetMs == null) {
+                            current
+                        } else {
+                            current.copy(
+                                isSeeking = false,
+                                seekTargetMs = null,
+                            )
+                        }
+                    }
                 }
                 submitMpvTask {
                     if (explicitlyStopped || playbackGeneration.get() != eventGen) return@submitMpvTask
                     val instance = mpv ?: return@submitMpvTask
                     if (instance.isInitialized) {
+                        if (eventId == MPV.mpvEvent.MPV_EVENT_FILE_LOADED && activeSpliceStartMs > 0L && !spliceOffsetResolved) {
+                            val initialPosSec = runCatching { instance.getPropertyDouble("time-pos") }
+                                .getOrNull()
+                                ?.takeIf { it.isFinite() && it >= 0.0 }
+                            if (initialPosSec != null) {
+                                val initialPosMs = (initialPosSec * 1000.0).toLong()
+                                spliceTimeOffsetMs = if (initialPosMs >= activeSpliceStartMs - 5_000L) {
+                                    0L
+                                } else {
+                                    activeSpliceStartMs
+                                }
+                                spliceOffsetResolved = true
+                            }
+                        }
                         refreshTracksLocked(instance)
                         val realPaused = runCatching { instance.getPropertyBoolean("pause") }.getOrNull()
                         val realHwdec = runCatching { instance.getPropertyString("hwdec-current") }.getOrNull()
@@ -1419,6 +1891,7 @@ class MpvPlaybackEngine(
                     if (isErrorReason) {
                         cacheMonitorJob?.cancel()
                         cacheMonitorJob = null
+                        resetSeekTracking()
                         val fileErr = runCatching { map?.get("file_error")?.asString() }.getOrNull()
                         val msg = if (!fileErr.isNullOrBlank()) {
                             "Recording playback error: $fileErr"
@@ -1429,6 +1902,8 @@ class MpvPlaybackEngine(
                             if (current.dvrEntryId == dvrEntry.id && current.error == null) {
                                 current.copy(
                                     status = PlaybackStatus.ERROR,
+                                    isSeeking = false,
+                                    seekTargetMs = null,
                                     error = PlaybackError.PlaybackFailed(msg),
                                 )
                             } else {
@@ -1438,6 +1913,7 @@ class MpvPlaybackEngine(
                     } else if (!isStoppedReason) {
                         cacheMonitorJob?.cancel()
                         cacheMonitorJob = null
+                        resetSeekTracking()
                         playbackGeneration.incrementAndGet()
                         activeDvrEntry = null
                         _state.update { current ->
@@ -1446,6 +1922,8 @@ class MpvPlaybackEngine(
                                     status = PlaybackStatus.IDLE,
                                     isCompleted = true,
                                     isGrowingRecording = false,
+                                    isSeeking = false,
+                                    seekTargetMs = null,
                                 )
                             } else {
                                 current
@@ -1818,22 +2296,32 @@ class MpvPlaybackEngine(
         private const val POSITION_EMIT_INTERVAL_MS = 250L
         private const val POSITION_JUMP_THRESHOLD_MS = 1_500L
         private const val CACHE_POLL_INTERVAL_MS = 500L
+        private const val SEEK_POLL_INTERVAL_MS = 200L
         private const val MEMORY_STATS_SAMPLE_INTERVAL_MS = 1_500L
         private const val DISK_CACHE_SAMPLE_INTERVAL_MS = 2_000L
         private const val BYTES_PER_MIB = 1024L * 1024L
         private const val DEFAULT_RAM_CACHE_MIB = 64L
         private const val DEFAULT_RAM_CACHE_BYTES = DEFAULT_RAM_CACHE_MIB * BYTES_PER_MIB
         private const val DEFAULT_RAM_CACHE_ARG = "${DEFAULT_RAM_CACHE_MIB}MiB"
+        private const val GROWING_LIGHT_RAM_CACHE_MIB = 24L
+        private const val GROWING_LIGHT_RAM_CACHE_BYTES = GROWING_LIGHT_RAM_CACHE_MIB * BYTES_PER_MIB
+        private const val GROWING_LIGHT_RAM_CACHE_ARG = "${GROWING_LIGHT_RAM_CACHE_MIB}MiB"
         private const val DISK_SAFETY_RESERVE_BYTES = 512L * BYTES_PER_MIB
         private const val SURFACE_DETACH_TIMEOUT_MS = 1_500L
         private const val SEEK_GUARD_SUBMIT_MS = 1_200L
         private const val SEEK_GUARD_SETTLE_MS = 450L
+        private const val SEEK_GUARD_MAX_MS = 30_000L
         private const val MPV_VOLUME_DUCKED = 25.0
         private const val MPV_VOLUME_FULL = 100.0
         private const val TIMESHIFT_WARN_RATIO = 0.90
         private const val TIMESHIFT_FULL_RESUME_RATIO = 0.98
         private const val TIMESHIFT_NOTICE_SHORT_MS = 4_000L
         private const val TIMESHIFT_NOTICE_LONG_MS = 6_000L
+        private const val LIVE_EDGE_NOTICE_MS = 2_000L
+        private const val INDEX_SPLICE_MAX_DELTA_MS = 5_000L
+        private const val INDEX_SPLICE_JUMP_THRESHOLD_MS = 15_000L
+        private const val BACK_CACHE_SEEK_MARGIN_MS = 2_000L
+        private const val COLD_RESUME_BINARY_SEARCH_MIN_SEC = 15L
         private const val TIMESHIFT_NEARLY_FULL_NOTICE = "Timeshift pause buffer nearly full"
     }
 }

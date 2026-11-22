@@ -180,8 +180,9 @@ internal fun MobilePlayerScreen(
     val isAudioStage = playbackState.isRadio || playbackState.isAudioOnly
     val hasError = playbackState.error != null
 
-    BackHandler(enabled = trackPanelOpen || infoPanelOpen || quickZapOpen) {
+    BackHandler(enabled = trackPanelOpen || infoPanelOpen || quickZapOpen || playbackState.isSeeking) {
         when {
+            playbackState.isSeeking -> playbackEngine.cancelSeek()
             infoPanelOpen -> infoPanelOpen = false
             trackPanelOpen -> trackPanelOpen = false
             quickZapOpen -> quickZapOpen = false
@@ -232,9 +233,9 @@ internal fun MobilePlayerScreen(
         }
     }
 
-    LaunchedEffect(hudVisible, hudInteractionNonce, trackPanelOpen, infoPanelOpen, quickZapOpen, playbackState.status, isScrubbing, isInPip, isAudioStage) {
+    LaunchedEffect(hudVisible, hudInteractionNonce, trackPanelOpen, infoPanelOpen, quickZapOpen, playbackState.status, playbackState.isSeeking, isScrubbing, isInPip, isAudioStage) {
         if (hudVisible && !trackPanelOpen && !infoPanelOpen && !quickZapOpen && !isScrubbing && !isInPip &&
-            playbackState.status == PlaybackStatus.PLAYING && !isAudioStage
+            !playbackState.isSeeking && playbackState.status == PlaybackStatus.PLAYING && !isAudioStage
         ) {
             delay(MuxGridDurations.MobileHudAutoHideMs)
             hudVisible = false
@@ -276,19 +277,32 @@ internal fun MobilePlayerScreen(
                                     } else {
                                         -PlaybackSeekDefaults.SEEK_BACK_STEP_MS
                                     }
-                                    val stepSec = (deltaMs / 1_000L).toInt()
-                                    playbackEngine.seekBy(deltaMs)
-                                    val nowMs = SystemClock.elapsedRealtime()
-                                    val sameDirection = (stepSec > 0 && accumulatedSeekDelta > 0) ||
-                                        (stepSec < 0 && accumulatedSeekDelta < 0)
-                                    accumulatedSeekDelta = if (nowMs - lastSeekTapElapsedMs <= 1_200L && sameDirection) {
-                                        accumulatedSeekDelta + stepSec
+                                    val basePosMs = if (playbackState.isSeeking) {
+                                        playbackState.seekTargetMs ?: playbackState.positionMs
                                     } else {
-                                        stepSec
+                                        playbackState.positionMs
                                     }
-                                    lastSeekTapElapsedMs = nowMs
-                                    seekFeedbackNonce++
-                                    seekFeedback = SeekTapFeedback(accumulatedSeekDelta, seekFeedbackNonce)
+                                    val clampedTargetMs = playbackState.clampSeekPositionMs(basePosMs + deltaMs)
+                                    val actualDeltaMs = clampedTargetMs - basePosMs
+                                    val stepSec = if (actualDeltaMs == 0L) {
+                                        0
+                                    } else {
+                                        ((actualDeltaMs + if (actualDeltaMs > 0L) 500L else -500L) / 1_000L).toInt()
+                                    }
+                                    playbackEngine.seekBy(deltaMs)
+                                    if (stepSec != 0) {
+                                        val nowMs = SystemClock.elapsedRealtime()
+                                        val sameDirection = (stepSec > 0 && accumulatedSeekDelta > 0) ||
+                                            (stepSec < 0 && accumulatedSeekDelta < 0)
+                                        accumulatedSeekDelta = if (nowMs - lastSeekTapElapsedMs <= 1_200L && sameDirection) {
+                                            accumulatedSeekDelta + stepSec
+                                        } else {
+                                            stepSec
+                                        }
+                                        lastSeekTapElapsedMs = nowMs
+                                        seekFeedbackNonce++
+                                        seekFeedback = SeekTapFeedback(accumulatedSeekDelta, seekFeedbackNonce)
+                                    }
                                 },
                             )
                         }
@@ -692,8 +706,17 @@ internal fun MobilePlayerScreen(
                 ) {
                     if (playbackState.isRecordingPlayback) {
                         val durationMs = playbackState.durationMs.coerceAtLeast(1L)
+                        val seekTargetMs = playbackState.seekTargetMs
                         val displayPosMs = if (isScrubbing) scrubPositionMs else playbackState.positionMs.coerceIn(0L, durationMs)
                         val sliderFraction = (displayPosMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                        val bufferedFraction = playbackState.bufferedPositionMs
+                            .takeIf { it > 0L }
+                            ?.let { (it.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) }
+                        val seekTargetFraction = if (!isScrubbing && playbackState.isSeeking && seekTargetMs != null) {
+                            (seekTargetMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                        } else {
+                            null
+                        }
                         val animatedFraction by animateFloatAsState(
                             targetValue = sliderFraction,
                             animationSpec = tween(durationMillis = MuxGridDurations.Progress, easing = LinearEasing),
@@ -736,7 +759,8 @@ internal fun MobilePlayerScreen(
                                 value = if (isScrubbing) sliderFraction else animatedFraction,
                                 onValueChange = { fraction ->
                                     isScrubbing = true
-                                    scrubPositionMs = (fraction.coerceIn(0f, 1f) * durationMs).toLong()
+                                    val rawMs = (fraction.coerceIn(0f, 1f) * durationMs).toLong()
+                                    scrubPositionMs = playbackState.clampSeekPositionMs(rawMs)
                                 },
                                 onValueChangeFinished = {
                                     isScrubbing = false
@@ -744,6 +768,8 @@ internal fun MobilePlayerScreen(
                                 },
                                 activeTrackColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.Accent,
                                 inactiveTrackColor = MuxGridColors.TrackBackground,
+                                bufferedFraction = bufferedFraction,
+                                seekTargetFraction = seekTargetFraction,
                             )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),

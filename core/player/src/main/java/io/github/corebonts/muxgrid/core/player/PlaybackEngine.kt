@@ -25,6 +25,7 @@ interface PlaybackEngine {
     fun setPaused(paused: Boolean)
     fun seekTo(positionMs: Long)
     fun seekBy(deltaMs: Long)
+    fun cancelSeek()
     fun seekToLiveEdge()
     fun setAudioTrack(trackId: Int)
     fun setSubtitleTrack(trackId: Int?)

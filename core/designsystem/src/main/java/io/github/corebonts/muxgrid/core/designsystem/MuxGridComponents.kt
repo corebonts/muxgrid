@@ -274,8 +274,12 @@ fun LiveProgressBar(
     fillColor: Color = MuxGridColors.ProgressFill,
     height: Dp = 2.dp,
     animate: Boolean = false,
+    bufferedFraction: Float? = null,
+    seekTargetFraction: Float? = null,
 ) {
     val clamped = progress.coerceIn(0f, 1f)
+    val clampedBuffered = bufferedFraction?.coerceIn(0f, 1f)
+    val clampedTarget = seekTargetFraction?.coerceIn(0f, 1f)
     val displayProgress = if (animate) {
         animateFloatAsState(
             targetValue = clamped,
@@ -286,6 +290,8 @@ fun LiveProgressBar(
         clamped
     }
     val trackBackground = MuxGridColors.TrackBackground
+    val bufferedColor = fillColor.copy(alpha = 0.34f)
+    val targetMarkerColor = Color.White
     Spacer(
         modifier = modifier
             .height(height)
@@ -295,11 +301,31 @@ fun LiveProgressBar(
                     color = trackBackground,
                     cornerRadius = radius,
                 )
+                if (clampedBuffered != null && clampedBuffered > displayProgress) {
+                    drawRoundRect(
+                        color = bufferedColor,
+                        size = Size(size.width * clampedBuffered, size.height),
+                        cornerRadius = radius,
+                    )
+                }
                 if (displayProgress > 0f) {
                     drawRoundRect(
                         color = fillColor,
                         size = Size(size.width * displayProgress, size.height),
                         cornerRadius = radius,
+                    )
+                }
+                if (clampedTarget != null) {
+                    val markerWidth = 3.dp.toPx().coerceAtLeast(2f)
+                    val markerHeight = (size.height + 6.dp.toPx()).coerceAtLeast(size.height)
+                    val x = (size.width * clampedTarget - markerWidth / 2f)
+                        .coerceIn(0f, (size.width - markerWidth).coerceAtLeast(0f))
+                    val y = (size.height - markerHeight) / 2f
+                    drawRoundRect(
+                        color = targetMarkerColor,
+                        topLeft = Offset(x, y),
+                        size = Size(markerWidth, markerHeight),
+                        cornerRadius = CornerRadius(markerWidth / 2f, markerWidth / 2f),
                     )
                 }
             },
@@ -404,12 +430,16 @@ fun MuxGridSeekBar(
     activeTrackColor: Color = MuxGridColors.Accent,
     inactiveTrackColor: Color = MuxGridColors.TrackBackground,
     thumbColor: Color = MuxGridColors.SeekThumb,
+    bufferedFraction: Float? = null,
+    seekTargetFraction: Float? = null,
 ) {
     var widthPx by remember { mutableIntStateOf(1) }
     var dragging by remember { mutableStateOf(false) }
     val currentOnValueChange by rememberUpdatedState(onValueChange)
     val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
     val clamped = value.coerceIn(0f, 1f)
+    val clampedBuffered = bufferedFraction?.coerceIn(0f, 1f)
+    val clampedTarget = seekTargetFraction?.coerceIn(0f, 1f)
     val barHeight by animateDpAsState(
         targetValue = if (dragging) 6.dp else 4.dp,
         animationSpec = tween(durationMillis = MuxGridDurations.Fast),
@@ -459,6 +489,15 @@ fun MuxGridSeekBar(
                 .clip(MuxGridShapes.SeekTrack)
                 .background(inactiveTrackColor),
         ) {
+            if (clampedBuffered != null && clampedBuffered > clamped) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(clampedBuffered)
+                        .fillMaxHeight()
+                        .clip(MuxGridShapes.SeekTrack)
+                        .background(activeTrackColor.copy(alpha = 0.34f)),
+                )
+            }
             if (clamped > 0f) {
                 Box(
                     modifier = Modifier
@@ -468,6 +507,20 @@ fun MuxGridSeekBar(
                         .background(activeTrackColor),
                 )
             }
+        }
+        if (clampedTarget != null && !dragging) {
+            Box(
+                modifier = Modifier
+                    .offset {
+                        val markerWidthPx = 3.dp.toPx()
+                        val x = (clampedTarget * widthPx - markerWidthPx / 2f).roundToInt()
+                            .coerceIn(0, (widthPx - markerWidthPx.roundToInt()).coerceAtLeast(0))
+                        IntOffset(x, 0)
+                    }
+                    .size(width = 3.dp, height = 12.dp)
+                    .clip(MuxGridShapes.SeekTrack)
+                    .background(Color.White),
+            )
         }
         if (dragging) {
             Box(

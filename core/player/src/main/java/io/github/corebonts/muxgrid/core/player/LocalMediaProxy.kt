@@ -2,6 +2,9 @@ package io.github.corebonts.muxgrid.core.player
 
 import io.github.corebonts.muxgrid.core.model.GrowingDvrFile
 import io.github.corebonts.muxgrid.core.model.StreamTicket
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
@@ -47,6 +50,8 @@ class LocalMediaProxy(
         throw UnsupportedOperationException("Growing DVR file opener is not configured")
     },
     private val isDvrRecordingProvider: (dvrId: Long) -> Boolean = { false },
+    private val growingIndexStore: GrowingMkvIndexStore? = null,
+    private val dvrStartEpochProvider: (dvrId: Long) -> Long = { 0L },
     private val onLiveOpenFailed: (channelId: Long, reason: String, isEmptyReply: Boolean) -> Unit = { _, _, _ -> },
     private val ticketTtlMs: Long = DEFAULT_TICKET_TTL_MS,
     private val growingPollIntervalMs: Long = DEFAULT_GROWING_POLL_INTERVAL_MS,
@@ -142,8 +147,12 @@ class LocalMediaProxy(
     fun dvrStreamUrl(dvrId: Long): String =
         "http://127.0.0.1:$port/$sessionToken/dvr/$dvrId"
 
-    fun growingDvrStreamUrl(dvrId: Long): String =
-        "http://127.0.0.1:$port/$sessionToken/growing/$dvrId"
+    fun growingDvrStreamUrl(dvrId: Long, spliceOffset: Long = 0L): String =
+        if (spliceOffset > 0L) {
+            "http://127.0.0.1:$port/$sessionToken/growing/$dvrId?spliceOffset=$spliceOffset"
+        } else {
+            "http://127.0.0.1:$port/$sessionToken/growing/$dvrId"
+        }
 
     fun stopActiveStream() {
         activeLiveUpstream.getAndSet(null)?.close()
@@ -202,7 +211,9 @@ class LocalMediaProxy(
                 return
             }
             val method = parts[0].uppercase()
-            val rawPath = parts[1].substringBefore('?')
+            val fullTarget = parts[1]
+            val rawPath = fullTarget.substringBefore('?')
+            val queryString = if ('?' in fullTarget) fullTarget.substringAfter('?') else ""
             val segments = rawPath.trimStart('/').split('/')
             if (segments.size != 3 || segments[0] != sessionToken) {
                 writeHttpError(clientSocket.getOutputStream(), 403, "Forbidden")
@@ -237,7 +248,17 @@ class LocalMediaProxy(
                     val handle = ActiveStreamHandle(clientSocket = clientSocket)
                     dvrHandle = handle
                     activeDvrUpstreams.add(handle)
-                    relayGrowingDvrStream(method, id, rangeHeader, clientSocket, clientIn, handle, clientSocket.getOutputStream())
+                    val spliceOffset = parseQueryLong(queryString, "spliceOffset")?.coerceAtLeast(0L) ?: 0L
+                    relayGrowingDvrStream(
+                        method = method,
+                        dvrId = id,
+                        spliceOffset = spliceOffset,
+                        rangeHeader = rangeHeader,
+                        clientSocket = clientSocket,
+                        clientIn = clientIn,
+                        handle = handle,
+                        clientOut = clientSocket.getOutputStream(),
+                    )
                 }
                 else -> writeHttpError(clientSocket.getOutputStream(), 404, "Not Found")
             }
@@ -503,9 +524,38 @@ class LocalMediaProxy(
         }
     }
 
+    private fun parseQueryLong(query: String, name: String): Long? {
+        if (query.isEmpty()) return null
+        for (pair in query.split('&')) {
+            val eq = pair.indexOf('=')
+            if (eq > 0 && pair.substring(0, eq) == name) {
+                return pair.substring(eq + 1).toLongOrNull()
+            }
+        }
+        return null
+    }
+
+    private fun sniffGrowingContentType(
+        initialProbe: ByteArray?,
+        file: GrowingDvrFile,
+        currentRealSize: Long,
+    ): String {
+        val probe = when {
+            initialProbe != null && initialProbe.size >= 4 -> initialProbe
+            currentRealSize >= 4L -> runCatching { runBlocking { file.read(0L, 4) } }.getOrNull()
+            else -> null
+        } ?: return "application/octet-stream"
+        return when {
+            MkvEbml.isEbmlMagic(probe) -> "video/x-matroska"
+            probe.isNotEmpty() && (probe[0].toInt() and 0xFF) == 0x47 -> "video/mp2t"
+            else -> "application/octet-stream"
+        }
+    }
+
     private fun relayGrowingDvrStream(
         method: String,
         dvrId: Long,
+        spliceOffset: Long,
         rangeHeader: String?,
         clientSocket: Socket,
         clientIn: InputStream,
@@ -521,46 +571,90 @@ class LocalMediaProxy(
             return
         }
 
+        val mkvIndex = growingIndexStore?.getOrLoad(dvrId, dvrStartEpochProvider(dvrId))
+        val spliceHeader = if (spliceOffset > 0L) mkvIndex?.headerBytesRef() else null
+        val useSplice = spliceOffset > 0L && spliceHeader != null && spliceHeader.isNotEmpty()
+        val headerLen = if (useSplice) spliceHeader.size.toLong() else 0L
+
+        fun toVirtualSize(realSize: Long): Long = if (useSplice) {
+            headerLen + (realSize - spliceOffset).coerceAtLeast(0L)
+        } else {
+            realSize
+        }
+
+        fun toRealOffset(virtualOffset: Long): Long = if (useSplice) {
+            spliceOffset + (virtualOffset - headerLen).coerceAtLeast(0L)
+        } else {
+            virtualOffset
+        }
+
         activeTransportMode = "HTSP VFS (growing)"
         activeUpstreamHost = "HTSP VFS"
         activeUpstreamStatus = "Tail-follow"
 
         try {
-            var currentSize = file.initialSize.coerceAtLeast(0L)
+            var currentRealSize = file.initialSize.coerceAtLeast(0L)
+            var currentVirtualSize = toVirtualSize(currentRealSize)
             val rangeSpec = parseByteRange(rangeHeader)
             var hasRange = false
-            var startOffset = 0L
-            var requestedEnd: Long? = null
+            var startVirtualOffset = 0L
+            var requestedVirtualEnd: Long? = null
             if (rangeSpec != null) {
                 hasRange = true
                 when (rangeSpec) {
                     is ByteRangeSpec.FromTo -> {
-                        startOffset = rangeSpec.start
-                        requestedEnd = rangeSpec.endInclusive
+                        startVirtualOffset = rangeSpec.start
+                        requestedVirtualEnd = rangeSpec.endInclusive
                     }
                     is ByteRangeSpec.Suffix -> {
-                        startOffset = (currentSize - rangeSpec.suffixLength).coerceAtLeast(0L)
+                        startVirtualOffset = (currentVirtualSize - rangeSpec.suffixLength).coerceAtLeast(0L)
                     }
                 }
             }
 
+            // When starting at byte 0 of an un-cached stream for GET, prefetch chunk 0 once so we
+            // sniff Content-Type, capture the MKV header, and stream the exact same bytes without a
+            // duplicate 4-byte probe RPC.
+            var prefetchedChunk0: ByteArray? = null
+            val cachedHeaderRef = spliceHeader ?: mkvIndex?.headerBytesRef()
+            val contentType = when {
+                cachedHeaderRef != null -> "video/x-matroska"
+                method != "HEAD" && !useSplice && startVirtualOffset == 0L && currentRealSize > 0L -> {
+                    val firstMax = if (requestedVirtualEnd != null) {
+                        minOf(GROWING_READ_CHUNK_BYTES.toLong(), requestedVirtualEnd + 1L).toInt()
+                    } else {
+                        GROWING_READ_CHUNK_BYTES
+                    }
+                    val first = if (firstMax > 0) {
+                        runCatching { runBlocking { file.read(0L, firstMax) } }.getOrNull()
+                    } else {
+                        null
+                    }
+                    if (first != null && first.isNotEmpty()) {
+                        prefetchedChunk0 = first
+                    }
+                    sniffGrowingContentType(first, file, currentRealSize)
+                }
+                else -> sniffGrowingContentType(null, file, currentRealSize)
+            }
+
             if (method == "HEAD") {
-                if (hasRange && startOffset >= currentSize && !isDvrRecordingProvider(dvrId)) {
-                    val headers = "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */$currentSize\r\nConnection: close\r\n\r\n"
+                if (hasRange && startVirtualOffset >= currentVirtualSize && !isDvrRecordingProvider(dvrId)) {
+                    val headers = "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */$currentVirtualSize\r\nConnection: close\r\n\r\n"
                     clientOut.write(headers.toByteArray(StandardCharsets.US_ASCII))
                     clientOut.flush()
                     return
                 }
                 val headers = buildString {
-                    if (hasRange && currentSize > 0L && startOffset < currentSize) {
-                        val maxAvailableEnd = currentSize - 1L
-                        val headerEnd = minOf(requestedEnd ?: maxAvailableEnd, maxAvailableEnd)
+                    if (hasRange && currentVirtualSize > 0L && startVirtualOffset < currentVirtualSize) {
+                        val maxAvailableEnd = currentVirtualSize - 1L
+                        val headerEnd = minOf(requestedVirtualEnd ?: maxAvailableEnd, maxAvailableEnd)
                         append("HTTP/1.1 206 Partial Content\r\n")
-                        append("Content-Range: bytes $startOffset-$headerEnd/*\r\n")
+                        append("Content-Range: bytes $startVirtualOffset-$headerEnd/*\r\n")
                     } else {
                         append("HTTP/1.1 200 OK\r\n")
                     }
-                    append("Content-Type: video/x-matroska\r\n")
+                    append("Content-Type: $contentType\r\n")
                     append("Accept-Ranges: bytes\r\n")
                     append("Connection: close\r\n\r\n")
                 }
@@ -569,13 +663,14 @@ class LocalMediaProxy(
                 return
             }
 
-            if (hasRange && startOffset >= currentSize) {
+            if (hasRange && startVirtualOffset >= currentVirtualSize) {
                 while (!handle.cancelled.get()) {
                     val stillRecording = isDvrRecordingProvider(dvrId)
-                    currentSize = runBlocking { file.statSize() }.coerceAtLeast(0L)
-                    if (currentSize > startOffset) break
+                    currentRealSize = runBlocking { file.statSize() }.coerceAtLeast(0L)
+                    currentVirtualSize = toVirtualSize(currentRealSize)
+                    if (currentVirtualSize > startVirtualOffset) break
                     if (!stillRecording) {
-                        val headers = "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */$currentSize\r\nConnection: close\r\n\r\n"
+                        val headers = "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */$currentVirtualSize\r\nConnection: close\r\n\r\n"
                         clientOut.write(headers.toByteArray(StandardCharsets.US_ASCII))
                         clientOut.flush()
                         return
@@ -590,17 +685,17 @@ class LocalMediaProxy(
 
             val respHeaders = buildString {
                 if (hasRange) {
-                    val headerEnd = if (requestedEnd != null) {
-                        minOf(requestedEnd, (currentSize - 1L).coerceAtLeast(startOffset))
+                    val headerEnd = if (requestedVirtualEnd != null) {
+                        minOf(requestedVirtualEnd, (currentVirtualSize - 1L).coerceAtLeast(startVirtualOffset))
                     } else {
-                        (currentSize - 1L).coerceAtLeast(startOffset)
+                        (currentVirtualSize - 1L).coerceAtLeast(startVirtualOffset)
                     }
                     append("HTTP/1.1 206 Partial Content\r\n")
-                    append("Content-Range: bytes $startOffset-$headerEnd/*\r\n")
+                    append("Content-Range: bytes $startVirtualOffset-$headerEnd/*\r\n")
                 } else {
                     append("HTTP/1.1 200 OK\r\n")
                 }
-                append("Content-Type: video/x-matroska\r\n")
+                append("Content-Type: $contentType\r\n")
                 append("Accept-Ranges: bytes\r\n")
                 append("Transfer-Encoding: chunked\r\n")
                 append("Connection: close\r\n\r\n")
@@ -608,33 +703,169 @@ class LocalMediaProxy(
             clientOut.write(respHeaders.toByteArray(StandardCharsets.US_ASCII))
             clientOut.flush()
 
-            var offset = startOffset
-            while (!handle.cancelled.get()) {
-                if (requestedEnd != null && offset > requestedEnd) break
-                val remaining = if (requestedEnd != null) (requestedEnd - offset + 1L) else Long.MAX_VALUE
-                val toRead = minOf(GROWING_READ_CHUNK_BYTES.toLong(), remaining).toInt()
-                val chunk = runBlocking { file.read(offset, toRead) }
-                if (chunk.isNotEmpty()) {
-                    writeHttpChunk(clientOut, chunk)
-                    activeStreamBytes.addAndGet(chunk.size.toLong())
-                    offset += chunk.size
-                    continue
+            var virtualOffset = startVirtualOffset
+            // If splicing, emit any requested slice of the cached MKV header first.
+            if (useSplice && virtualOffset < headerLen) {
+                val endIdx = if (requestedVirtualEnd != null) {
+                    minOf(requestedVirtualEnd + 1L, headerLen).toInt()
+                } else {
+                    headerLen.toInt()
                 }
-
-                val stillRecording = isDvrRecordingProvider(dvrId)
-                val latestSize = runBlocking { file.statSize() }.coerceAtLeast(0L)
-                if (latestSize > offset) {
-                    continue
-                }
-                if (!stillRecording) {
-                    break
-                }
-                if (!waitForPollOrDisconnect(clientSocket, clientIn, growingPollIntervalMs, handle)) {
-                    return
+                val startIdx = virtualOffset.toInt()
+                if (endIdx > startIdx) {
+                    val headerSlice = if (startIdx == 0 && endIdx == spliceHeader.size) {
+                        spliceHeader
+                    } else {
+                        spliceHeader.copyOfRange(startIdx, endIdx)
+                    }
+                    writeHttpChunk(clientOut, headerSlice)
+                    activeStreamBytes.addAndGet(headerSlice.size.toLong())
+                    virtualOffset += headerSlice.size
                 }
             }
 
-            if (!handle.cancelled.get()) {
+            var realOffset = toRealOffset(virtualOffset)
+            val requestedRealEnd: Long? = requestedVirtualEnd?.let { vEnd ->
+                if (useSplice) {
+                    if (vEnd < headerLen) realOffset - 1L else spliceOffset + (vEnd - headerLen)
+                } else {
+                    vEnd
+                }
+            }
+            var knownRealSize = currentRealSize
+            var effectiveChunkSize = GROWING_READ_CHUNK_BYTES
+            var clientDisconnected = false
+            // Capture the opening MKV header (0..firstClusterOffset) or mark NON_MKV once, then
+            // drop the capturer so ongoing streaming has zero per-chunk CPU/GC overhead.
+            var headerCapturer = if (
+                mkvIndex != null &&
+                !mkvIndex.hasHeader &&
+                mkvIndex.containerKind != GrowingMkvIndex.ContainerKind.NON_MKV &&
+                realOffset == 0L
+            ) {
+                MkvHeaderCapturer(mkvIndex)
+            } else {
+                null
+            }
+
+            if (prefetchedChunk0 != null && !handle.cancelled.get()) {
+                writeHttpChunk(clientOut, prefetchedChunk0)
+                activeStreamBytes.addAndGet(prefetchedChunk0.size.toLong())
+                if (headerCapturer != null) {
+                    headerCapturer.onChunk(0L, prefetchedChunk0)
+                    if (headerCapturer.isDone) headerCapturer = null
+                }
+                realOffset += prefetchedChunk0.size
+                if (realOffset > knownRealSize) {
+                    knownRealSize = realOffset
+                }
+                val firstRequested = if (requestedRealEnd != null) {
+                    minOf(GROWING_READ_CHUNK_BYTES.toLong(), requestedRealEnd + 1L).toInt()
+                } else {
+                    GROWING_READ_CHUNK_BYTES
+                }
+                if (prefetchedChunk0.size < firstRequested &&
+                    firstRequested <= currentRealSize &&
+                    prefetchedChunk0.size >= GROWING_MIN_CHUNK_BYTES
+                ) {
+                    effectiveChunkSize = prefetchedChunk0.size
+                }
+            }
+
+            data class InFlightRead(
+                val startOffset: Long,
+                val requested: Int,
+                val deferred: Deferred<ByteArray>,
+            )
+
+            runBlocking {
+                val inFlight = ArrayDeque<InFlightRead>(GROWING_PIPELINE_DEPTH)
+                var nextDispatchOffset = realOffset
+
+                fun cancelInFlight() {
+                    while (inFlight.isNotEmpty()) {
+                        inFlight.removeFirst().deferred.cancel()
+                    }
+                    nextDispatchOffset = realOffset
+                }
+
+                try {
+                    while (!handle.cancelled.get()) {
+                        if (requestedRealEnd != null && realOffset > requestedRealEnd) break
+
+                        // Pipeline concurrent HTSP fileRead calls while behind the known write head
+                        // so linear cluster scans saturate network bandwidth instead of stalling on RTT.
+                        while (!handle.cancelled.get() && inFlight.size < GROWING_PIPELINE_DEPTH) {
+                            if (requestedRealEnd != null && nextDispatchOffset > requestedRealEnd) break
+                            val remaining = if (requestedRealEnd != null) {
+                                (requestedRealEnd - nextDispatchOffset + 1L)
+                            } else {
+                                Long.MAX_VALUE
+                            }
+                            val availableBehindHead = knownRealSize - nextDispatchOffset
+                            if (inFlight.isNotEmpty() && availableBehindHead <= 0L) break
+
+                            val toRead = if (availableBehindHead > 0L) {
+                                minOf(effectiveChunkSize.toLong(), remaining, availableBehindHead).toInt()
+                            } else {
+                                minOf(effectiveChunkSize.toLong(), remaining).toInt()
+                            }
+                            if (toRead <= 0) break
+
+                            val readOffset = nextDispatchOffset
+                            val deferred = async(Dispatchers.IO) { file.read(readOffset, toRead) }
+                            inFlight.addLast(InFlightRead(readOffset, toRead, deferred))
+                            nextDispatchOffset += toRead
+                        }
+
+                        if (inFlight.isEmpty()) break
+                        val head = inFlight.removeFirst()
+                        val chunk = head.deferred.await()
+                        if (chunk.isNotEmpty()) {
+                            writeHttpChunk(clientOut, chunk)
+                            activeStreamBytes.addAndGet(chunk.size.toLong())
+                            if (headerCapturer != null) {
+                                headerCapturer.onChunk(realOffset, chunk)
+                                if (headerCapturer.isDone) headerCapturer = null
+                            }
+                            realOffset += chunk.size
+                            if (realOffset > knownRealSize) {
+                                knownRealSize = realOffset
+                            }
+                            if (chunk.size < head.requested) {
+                                cancelInFlight()
+                                if (head.startOffset + head.requested <= knownRealSize &&
+                                    chunk.size >= GROWING_MIN_CHUNK_BYTES
+                                ) {
+                                    effectiveChunkSize = chunk.size
+                                }
+                            }
+                            continue
+                        }
+
+                        cancelInFlight()
+                        val stillRecording = isDvrRecordingProvider(dvrId)
+                        val latestSize = file.statSize().coerceAtLeast(0L)
+                        if (latestSize > knownRealSize) {
+                            knownRealSize = latestSize
+                        }
+                        if (latestSize > realOffset) {
+                            continue
+                        }
+                        if (!stillRecording) {
+                            break
+                        }
+                        if (!waitForPollOrDisconnect(clientSocket, clientIn, growingPollIntervalMs, handle)) {
+                            clientDisconnected = true
+                            return@runBlocking
+                        }
+                    }
+                } finally {
+                    cancelInFlight()
+                }
+            }
+
+            if (!clientDisconnected && !handle.cancelled.get()) {
                 clientOut.write(FINAL_CHUNK_BYTES)
                 clientOut.flush()
             }
@@ -974,6 +1205,8 @@ class LocalMediaProxy(
         private const val CLIENT_HEADER_BUFFER_BYTES: Int = 8_192
         private const val STREAM_BUFFER_BYTES: Int = 32_768
         private const val GROWING_READ_CHUNK_BYTES: Int = 65_536
+        private const val GROWING_MIN_CHUNK_BYTES: Int = 16_384
+        private const val GROWING_PIPELINE_DEPTH: Int = 2
         private val CRLF_BYTES = "\r\n".toByteArray(StandardCharsets.US_ASCII)
         private val FINAL_CHUNK_BYTES = "0\r\n\r\n".toByteArray(StandardCharsets.US_ASCII)
     }

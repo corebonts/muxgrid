@@ -288,9 +288,9 @@ internal fun TvPlayerScreen(
         }
     }
 
-    // Keep the HUD on screen while the progress bar is focused or while navigating HUD controls.
-    LaunchedEffect(hudVisible, trackPanelOpen, infoPanelOpen, playbackState.status, progressFocused, hudInteractionNonce) {
-        if (hudVisible && !trackPanelOpen && !infoPanelOpen && !progressFocused && playbackState.status == PlaybackStatus.PLAYING) {
+    // Keep the HUD on screen while the progress bar is focused, while seeking, or while navigating HUD controls.
+    LaunchedEffect(hudVisible, trackPanelOpen, infoPanelOpen, playbackState.status, playbackState.isSeeking, progressFocused, hudInteractionNonce) {
+        if (hudVisible && !trackPanelOpen && !infoPanelOpen && !progressFocused && !playbackState.isSeeking && playbackState.status == PlaybackStatus.PLAYING) {
             delay(MuxGridDurations.TvHudAutoHideMs)
             hudVisible = false
         }
@@ -335,6 +335,7 @@ internal fun TvPlayerScreen(
         when {
             playbackState.error != null -> onExit()
             hadActiveSeek -> Unit
+            playbackState.isSeeking -> playbackEngine.cancelSeek()
             infoPanelOpen -> infoPanelOpen = false
             trackPanelOpen -> trackPanelOpen = false
             hudVisible -> hudVisible = false
@@ -392,6 +393,11 @@ internal fun TvPlayerScreen(
                     isBackKey && suppressNextBackKeyUp -> true
                     isBackKey && (seekUiState.pendingTargetMs != null || seekUiState.isHolding) -> {
                         cancelPendingSeek()
+                        suppressNextBackKeyUp = true
+                        true
+                    }
+                    isBackKey && playbackState.isSeeking -> {
+                        playbackEngine.cancelSeek()
                         suppressNextBackKeyUp = true
                         true
                     }
@@ -656,6 +662,16 @@ internal fun TvPlayerScreen(
                     val dur = playbackState.durationMs.coerceAtLeast(1L)
                     val stablePosSec = rememberStableDurationSec(shownPosMs, playbackState.dvrEntryId)
                     val stableDurSec = rememberStableDurationSec(playbackState.durationMs, playbackState.dvrEntryId)
+                    val activeSeekTarget = playbackState.seekTargetMs
+                    val barPosMs = shownPosMs
+                    val bufferedFrac = playbackState.bufferedPositionMs
+                        .takeIf { it > 0L }
+                        ?.let { (it.toFloat() / dur.toFloat()).coerceIn(0f, 1f) }
+                    val targetFrac = if (seekUiState.pendingTargetMs == null && playbackState.isSeeking && activeSeekTarget != null) {
+                        (activeSeekTarget.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+                    } else {
+                        null
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -689,8 +705,10 @@ internal fun TvPlayerScreen(
                         }
                     }
                     LiveProgressBar(
-                        progress = (shownPosMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f),
+                        progress = (barPosMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f),
                         fillColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.Accent,
+                        bufferedFraction = bufferedFrac,
+                        seekTargetFraction = targetFrac,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
@@ -815,11 +833,21 @@ internal fun TvPlayerScreen(
                     if (playbackState.isRecordingPlayback) {
                         val dur = playbackState.durationMs.coerceAtLeast(1L)
                         val shownPosMs = seekUiState.pendingTargetMs ?: playbackState.positionMs
+                        val activeSeekTarget = playbackState.seekTargetMs
+                        val barPosMs = shownPosMs
+                        val bufferedFrac = playbackState.bufferedPositionMs
+                            .takeIf { it > 0L }
+                            ?.let { (it.toFloat() / dur.toFloat()).coerceIn(0f, 1f) }
+                        val targetFrac = if (seekUiState.pendingTargetMs == null && playbackState.isSeeking && activeSeekTarget != null) {
+                            (activeSeekTarget.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+                        } else {
+                            null
+                        }
                         val stablePosSec = rememberStableDurationSec(shownPosMs, playbackState.dvrEntryId)
                         val stableDurSec = rememberStableDurationSec(playbackState.durationMs, playbackState.dvrEntryId)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             TvSeekProgressBar(
-                                progress = (shownPosMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f),
+                                progress = (barPosMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f),
                                 fillColor = if (playbackState.isGrowingRecording) MuxGridColors.CoralLive else MuxGridColors.Accent,
                                 focused = progressFocused,
                                 focusRequester = progressFocusRequester,
@@ -828,6 +856,8 @@ internal fun TvPlayerScreen(
                                 onSeekKeyUp = { dir -> handleSeekKeyUp(dir) },
                                 onConfirm = { confirmFromProgressBar() },
                                 onDown = { runCatching { playPauseFocusRequester.requestFocus() } },
+                                bufferedFraction = bufferedFrac,
+                                seekTargetFraction = targetFrac,
                             )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1294,6 +1324,8 @@ private fun TvSeekProgressBar(
     onConfirm: () -> Unit,
     onDown: () -> Unit,
     modifier: Modifier = Modifier,
+    bufferedFraction: Float? = null,
+    seekTargetFraction: Float? = null,
 ) {
     DisposableEffect(Unit) {
         onDispose { onFocusChanged(false) }
@@ -1365,6 +1397,8 @@ private fun TvSeekProgressBar(
             progress = progress,
             fillColor = fillColor,
             height = if (focused) 6.dp else 4.dp,
+            bufferedFraction = bufferedFraction,
+            seekTargetFraction = seekTargetFraction,
             modifier = Modifier.fillMaxWidth(),
         )
     }

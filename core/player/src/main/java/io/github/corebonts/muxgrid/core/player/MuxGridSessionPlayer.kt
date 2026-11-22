@@ -70,7 +70,11 @@ internal class MuxGridSessionPlayer(
                     programTitle = st.programTitle,
                     isRadio = st.isRadio,
                     seekable = st.isRecordingPlayback || st.isTimeshiftSeekable,
-                    durationSec = if (st.isRecordingPlayback) st.durationMs / 1_000L else 0L,
+                    durationSec = when {
+                        st.isGrowingRecording -> (st.durationMs / 10_000L) * 10L
+                        st.isRecordingPlayback -> st.durationMs / 1_000L
+                        else -> 0L
+                    },
                     errorMsg = st.error?.message,
                 )
                 val nowElapsed = SystemClock.elapsedRealtime()

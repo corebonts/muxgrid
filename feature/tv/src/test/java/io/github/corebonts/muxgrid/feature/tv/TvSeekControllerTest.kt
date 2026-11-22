@@ -271,4 +271,22 @@ class TvSeekControllerTest {
         val revHold = controller.onKeyDown(-1, isRepeat = true, playbackState = state, nowElapsedMs = 840L)
         assertEquals(40_000L, revHold.uiState.pendingDeltaMs)
     }
+
+    @Test
+    fun `fresh press during ongoing async seek anchors on active seekTargetMs`() {
+        val controller = TvSeekController()
+        val state = PlaybackState(
+            dvrEntryId = 1L,
+            positionMs = 600_000L,
+            durationMs = 3_600_000L,
+            isGrowingRecording = true,
+            isSeeking = true,
+            seekTargetMs = 1_200_000L,
+        )
+
+        val res = controller.onKeyDown(-1, isRepeat = false, playbackState = state, nowElapsedMs = 0L)
+        assertEquals(1_190_000L, res.uiState.pendingTargetMs)
+        assertEquals(-10_000L, res.uiState.pendingDeltaMs)
+        assertEquals("-10s", res.uiState.badgeLabel)
+    }
 }

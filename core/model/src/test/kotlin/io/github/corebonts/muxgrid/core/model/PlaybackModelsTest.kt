@@ -59,4 +59,18 @@ class PlaybackModelsTest {
         assertTrue(pausedSlightlyBehind.isBehindLive)
         assertFalse(playingSlightlyBehind.isBehindLive)
     }
+
+    @Test
+    fun `isSeekClampedAtGrowingEdge detects seeks past write head margin`() {
+        val growing = PlaybackState(
+            dvrEntryId = 42L,
+            durationMs = 120_000L,
+            isGrowingRecording = true,
+        )
+        val completed = growing.copy(isGrowingRecording = false)
+        assertTrue(growing.isSeekClampedAtGrowingEdge(120_000L))
+        assertTrue(growing.isSeekClampedAtGrowingEdge(119_000L))
+        assertFalse(growing.isSeekClampedAtGrowingEdge(118_000L))
+        assertFalse(completed.isSeekClampedAtGrowingEdge(130_000L))
+    }
 }

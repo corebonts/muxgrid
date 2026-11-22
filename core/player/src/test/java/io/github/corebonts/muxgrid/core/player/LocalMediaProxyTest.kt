@@ -685,6 +685,225 @@ class LocalMediaProxyTest {
         }
     }
 
+    @Test
+    fun `growing DVR pipelines concurrent fileReads behind write head and preserves byte order`() {
+        val totalBytes = 1_100_000
+        val payload = ByteArray(totalBytes) { i -> (i * 31 + 7).toByte() }
+        val inFlight = AtomicInteger(0)
+        val maxConcurrent = AtomicInteger(0)
+
+        val proxy = LocalMediaProxy(
+            serverBaseUrlProvider = { null },
+            ticketProvider = { StreamTicket("", "") },
+            growingFileOpener = {
+                object : GrowingDvrFile {
+                    override val initialSize: Long = payload.size.toLong()
+                    override suspend fun statSize(): Long = payload.size.toLong()
+                    override suspend fun read(offset: Long, size: Int): ByteArray {
+                        val active = inFlight.incrementAndGet()
+                        maxConcurrent.accumulateAndGet(active, ::maxOf)
+                        try {
+                            kotlinx.coroutines.delay(25L)
+                            val off = offset.toInt()
+                            if (off >= payload.size) return ByteArray(0)
+                            return payload.copyOfRange(off, minOf(payload.size, off + size))
+                        } finally {
+                            inFlight.decrementAndGet()
+                        }
+                    }
+                    override fun close() = Unit
+                }
+            },
+            isDvrRecordingProvider = { false },
+            growingPollIntervalMs = 20L,
+        )
+
+        try {
+            val conn = URL(proxy.growingDvrStreamUrl(404L)).openConnection() as HttpURLConnection
+            assertEquals(200, conn.responseCode)
+            val received = conn.inputStream.readBytes()
+            assertEquals(payload.size, received.size)
+            assertTrue(payload.contentEquals(received))
+            assertTrue(maxConcurrent.get() >= 2, "Expected pipelined concurrent reads, max was ${maxConcurrent.get()}")
+        } finally {
+            proxy.close()
+        }
+    }
+
+    @Test
+    fun `growing DVR adapts cleanly when server caps fileRead below requested chunk size`() {
+        val totalBytes = 400_000
+        val serverCap = 32_768
+        val payload = ByteArray(totalBytes) { i -> ((i * 17) xor (i ushr 8)).toByte() }
+
+        val proxy = LocalMediaProxy(
+            serverBaseUrlProvider = { null },
+            ticketProvider = { StreamTicket("", "") },
+            growingFileOpener = {
+                object : GrowingDvrFile {
+                    override val initialSize: Long = payload.size.toLong()
+                    override suspend fun statSize(): Long = payload.size.toLong()
+                    override suspend fun read(offset: Long, size: Int): ByteArray {
+                        val off = offset.toInt()
+                        if (off >= payload.size) return ByteArray(0)
+                        val capped = minOf(size, serverCap)
+                        return payload.copyOfRange(off, minOf(payload.size, off + capped))
+                    }
+                    override fun close() = Unit
+                }
+            },
+            isDvrRecordingProvider = { false },
+            growingPollIntervalMs = 20L,
+        )
+
+        try {
+            val conn = URL(proxy.growingDvrStreamUrl(505L)).openConnection() as HttpURLConnection
+            assertEquals(200, conn.responseCode)
+            val received = conn.inputStream.readBytes()
+            assertEquals(payload.size, received.size)
+            assertTrue(payload.contentEquals(received))
+        } finally {
+            proxy.close()
+        }
+    }
+
+    @Test
+    fun `growing DVR spliceOffset serves cached MKV header followed by cluster bytes`() {
+        val header = byteArrayOf(0x1A, 0x45, 0xDF.toByte(), 0xA3.toByte(), 0x01, 0x02, 0x03, 0x04)
+        val cluster1 = "CLUSTER_ONE_DATA".toByteArray(StandardCharsets.US_ASCII)
+        val cluster2 = "CLUSTER_TWO_TARGET".toByteArray(StandardCharsets.US_ASCII)
+        val fullFile = header + cluster1 + cluster2
+        val spliceOffset = (header.size + cluster1.size).toLong()
+
+        val store = GrowingMkvIndexStore()
+        val idx = store.getOrLoad(dvrId = 606L, startEpochSec = 1000L)
+        idx.recordHeader(header, GrowingMkvIndex.DEFAULT_TIMESTAMP_SCALE_NS)
+        idx.recordCluster(30_000L, spliceOffset)
+
+        val proxy = LocalMediaProxy(
+            serverBaseUrlProvider = { null },
+            ticketProvider = { StreamTicket("", "") },
+            growingFileOpener = {
+                object : GrowingDvrFile {
+                    override val initialSize: Long = fullFile.size.toLong()
+                    override suspend fun statSize(): Long = fullFile.size.toLong()
+                    override suspend fun read(offset: Long, size: Int): ByteArray {
+                        val off = offset.toInt()
+                        if (off >= fullFile.size) return ByteArray(0)
+                        return fullFile.copyOfRange(off, minOf(fullFile.size, off + size))
+                    }
+                    override fun close() = Unit
+                }
+            },
+            isDvrRecordingProvider = { false },
+            growingIndexStore = store,
+            dvrStartEpochProvider = { 1000L },
+            growingPollIntervalMs = 20L,
+        )
+
+        try {
+            val conn = URL(proxy.growingDvrStreamUrl(606L, spliceOffset = spliceOffset)).openConnection() as HttpURLConnection
+            assertEquals(200, conn.responseCode)
+            val received = conn.inputStream.readBytes()
+            val expected = header + cluster2
+            assertTrue(expected.contentEquals(received))
+            assertEquals("video/x-matroska", conn.getHeaderField("Content-Type"))
+        } finally {
+            proxy.close()
+        }
+    }
+
+    @Test
+    fun `growing DVR sniffs video mp2t Content-Type for MPEG-TS recordings and caches NON_MKV`() {
+        val tsPayload = ByteArray(376) { idx -> if (idx % 188 == 0) 0x47 else 0x11 }
+        val store = GrowingMkvIndexStore()
+        var readZeroCount = 0
+        val proxy = LocalMediaProxy(
+            serverBaseUrlProvider = { null },
+            ticketProvider = { StreamTicket("", "") },
+            growingFileOpener = {
+                object : GrowingDvrFile {
+                    override val initialSize: Long = tsPayload.size.toLong()
+                    override suspend fun statSize(): Long = tsPayload.size.toLong()
+                    override suspend fun read(offset: Long, size: Int): ByteArray {
+                        if (offset == 0L) readZeroCount++
+                        val off = offset.toInt()
+                        if (off >= tsPayload.size) return ByteArray(0)
+                        return tsPayload.copyOfRange(off, minOf(tsPayload.size, off + size))
+                    }
+                    override fun close() = Unit
+                }
+            },
+            isDvrRecordingProvider = { false },
+            growingIndexStore = store,
+            dvrStartEpochProvider = { 1000L },
+            growingPollIntervalMs = 20L,
+        )
+        try {
+            val conn = URL(proxy.growingDvrStreamUrl(707L)).openConnection() as HttpURLConnection
+            assertEquals(200, conn.responseCode)
+            assertEquals("video/mp2t", conn.getHeaderField("Content-Type"))
+            assertTrue(tsPayload.contentEquals(conn.inputStream.readBytes()))
+            assertEquals(1, readZeroCount, "Expected chunk 0 prefetch to avoid duplicate offset-0 read")
+            assertEquals(
+                GrowingMkvIndex.ContainerKind.NON_MKV,
+                store.getOrLoad(707L, 1000L).containerKind,
+            )
+        } finally {
+            proxy.close()
+        }
+    }
+
+    @Test
+    fun `growing DVR captures MKV header on initial stream with single offset-0 read`() {
+        val header = byteArrayOf(
+            0x1A, 0x45, 0xDF.toByte(), 0xA3.toByte(), 0x84.toByte(), 0x01, 0x02, 0x03, 0x04,
+            0x2A, 0xD7.toByte(), 0xB1.toByte(), 0x83.toByte(), 0x0F, 0x42, 0x40,
+        )
+        val cluster = byteArrayOf(
+            0x1F, 0x43, 0xB6.toByte(), 0x75, 0x01,
+            0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(),
+            0xE7.toByte(), 0x81.toByte(), 0x00, 0xA3.toByte(), 0x11, 0x22,
+        )
+        val mkvPayload = header + cluster
+        val store = GrowingMkvIndexStore()
+        var readZeroCount = 0
+        val proxy = LocalMediaProxy(
+            serverBaseUrlProvider = { null },
+            ticketProvider = { StreamTicket("", "") },
+            growingFileOpener = {
+                object : GrowingDvrFile {
+                    override val initialSize: Long = mkvPayload.size.toLong()
+                    override suspend fun statSize(): Long = mkvPayload.size.toLong()
+                    override suspend fun read(offset: Long, size: Int): ByteArray {
+                        if (offset == 0L) readZeroCount++
+                        val off = offset.toInt()
+                        if (off >= mkvPayload.size) return ByteArray(0)
+                        return mkvPayload.copyOfRange(off, minOf(mkvPayload.size, off + size))
+                    }
+                    override fun close() = Unit
+                }
+            },
+            isDvrRecordingProvider = { false },
+            growingIndexStore = store,
+            dvrStartEpochProvider = { 1000L },
+            growingPollIntervalMs = 20L,
+        )
+        try {
+            val conn = URL(proxy.growingDvrStreamUrl(808L)).openConnection() as HttpURLConnection
+            assertEquals(200, conn.responseCode)
+            assertEquals("video/x-matroska", conn.getHeaderField("Content-Type"))
+            assertTrue(mkvPayload.contentEquals(conn.inputStream.readBytes()))
+            assertEquals(1, readZeroCount)
+            val idx = store.getOrLoad(808L, 1000L)
+            assertTrue(idx.hasHeader)
+            assertTrue(header.contentEquals(idx.headerBytes))
+            assertEquals(header.size.toLong(), idx.findClusterAtOrBefore(0L)?.byteOffset)
+        } finally {
+            proxy.close()
+        }
+    }
+
     private fun httpGet(url: String): String {
         val conn = URL(url).openConnection() as HttpURLConnection
         assertEquals(200, conn.responseCode)

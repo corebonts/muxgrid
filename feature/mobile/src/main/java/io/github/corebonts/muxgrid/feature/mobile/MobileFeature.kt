@@ -84,6 +84,7 @@ import io.github.corebonts.muxgrid.core.data.TvheadendRepository
 import io.github.corebonts.muxgrid.core.designsystem.BroadcastUnderlineTab
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.ConnectionStatusDot
+import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MobileTopBarHeight
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridAlphas
@@ -115,7 +116,8 @@ import io.github.corebonts.muxgrid.core.model.AppNotices
 import io.github.corebonts.muxgrid.core.model.BackgroundPlaybackMode
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ConnectionState
-import io.github.corebonts.muxgrid.core.model.GrowingRecordingPrebufferMode
+import io.github.corebonts.muxgrid.core.model.DvrEntry
+import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LiveFilter
 import io.github.corebonts.muxgrid.core.model.MainTab
@@ -254,6 +256,12 @@ fun MobileRoot(
                         MainTab.LIVE -> {
                             val tags by repository.tags.collectAsState()
                             val nowNextMap by repository.nowNextByChannel.collectAsState()
+                            val dvrEntries by repository.dvrEntries.collectAsState()
+                            val activeRecordingsByChannel = remember(dvrEntries) {
+                                dvrEntries.values
+                                    .filter { it.state == DvrState.RECORDING }
+                                    .associateBy { it.channelId }
+                            }
                             val nowEpochSec = rememberNowEpochSec(offsetMs)
                             MobileLiveChannelsTab(
                                 connectionState = connectionState,
@@ -263,6 +271,7 @@ fun MobileRoot(
                                 activeFilter = activeFilter,
                                 favorites = favorites,
                                 nowNextMap = nowNextMap,
+                                activeRecordingsByChannel = activeRecordingsByChannel,
                                 nowEpochSec = nowEpochSec,
                                 imageLoader = repository.imageLoader,
                                 gridColumns = gridColumns,
@@ -270,6 +279,10 @@ fun MobileRoot(
                                 onSelectFilter = { activeFilter = it },
                                 onChannelClick = { channel ->
                                     playbackEngine.playChannel(channel, repository.hwDecPreset.value)
+                                    route = MobileRoute.PLAYER
+                                },
+                                onPlayRecording = { entry, channel, startPosSec ->
+                                    playbackEngine.playDvrEntry(entry, channel, repository.hwDecPreset.value, startPosSec)
                                     route = MobileRoute.PLAYER
                                 },
                                 onToggleFavorite = { channel ->
@@ -337,7 +350,6 @@ fun MobileRoot(
                             val themeMode by repository.themeMode.collectAsState()
                             val hwDecPreset by repository.hwDecPreset.collectAsState()
                             val timeshiftWindow by repository.timeshiftWindow.collectAsState()
-                            val growingPrebufferMode by repository.growingRecordingPrebufferMode.collectAsState()
                             val backgroundPlaybackMode by repository.backgroundPlaybackMode.collectAsState()
                             MobileSettingsTab(
                                 profile = currentProfile,
@@ -346,7 +358,6 @@ fun MobileRoot(
                                 themeMode = themeMode,
                                 hwDecPreset = hwDecPreset,
                                 timeshiftWindow = timeshiftWindow,
-                                growingPrebufferMode = growingPrebufferMode,
                                 backgroundPlaybackMode = backgroundPlaybackMode,
                                 pipSupported = canEnterPip,
                                 appInfo = appInfo,
@@ -363,9 +374,6 @@ fun MobileRoot(
                                 },
                                 onSelectTimeshiftWindow = { window ->
                                     scope.launch { repository.setTimeshiftWindow(window) }
-                                },
-                                onSelectGrowingPrebufferMode = { mode ->
-                                    scope.launch { repository.setGrowingRecordingPrebufferMode(mode) }
                                 },
                                 onSelectBackgroundPlaybackMode = { mode ->
                                     scope.launch { repository.setBackgroundPlaybackMode(mode) }
@@ -905,12 +913,14 @@ private fun MobileLiveChannelsTab(
     activeFilter: LiveFilter,
     favorites: Set<Long>,
     nowNextMap: Map<Long, NowNextProgram>,
+    activeRecordingsByChannel: Map<Long, DvrEntry>,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     gridColumns: Int,
     bottomContentPadding: Dp,
     onSelectFilter: (LiveFilter) -> Unit,
     onChannelClick: (Channel) -> Unit,
+    onPlayRecording: (DvrEntry, Channel, Long) -> Unit,
     onToggleFavorite: (Channel) -> Unit,
     onOpenGuideForChannel: (Channel) -> Unit,
     onRecordEvent: suspend (Long) -> Result<Long>,
@@ -1008,6 +1018,7 @@ private fun MobileLiveChannelsTab(
                         MobileChannelCard(
                             channel = channel,
                             nowNext = nowNextMap[channel.id],
+                            isRecording = channel.id in activeRecordingsByChannel,
                             nowEpochSec = nowEpochSec,
                             isFavorite = channel.id in favorites,
                             imageLoader = imageLoader,
@@ -1031,6 +1042,7 @@ private fun MobileLiveChannelsTab(
                             MobileChannelCard(
                                 channel = channel,
                                 nowNext = nowNextMap[channel.id],
+                                isRecording = channel.id in activeRecordingsByChannel,
                                 nowEpochSec = nowEpochSec,
                                 isFavorite = channel.id in favorites,
                                 imageLoader = imageLoader,
@@ -1053,6 +1065,7 @@ private fun MobileLiveChannelsTab(
     val actionChannel = actionChannelId?.let { id -> channels.firstOrNull { it.id == id } }
     actionChannel?.let { ch ->
         val nowEvent = nowNextMap[ch.id]?.now
+        val activeRecording = activeRecordingsByChannel[ch.id]
         val isFav = ch.id in favorites
         MuxGridModalSheet(
             onDismissRequest = { if (!actionBusy) actionChannelId = null },
@@ -1089,6 +1102,21 @@ private fun MobileLiveChannelsTab(
                 Spacer(Modifier.width(6.dp))
                 Text("Watch Live", fontWeight = FontWeight.SemiBold)
             }
+            if (activeRecording != null) {
+                OutlinedButton(
+                    enabled = !actionBusy,
+                    onClick = {
+                        actionChannelId = null
+                        onPlayRecording(activeRecording, ch, 0L)
+                    },
+                    shape = MuxGridShapes.Sm,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(MuxGridIcons.Replay10, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Watch from Start (Recording)", color = MuxGridColors.CoralLive, fontWeight = FontWeight.SemiBold)
+                }
+            }
             OutlinedButton(
                 enabled = !actionBusy,
                 onClick = {
@@ -1120,7 +1148,7 @@ private fun MobileLiveChannelsTab(
                 Spacer(Modifier.width(6.dp))
                 Text("View EPG Guide", color = MuxGridColors.TextPrimary)
             }
-            if (nowEvent != null && nowEvent.dvrId == null) {
+            if (activeRecording == null && nowEvent != null && nowEvent.dvrId == null) {
                 OutlinedButton(
                     enabled = !actionBusy,
                     onClick = {
@@ -1153,6 +1181,7 @@ private fun MobileLiveChannelsTab(
 private fun MobileChannelCard(
     channel: Channel,
     nowNext: NowNextProgram?,
+    isRecording: Boolean,
     nowEpochSec: Long,
     isFavorite: Boolean,
     imageLoader: ImageLoader,
@@ -1205,6 +1234,9 @@ private fun MobileChannelCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
+                if (isRecording) {
+                    DvrStateBadge(state = DvrState.RECORDING)
+                }
             }
             Spacer(Modifier.height(2.dp))
             val now = nowNext?.now
@@ -1279,7 +1311,6 @@ private fun MobileSettingsTab(
     themeMode: ThemeMode,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
-    growingPrebufferMode: GrowingRecordingPrebufferMode,
     backgroundPlaybackMode: BackgroundPlaybackMode,
     pipSupported: Boolean,
     appInfo: AppBuildInfo,
@@ -1288,7 +1319,6 @@ private fun MobileSettingsTab(
     onSelectThemeMode: (ThemeMode) -> Unit,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
-    onSelectGrowingPrebufferMode: (GrowingRecordingPrebufferMode) -> Unit,
     onSelectBackgroundPlaybackMode: (BackgroundPlaybackMode) -> Unit,
     onRetryConnect: () -> Unit,
     onOpenServerSetup: () -> Unit,
@@ -1384,9 +1414,7 @@ private fun MobileSettingsTab(
                         )
                         MobileTimeshiftSection(
                             timeshiftWindow = timeshiftWindow,
-                            growingPrebufferMode = growingPrebufferMode,
                             onSelectTimeshiftWindow = onSelectTimeshiftWindow,
-                            onSelectGrowingPrebufferMode = onSelectGrowingPrebufferMode,
                         )
                         MobileAppInfoSection(
                             appInfo = appInfo,
@@ -1420,9 +1448,7 @@ private fun MobileSettingsTab(
                 )
                 MobileTimeshiftSection(
                     timeshiftWindow = timeshiftWindow,
-                    growingPrebufferMode = growingPrebufferMode,
                     onSelectTimeshiftWindow = onSelectTimeshiftWindow,
-                    onSelectGrowingPrebufferMode = onSelectGrowingPrebufferMode,
                 )
                 MobileAppInfoSection(
                     appInfo = appInfo,
@@ -1790,78 +1816,40 @@ private fun MobileDecoderPresetSection(
 @Composable
 private fun MobileTimeshiftSection(
     timeshiftWindow: TimeshiftWindow,
-    growingPrebufferMode: GrowingRecordingPrebufferMode,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
-    onSelectGrowingPrebufferMode: (GrowingRecordingPrebufferMode) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("TIMESHIFT & PRE-BUFFER", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+        Text("LIVE TIMESHIFT CACHE LIMIT", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(MuxGridShapes.Card)
                 .background(MuxGridColors.CardSurface)
                 .padding(horizontal = 12.dp, vertical = 11.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "Live Timeshift Cache Limit",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MuxGridColors.TextPrimary,
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(18.dp),
-                ) {
-                    TimeshiftWindow.entries.forEach { option ->
-                        BroadcastUnderlineTab(
-                            label = option.shortLabel,
-                            selected = option == timeshiftWindow,
-                            onClick = { onSelectTimeshiftWindow(option) },
-                        )
-                    }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                TimeshiftWindow.entries.forEach { option ->
+                    BroadcastUnderlineTab(
+                        label = option.shortLabel,
+                        selected = option == timeshiftWindow,
+                        onClick = { onSelectTimeshiftWindow(option) },
+                    )
                 }
-                Text(
-                    text = "${timeshiftWindow.description} · split pause/rewind · applies on next tune",
-                    style = MuxGridType.TabularSmall,
-                    color = MuxGridColors.TextSecondary,
-                )
             }
-            MuxGridDivider()
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "Pre-Buffer Ongoing Recordings",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MuxGridColors.TextPrimary,
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(18.dp),
-                ) {
-                    GrowingRecordingPrebufferMode.entries.forEach { option ->
-                        BroadcastUnderlineTab(
-                            label = option.label,
-                            selected = option == growingPrebufferMode,
-                            onClick = { onSelectGrowingPrebufferMode(option) },
-                        )
-                    }
-                }
-                Text(
-                    text = "${growingPrebufferMode.description} · applies on next play",
-                    style = MuxGridType.TabularSmall,
-                    color = MuxGridColors.TextSecondary,
-                )
-            }
+            Text(
+                text = "${timeshiftWindow.description} · split pause/rewind · applies on next tune",
+                style = MuxGridType.TabularSmall,
+                color = MuxGridColors.TextSecondary,
+            )
         }
     }
 }

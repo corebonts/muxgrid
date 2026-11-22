@@ -108,6 +108,7 @@ import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.data.TvheadendRepository
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.ConnectionStatusDot
+import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridAlphas
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
@@ -137,7 +138,8 @@ import io.github.corebonts.muxgrid.core.model.AppAttribution
 import io.github.corebonts.muxgrid.core.model.AppBuildInfo
 import io.github.corebonts.muxgrid.core.model.AppNotices
 import io.github.corebonts.muxgrid.core.model.Channel
-import io.github.corebonts.muxgrid.core.model.GrowingRecordingPrebufferMode
+import io.github.corebonts.muxgrid.core.model.DvrEntry
+import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
@@ -557,6 +559,12 @@ private fun TvContent(
                             MainTab.LIVE -> {
                                 val tags by repository.tags.collectAsState()
                                 val nowNextMap by repository.nowNextByChannel.collectAsState()
+                                val dvrEntries by repository.dvrEntries.collectAsState()
+                                val activeRecordingsByChannel = remember(dvrEntries) {
+                                    dvrEntries.values
+                                        .filter { it.state == DvrState.RECORDING }
+                                        .associateBy { it.channelId }
+                                }
                                 val nowEpochSec = rememberNowEpochSec(offsetMs)
                                 TvLiveChannelsTab(
                                     connectionState = connectionState,
@@ -566,6 +574,7 @@ private fun TvContent(
                                     activeFilter = activeFilter,
                                     favorites = favorites,
                                     nowNextMap = nowNextMap,
+                                    activeRecordingsByChannel = activeRecordingsByChannel,
                                     nowEpochSec = nowEpochSec,
                                     imageLoader = repository.imageLoader,
                                     gridState = liveGridState,
@@ -576,6 +585,12 @@ private fun TvContent(
                                         focusMemory.liveChannelId = channel.id
                                         hasDeliveredInitialContentFocus = true
                                         playbackEngine.playChannel(channel, repository.hwDecPreset.value)
+                                        route = TvRoute.PLAYER
+                                    },
+                                    onPlayRecording = { entry, channel, startSec ->
+                                        focusMemory.liveChannelId = channel.id
+                                        hasDeliveredInitialContentFocus = true
+                                        playbackEngine.playDvrEntry(entry, channel, repository.hwDecPreset.value, startSec)
                                         route = TvRoute.PLAYER
                                     },
                                     onToggleFavorite = { channel ->
@@ -660,7 +675,6 @@ private fun TvContent(
                                 val themeMode by repository.themeMode.collectAsState()
                                 val hwDecPreset by repository.hwDecPreset.collectAsState()
                                 val timeshiftWindow by repository.timeshiftWindow.collectAsState()
-                                val growingPrebufferMode by repository.growingRecordingPrebufferMode.collectAsState()
                                 TvSettingsTab(
                                     profile = currentProfile,
                                     connectionState = connectionState,
@@ -668,7 +682,6 @@ private fun TvContent(
                                     themeMode = themeMode,
                                     hwDecPreset = hwDecPreset,
                                     timeshiftWindow = timeshiftWindow,
-                                    growingPrebufferMode = growingPrebufferMode,
                                     appInfo = appInfo,
                                     focusMemory = focusMemory,
                                     focusRequestNonce = contentFocusRequestNonce,
@@ -684,9 +697,6 @@ private fun TvContent(
                                     },
                                     onSelectTimeshiftWindow = { window ->
                                         scope.launch { repository.setTimeshiftWindow(window) }
-                                    },
-                                    onSelectGrowingPrebufferMode = { mode ->
-                                        scope.launch { repository.setGrowingRecordingPrebufferMode(mode) }
                                     },
                                     onRetryConnect = {
                                         focusMemory.settingsTarget = TvSettingsFocusTarget.PRIMARY
@@ -965,6 +975,7 @@ private fun TvLiveChannelsTab(
     activeFilter: LiveFilter,
     favorites: Set<Long>,
     nowNextMap: Map<Long, NowNextProgram>,
+    activeRecordingsByChannel: Map<Long, DvrEntry>,
     nowEpochSec: Long,
     imageLoader: ImageLoader,
     gridState: LazyGridState,
@@ -972,10 +983,12 @@ private fun TvLiveChannelsTab(
     focusRequestNonce: Int,
     onSelectFilter: (LiveFilter) -> Unit,
     onChannelClick: (Channel) -> Unit,
+    onPlayRecording: (DvrEntry, Channel, Long) -> Unit,
     onToggleFavorite: (Channel) -> Unit,
 ) {
     val activeFilterFocusRequester = remember { FocusRequester() }
     val channelFocusRequesters = remember { mutableMapOf<Long, FocusRequester>() }
+    var actionChannelId by remember { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(focusRequestNonce) {
         if (focusRequestNonce == 0) return@LaunchedEffect
@@ -1109,17 +1122,123 @@ private fun TvLiveChannelsTab(
                             }
                         }
                     }
+                    val activeRec = activeRecordingsByChannel[channel.id]
                     TvChannelCard(
                         channel = channel,
                         nowNext = nowNextMap[channel.id],
+                        isRecording = activeRec != null,
                         nowEpochSec = nowEpochSec,
                         isFavorite = channel.id in favorites,
                         imageLoader = imageLoader,
                         focusRequester = cardFocusRequester,
                         onFocused = { focusMemory.liveChannelId = channel.id },
                         onChannelClick = onChannelClick,
-                        onToggleFavorite = onToggleFavorite,
+                        onLongClick = { ch ->
+                            if (activeRecordingsByChannel[ch.id] != null) {
+                                actionChannelId = ch.id
+                            } else {
+                                onToggleFavorite(ch)
+                            }
+                        },
                     )
+                }
+            }
+        }
+    }
+
+    val actionChannel = actionChannelId?.let { id -> channels.firstOrNull { it.id == id } }
+    val actionRecording = actionChannel?.let { activeRecordingsByChannel[it.id] }
+    if (actionChannel != null && actionRecording != null) {
+        val watchStartFocusRequester = remember { FocusRequester() }
+        val isFav = actionChannel.id in favorites
+        LaunchedEffect(actionChannel.id) {
+            runCatching { watchStartFocusRequester.requestFocus() }
+        }
+        BackHandler { actionChannelId = null }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MuxGridColors.OverlayBackdrop)
+                .padding(36.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                modifier = Modifier
+                    .widthIn(min = 360.dp, max = 500.dp)
+                    .fillMaxWidth()
+                    .clip(MuxGridShapes.Dialog)
+                    .background(MuxGridColors.CardSurfaceElevated)
+                    .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
+                    .focusProperties { this.onExit = { cancelFocusChange() } }
+                    .focusGroup()
+                    .padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = actionChannel.name,
+                        style = MuxGridType.Title,
+                        fontSize = 18.sp,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    DvrStateBadge(state = DvrState.RECORDING)
+                }
+                Text(
+                    text = actionRecording.title,
+                    style = MuxGridType.CardSubtitle,
+                    color = MuxGridColors.TextSecondary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Button(
+                    onClick = {
+                        actionChannelId = null
+                        onPlayRecording(actionRecording, actionChannel, 0L)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(watchStartFocusRequester),
+                    shape = tvButtonShape(),
+                    colors = tvPrimaryButtonColors(),
+                ) {
+                    Icon(MuxGridIcons.Replay10, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Watch from Start (Recording)", fontWeight = FontWeight.SemiBold)
+                }
+                Button(
+                    onClick = {
+                        actionChannelId = null
+                        onChannelClick(actionChannel)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = tvButtonShape(),
+                    colors = tvSecondaryButtonColors(),
+                ) {
+                    Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Watch Live")
+                }
+                Button(
+                    onClick = {
+                        onToggleFavorite(actionChannel)
+                        actionChannelId = null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = tvButtonShape(),
+                    colors = tvSecondaryButtonColors(),
+                ) {
+                    Icon(
+                        imageVector = if (isFav) MuxGridIcons.StarFilled else MuxGridIcons.Star,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (isFav) "Remove from Favorites" else "Add to Favorites")
                 }
             }
         }
@@ -1131,13 +1250,14 @@ private fun TvLiveChannelsTab(
 private fun TvChannelCard(
     channel: Channel,
     nowNext: NowNextProgram?,
+    isRecording: Boolean,
     nowEpochSec: Long,
     isFavorite: Boolean,
     imageLoader: ImageLoader,
     focusRequester: FocusRequester,
     onFocused: () -> Unit,
     onChannelClick: (Channel) -> Unit,
-    onToggleFavorite: (Channel) -> Unit,
+    onLongClick: (Channel) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -1149,7 +1269,7 @@ private fun TvChannelCard(
         nextProgram?.let { "Next ${formatEpochHm(it.startEpochSec)} · ${it.title}" } ?: ""
     }
     val handleClick = remember(channel, onChannelClick) { { onChannelClick(channel) } }
-    val handleLongClick = remember(channel, onToggleFavorite) { { onToggleFavorite(channel) } }
+    val handleLongClick = remember(channel, onLongClick) { { onLongClick(channel) } }
     val interactionSource = remember { MutableInteractionSource() }
     val now = nowNext?.now
     val cardDescription = remember(channel.formattedNumber, channel.name, now?.title) {
@@ -1229,6 +1349,9 @@ private fun TvChannelCard(
                             modifier = Modifier.size(14.dp),
                         )
                     }
+                    if (isRecording) {
+                        DvrStateBadge(state = DvrState.RECORDING)
+                    }
                 }
                 Text(
                     text = channel.name,
@@ -1288,7 +1411,6 @@ private fun TvSettingsTab(
     themeMode: ThemeMode,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
-    growingPrebufferMode: GrowingRecordingPrebufferMode,
     appInfo: AppBuildInfo,
     focusMemory: TvFocusMemory,
     focusRequestNonce: Int,
@@ -1296,7 +1418,6 @@ private fun TvSettingsTab(
     onSelectThemeMode: (ThemeMode) -> Unit,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
-    onSelectGrowingPrebufferMode: (GrowingRecordingPrebufferMode) -> Unit,
     onRetryConnect: () -> Unit,
     onOpenServerSetup: () -> Unit,
 ) {
@@ -1397,10 +1518,8 @@ private fun TvSettingsTab(
                         TvDecoderTimeshiftSettingsCard(
                             hwDecPreset = hwDecPreset,
                             timeshiftWindow = timeshiftWindow,
-                            growingPrebufferMode = growingPrebufferMode,
                             onSelectPreset = onSelectPreset,
                             onSelectTimeshiftWindow = onSelectTimeshiftWindow,
-                            onSelectGrowingPrebufferMode = onSelectGrowingPrebufferMode,
                         )
                         TvAppInfoSettingsCard(
                             appInfo = appInfo,
@@ -1430,10 +1549,8 @@ private fun TvSettingsTab(
                 TvDecoderTimeshiftSettingsCard(
                     hwDecPreset = hwDecPreset,
                     timeshiftWindow = timeshiftWindow,
-                    growingPrebufferMode = growingPrebufferMode,
                     onSelectPreset = onSelectPreset,
                     onSelectTimeshiftWindow = onSelectTimeshiftWindow,
-                    onSelectGrowingPrebufferMode = onSelectGrowingPrebufferMode,
                 )
                 TvAppInfoSettingsCard(
                     appInfo = appInfo,
@@ -1699,10 +1816,8 @@ private fun TvGeneralSettingsCard(
 private fun TvDecoderTimeshiftSettingsCard(
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
-    growingPrebufferMode: GrowingRecordingPrebufferMode,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
-    onSelectGrowingPrebufferMode: (GrowingRecordingPrebufferMode) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -1769,36 +1884,6 @@ private fun TvDecoderTimeshiftSettingsCard(
             }
             Text(
                 text = "${timeshiftWindow.description} · split pause/rewind · applies on next tune",
-                style = MuxGridType.TabularSmall,
-                color = MuxGridColors.TextMuted,
-            )
-        }
-
-        MuxGridDivider()
-
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-                text = "Pre-Buffer Ongoing Recordings",
-                style = MuxGridType.CardSubtitle,
-                fontSize = 13.sp,
-            )
-            Row(
-                modifier = Modifier
-                    .focusGroup()
-                    .focusRestorer()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                GrowingRecordingPrebufferMode.entries.forEach { option ->
-                    TvUnderlineOption(
-                        label = option.label,
-                        selected = growingPrebufferMode == option,
-                        onClick = { onSelectGrowingPrebufferMode(option) },
-                    )
-                }
-            }
-            Text(
-                text = "${growingPrebufferMode.description} · applies on next play",
                 style = MuxGridType.TabularSmall,
                 color = MuxGridColors.TextMuted,
             )

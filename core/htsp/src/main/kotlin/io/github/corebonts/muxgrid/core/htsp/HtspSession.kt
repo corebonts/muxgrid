@@ -27,7 +27,7 @@ internal class HtspSession(
     private val socket: Socket,
     private val seqGenerator: AtomicLong,
 ) {
-    private val input = BufferedInputStream(socket.getInputStream(), 65_536)
+    private val input = BufferedInputStream(socket.getInputStream(), 262_144)
     private val output = BufferedOutputStream(socket.getOutputStream(), 16_384)
     private val writeQueue = Channel<ByteArray>(Channel.UNLIMITED)
     private val pending = ConcurrentHashMap<Long, CompletableDeferred<HtsMap>>()

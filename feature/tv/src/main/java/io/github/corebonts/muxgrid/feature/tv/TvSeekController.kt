@@ -88,7 +88,11 @@ internal class TvSeekController {
         nowElapsedMs: Long,
     ): SeekKeyResult {
         if (!hasActivePending) {
-            anchorPositionMs = playbackState.positionMs
+            anchorPositionMs = if (playbackState.isSeeking && playbackState.seekTargetMs != null) {
+                playbackState.seekTargetMs!!
+            } else {
+                playbackState.positionMs
+            }
             hasActivePending = true
             hasHeldInSession = false
             tapTier = 0
