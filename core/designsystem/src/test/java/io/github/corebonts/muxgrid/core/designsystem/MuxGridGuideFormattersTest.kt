@@ -456,4 +456,80 @@ class MuxGridGuideFormattersTest {
         assertEquals(357f, state.scrollOffsetPx)
         assertEquals(origin + 3_630L, state.visibleStartEpochSec)
     }
+
+    @Test
+    fun `computeTimelineBufferWindow preserves hysteresis within margins and clamps bounds`() {
+        val origin = 10_800L
+        val end = origin + 12L * 3600L
+        val visibleDur = 7_200L
+
+        // Initial build starts at origin and extends past visible end by 2h
+        val initial = computeTimelineBufferWindow(
+            visibleStartSec = origin + 600L,
+            visibleDurationSec = visibleDur,
+            timelineOriginSec = origin,
+            timelineEndSec = end,
+            prevStartSec = 0L,
+            prevEndSec = 0L,
+        )
+        assertEquals(origin, initial.first)
+        assertEquals(origin + visibleDur + 2L * 3_600L, initial.second)
+
+        // Small horizontal scroll within hysteresis margin reuses identical range
+        val reused = computeTimelineBufferWindow(
+            visibleStartSec = origin + 2_400L,
+            visibleDurationSec = visibleDur,
+            timelineOriginSec = origin,
+            timelineEndSec = end,
+            prevStartSec = initial.first,
+            prevEndSec = initial.second,
+        )
+        assertEquals(initial, reused)
+
+        // Crossing inside the trailing half-hour margin shifts window forward cleanly
+        val advanced = computeTimelineBufferWindow(
+            visibleStartSec = origin + 6_000L,
+            visibleDurationSec = visibleDur,
+            timelineOriginSec = origin,
+            timelineEndSec = end,
+            prevStartSec = initial.first,
+            prevEndSec = initial.second,
+        )
+        assertEquals(origin + 5_400L - 3_600L, advanced.first)
+        assertEquals(origin + 5_400L + visibleDur + 2L * 3_600L, advanced.second)
+
+        // Near end clamps cleanly to timelineEndSec
+        val atEnd = computeTimelineBufferWindow(
+            visibleStartSec = end - visibleDur,
+            visibleDurationSec = visibleDur,
+            timelineOriginSec = origin,
+            timelineEndSec = end,
+            prevStartSec = 0L,
+            prevEndSec = 0L,
+        )
+        assertEquals(end, atEnd.second)
+    }
+
+    @Test
+    fun `findAdjacentEpgEvent binary search handles matching startEpochSec duplicates`() {
+        val base = today.atStartOfDay(zone).toEpochSecond() + 14L * 3600L
+        val e1 = EpgEvent(id = 10L, channelId = 1L, startEpochSec = base, stopEpochSec = base + 1_800L, title = "First")
+        val e2 = EpgEvent(id = 20L, channelId = 1L, startEpochSec = base + 1_800L, stopEpochSec = base + 3_600L, title = "DupA")
+        val e3 = EpgEvent(id = 30L, channelId = 1L, startEpochSec = base + 1_800L, stopEpochSec = base + 5_400L, title = "DupB")
+        val e4 = EpgEvent(id = 40L, channelId = 1L, startEpochSec = base + 5_400L, stopEpochSec = base + 7_200L, title = "Last")
+        val list = listOf(e1, e2, e3, e4)
+
+        assertEquals(
+            30L,
+            findAdjacentEpgEvent(list, 20L, +1, base, base + 7_200L, currentStartEpochSec = e2.startEpochSec)?.id,
+        )
+        assertEquals(
+            20L,
+            findAdjacentEpgEvent(list, 30L, -1, base, base + 7_200L, currentStartEpochSec = e3.startEpochSec)?.id,
+        )
+        assertEquals(
+            40L,
+            findAdjacentEpgEvent(list, 30L, +1, base, base + 7_200L, currentStartEpochSec = e3.startEpochSec)?.id,
+        )
+    }
 }

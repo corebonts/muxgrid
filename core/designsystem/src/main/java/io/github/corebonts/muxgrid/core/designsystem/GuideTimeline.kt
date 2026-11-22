@@ -3,6 +3,9 @@ package io.github.corebonts.muxgrid.core.designsystem
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
@@ -249,7 +252,24 @@ fun buildContinuousTimelineCells(
     val safeMax = rangeEnd + 4L * 3600L
     val cells = ArrayList<TimelineCell>()
     var cursor = rangeStart
-    for (ev in events) {
+    // Binary-search near rangeStart - 24h so multi-week EPG lists skip earlier days in O(log N)
+    var startIdx = 0
+    if (events.size > 16) {
+        val searchStart = rangeStart - 24L * 3600L
+        var lo = 0
+        var hi = events.size - 1
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            if (events[mid].startEpochSec < searchStart) {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        startIdx = lo
+    }
+    for (i in startIdx until events.size) {
+        val ev = events[i]
         if (ev.startEpochSec >= rangeEnd) break
         if (ev.stopEpochSec <= rangeStart) continue
         val evStart = ev.startEpochSec.coerceIn(safeMin, safeMax)
@@ -310,6 +330,34 @@ fun buildContinuousTimelineCells(
 }
 
 /**
+ * Computes a quantized horizontal timeline buffer window with hysteresis so small scroll steps
+ * do not invalidate visible rows or re-slice EPG cells every half-hour boundary.
+ */
+fun computeTimelineBufferWindow(
+    visibleStartSec: Long,
+    visibleDurationSec: Long,
+    timelineOriginSec: Long,
+    timelineEndSec: Long,
+    prevStartSec: Long,
+    prevEndSec: Long,
+): Pair<Long, Long> {
+    val visEnd = visibleStartSec + visibleDurationSec
+    val marginSec = HALF_HOUR_SEC
+    val needsRebuild = prevEndSec <= prevStartSec ||
+        prevStartSec < timelineOriginSec ||
+        prevEndSec > timelineEndSec ||
+        (visibleStartSec < prevStartSec + marginSec && prevStartSec > timelineOriginSec) ||
+        (visEnd > prevEndSec - marginSec && prevEndSec < timelineEndSec)
+    if (!needsRebuild) {
+        return prevStartSec to prevEndSec
+    }
+    val anchor = floorToHalfHour(visibleStartSec)
+    val nextStart = (anchor - 3600L).coerceAtLeast(timelineOriginSec)
+    val nextEnd = (anchor + visibleDurationSec + 2L * 3600L).coerceAtMost(timelineEndSec)
+    return nextStart to nextEnd
+}
+
+/**
  * Returns the previous (`direction < 0`) or next (`direction > 0`) event in a channel's sorted
  * [events] list relative to [currentEventId], bounded to `[minEpochSec, maxEpochSec]`.
  */
@@ -319,9 +367,51 @@ fun findAdjacentEpgEvent(
     direction: Int,
     minEpochSec: Long,
     maxEpochSec: Long,
+    currentStartEpochSec: Long? = null,
 ): EpgEvent? {
     if (events.isEmpty() || direction == 0) return null
-    val idx = events.indexOfFirst { it.id == currentEventId }
+    var idx = -1
+    if (currentStartEpochSec != null) {
+        // Binary search by startEpochSec first, then scan matching/nearby items
+        var lo = 0
+        var hi = events.size - 1
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            val s = events[mid].startEpochSec
+            when {
+                s < currentStartEpochSec -> lo = mid + 1
+                s > currentStartEpochSec -> hi = mid - 1
+                else -> {
+                    if (events[mid].id == currentEventId) {
+                        idx = mid
+                        break
+                    }
+                    var k = mid - 1
+                    while (k >= 0 && events[k].startEpochSec == currentStartEpochSec) {
+                        if (events[k].id == currentEventId) {
+                            idx = k
+                            break
+                        }
+                        k--
+                    }
+                    if (idx < 0) {
+                        k = mid + 1
+                        while (k < events.size && events[k].startEpochSec == currentStartEpochSec) {
+                            if (events[k].id == currentEventId) {
+                                idx = k
+                                break
+                            }
+                            k++
+                        }
+                    }
+                    break
+                }
+            }
+        }
+    }
+    if (idx < 0) {
+        idx = events.indexOfFirst { it.id == currentEventId }
+    }
     if (idx < 0) return null
     val step = if (direction > 0) 1 else -1
     var candidateIdx = idx + step
@@ -336,8 +426,8 @@ fun findAdjacentEpgEvent(
 }
 
 /**
- * Renders half-hour time markers synchronized with [scrollState] in the layout phase
- * (zero recomposition per scroll pixel).
+ * Renders half-hour time markers synchronized with [scrollState] via a single `graphicsLayer`
+ * translation (zero recomposition and zero measure/layout per horizontal scroll frame).
  */
 @Composable
 fun TimelineRuler(
@@ -367,35 +457,41 @@ fun TimelineRuler(
         }
     }
 
-    Layout(
-        modifier = modifier.clipToBounds(),
-        content = {
-            slotMeta.forEach { (_, label, isMidnight) ->
-                Text(
-                    text = label,
-                    style = MuxGridType.TabularSmall,
-                    color = if (isMidnight) MuxGridColors.AccentSoft else MuxGridColors.TextSecondary,
-                    fontWeight = if (isMidnight) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 1,
-                )
-            }
-        },
-    ) { measurables, constraints ->
-        val widthPx = constraints.maxWidth
-        val heightPx = 18.dp.roundToPx()
-        val labelConstraints = Constraints(maxWidth = widthPx, maxHeight = heightPx)
-        val labelPlaceables = measurables.map { it.measure(labelConstraints) }
-
-        layout(widthPx, heightPx) {
+    Box(
+        modifier = modifier
+            .height(18.dp)
+            .clipToBounds(),
+    ) {
+        Layout(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationX = (firstSlot - scrollState.originEpochSec) * scrollState.pxPerSec - scrollState.scrollOffsetPx
+                },
+            content = {
+                slotMeta.forEach { (_, label, isMidnight) ->
+                    Text(
+                        text = label,
+                        style = MuxGridType.TabularSmall,
+                        color = if (isMidnight) MuxGridColors.AccentSoft else MuxGridColors.TextSecondary,
+                        fontWeight = if (isMidnight) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                    )
+                }
+            },
+        ) { measurables, constraints ->
+            val widthPx = constraints.maxWidth
+            val heightPx = constraints.maxHeight
+            val labelConstraints = Constraints(maxWidth = widthPx, maxHeight = heightPx)
+            val labelPlaceables = measurables.map { it.measure(labelConstraints) }
             val origin = scrollState.originEpochSec
             val pxPerSec = scrollState.pxPerSec
-            val scrollPx = scrollState.scrollOffsetPx
 
-            labelPlaceables.forEachIndexed { idx, placeable ->
-                val sec = slotMeta[idx].first
-                if (sec >= origin) {
-                    val x = ((sec - origin) * pxPerSec - scrollPx).roundToInt()
-                    if (x + placeable.width > 0 && x < widthPx) {
+            layout(widthPx, heightPx) {
+                labelPlaceables.forEachIndexed { idx, placeable ->
+                    val sec = slotMeta[idx].first
+                    if (sec >= origin) {
+                        val x = ((sec - firstSlot) * pxPerSec).roundToInt()
                         placeable.placeRelative(x = x, y = (heightPx - placeable.height) / 2)
                     }
                 }
@@ -426,10 +522,9 @@ fun Modifier.timelineStickyTextOffset(
 }
 
 /**
- * Places a channel row's [cells] in exact pixel lockstep with [scrollState]. Each cell is measured
- * once at its natural width (without reading [TimelineScrollState.scrollOffsetPx] during measure),
- * and [scrollState.scrollOffsetPx] is read strictly during placement (`layout { ... }`) so
- * horizontal scrolling performs zero per-frame re-measurement or text re-layout.
+ * Places a channel row's [cells] relative to [anchorEpochSec] and translates the whole track via a
+ * single `graphicsLayer` reading [TimelineScrollState.scrollOffsetPx]. Horizontal scrolling performs
+ * zero recomposition, zero re-measurement, and zero per-frame Compose layout invalidations.
  */
 @Composable
 fun TimelineRowTrack(
@@ -437,40 +532,43 @@ fun TimelineRowTrack(
     scrollState: TimelineScrollState,
     cellGap: Dp = 2.dp,
     modifier: Modifier = Modifier,
+    anchorEpochSec: Long = cells.firstOrNull()?.startEpochSec ?: scrollState.originEpochSec,
     cellContent: @Composable (TimelineCell) -> Unit,
 ) {
-    Layout(
-        modifier = modifier.clipToBounds(),
-        content = {
-            cells.forEach { cell ->
-                key(cell.key) {
-                    cellContent(cell)
+    Box(modifier = modifier.clipToBounds()) {
+        Layout(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationX = (anchorEpochSec - scrollState.originEpochSec) * scrollState.pxPerSec - scrollState.scrollOffsetPx
+                },
+            content = {
+                cells.forEach { cell ->
+                    key(cell.key) {
+                        cellContent(cell)
+                    }
                 }
-            }
-        },
-    ) { measurables, constraints ->
-        val widthPx = constraints.maxWidth
-        val heightPx = constraints.maxHeight
-        val gapPx = cellGap.roundToPx()
-        val pxPerSec = scrollState.pxPerSec
-        val maxCellWidthPx = (widthPx * 4).coerceAtLeast(widthPx)
+            },
+        ) { measurables, constraints ->
+            val widthPx = constraints.maxWidth
+            val heightPx = constraints.maxHeight
+            val gapPx = cellGap.roundToPx()
+            val pxPerSec = scrollState.pxPerSec
+            val maxCellWidthPx = (widthPx * 4).coerceAtLeast(widthPx)
 
-        val cellPlaceables = ArrayList<androidx.compose.ui.layout.Placeable>(measurables.size)
-        measurables.forEachIndexed { idx, measurable ->
-            val cell = cells[idx]
-            val naturalWidthPx = (((cell.stopEpochSec - cell.startEpochSec) * pxPerSec).roundToInt() - gapPx)
-                .coerceIn(4, maxCellWidthPx)
-            cellPlaceables.add(measurable.measure(Constraints.fixed(naturalWidthPx, heightPx)))
-        }
-
-        layout(widthPx, heightPx) {
-            val origin = scrollState.originEpochSec
-            val scrollPx = scrollState.scrollOffsetPx
-            cellPlaceables.forEachIndexed { idx, placeable ->
+            val cellPlaceables = ArrayList<androidx.compose.ui.layout.Placeable>(measurables.size)
+            measurables.forEachIndexed { idx, measurable ->
                 val cell = cells[idx]
-                val rawLeft = ((cell.startEpochSec - origin) * pxPerSec - scrollPx).roundToInt()
-                if (rawLeft + placeable.width > 0 && rawLeft < widthPx) {
-                    placeable.placeRelative(x = rawLeft, y = 0)
+                val naturalWidthPx = (((cell.stopEpochSec - cell.startEpochSec) * pxPerSec).roundToInt() - gapPx)
+                    .coerceIn(4, maxCellWidthPx)
+                cellPlaceables.add(measurable.measure(Constraints.fixed(naturalWidthPx, heightPx)))
+            }
+
+            layout(widthPx, heightPx) {
+                cellPlaceables.forEachIndexed { idx, placeable ->
+                    val cell = cells[idx]
+                    val x = ((cell.startEpochSec - anchorEpochSec) * pxPerSec).roundToInt()
+                    placeable.placeRelative(x = x, y = 0)
                 }
             }
         }

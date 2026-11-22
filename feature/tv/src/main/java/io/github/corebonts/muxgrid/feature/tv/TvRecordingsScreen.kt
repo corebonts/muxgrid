@@ -54,7 +54,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Button
 import androidx.tv.material3.Icon
-import androidx.tv.material3.Text
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
@@ -65,6 +64,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridAlphas
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridBorders
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridRadii
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.dvrConfirmSpec
@@ -543,7 +543,13 @@ private fun TvRecordingShelf(
                 val piconModel = remember(ch?.id, ch?.icon) {
                     ch?.icon?.let { PiconModel(ch.id, it) }
                 }
-                var isFocused by remember(focusKey) { mutableStateOf(false) }
+                val isFocusedState = remember(focusKey) { mutableStateOf(false) }
+                val subtitleLabel = remember(entry.id, entry.startEpochSec, ch?.name, nowEpochSec / 3600L) {
+                    listOfNotNull(
+                        ch?.name,
+                        formatEpochDayHm(entry.startEpochSec, nowEpochSec),
+                    ).joinToString(" · ")
+                }
                 DisposableEffect(focusKey) {
                     cardFocusRequesters[focusKey] = cardFocusRequester
                     onDispose {
@@ -555,28 +561,23 @@ private fun TvRecordingShelf(
                 Column(
                     modifier = Modifier
                         .width(292.dp)
-                        .graphicsLayer {
-                            val scale = if (isFocused) 1.015f else 1f
-                            scaleX = scale
-                            scaleY = scale
-                        }
-                        .clip(MuxGridShapes.Card)
-                        .background(if (isFocused) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface)
-                        .then(
-                            if (isFocused) {
-                                Modifier.border(MuxGridBorders.FocusedCard, MuxGridColors.FocusBorder, MuxGridShapes.Card)
-                            } else {
-                                Modifier
-                            },
+                        .tvFocusableSurface(
+                            focusedState = isFocusedState,
+                            cornerRadius = MuxGridRadii.Card,
+                            containerColor = MuxGridColors.CardSurface,
+                            focusedContainerColor = MuxGridColors.CardSurfaceElevated,
+                            focusBorderColor = MuxGridColors.FocusBorder,
+                            focusBorderWidth = MuxGridBorders.FocusedCard,
+                            focusedScale = 1.015f,
                         )
                         .focusRequester(cardFocusRequester)
                         .onFocusChanged { state ->
                             val focused = state.isFocused
-                            if (isFocused != focused) isFocused = focused
+                            if (isFocusedState.value != focused) isFocusedState.value = focused
                             if (focused) onFocusEntry(entry)
                         }
                         .clickable(
-                            interactionSource = remember(focusKey) { MutableInteractionSource() },
+                            interactionSource = null,
                             indication = null,
                             onClick = { onClickEntry(entry) },
                         )
@@ -608,10 +609,7 @@ private fun TvRecordingShelf(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                text = listOfNotNull(
-                                    ch?.name,
-                                    formatEpochDayHm(entry.startEpochSec, nowEpochSec),
-                                ).joinToString(" · "),
+                                text = subtitleLabel,
                                 style = MuxGridType.TabularSmall,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,

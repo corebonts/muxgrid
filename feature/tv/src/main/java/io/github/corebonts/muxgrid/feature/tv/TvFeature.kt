@@ -8,6 +8,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.focusGroup
@@ -41,15 +42,16 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -60,14 +62,20 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -81,10 +89,15 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -95,13 +108,11 @@ import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
-import androidx.tv.material3.FilterChip
-import androidx.tv.material3.FilterChipDefaults
 import androidx.tv.material3.Icon
 import androidx.tv.material3.LocalContentColor
+import androidx.tv.material3.LocalTextStyle
 import androidx.tv.material3.MaterialTheme as TvMaterialTheme
 import androidx.tv.material3.Surface
-import androidx.tv.material3.Text
 import androidx.tv.material3.darkColorScheme as tvDarkColorScheme
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
@@ -116,6 +127,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDurations
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridRadii
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
@@ -177,11 +189,167 @@ internal data class TvRecordingFocusTarget(
 /**
  * Non-observable focus memory so D-pad moves never trigger Compose recomposition.
  */
+/**
+ * Lightweight TV text wrapper delegating directly to [BasicText] while still honoring
+ * `androidx.tv.material3` [LocalContentColor] and [LocalTextStyle]. Unlike
+ * `androidx.tv.material3.Text`, it does not wrap every text node in `Modifier.graphicsLayer`,
+ * which otherwise triggers expensive HWUI offscreen layer flushes (`flush layers`) during TV scroll.
+ */
+@Composable
+internal fun Text(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    fontSize: TextUnit = TextUnit.Unspecified,
+    fontStyle: FontStyle? = null,
+    fontWeight: FontWeight? = null,
+    fontFamily: FontFamily? = null,
+    letterSpacing: TextUnit = TextUnit.Unspecified,
+    textDecoration: TextDecoration? = null,
+    textAlign: TextAlign? = null,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+    overflow: TextOverflow = TextOverflow.Clip,
+    softWrap: Boolean = true,
+    maxLines: Int = Int.MAX_VALUE,
+    minLines: Int = 1,
+    style: TextStyle = LocalTextStyle.current,
+) {
+    val textColor = color.takeOrElse { style.color.takeOrElse { LocalContentColor.current } }
+    val mergedStyle = style.merge(
+        color = textColor,
+        fontSize = fontSize,
+        fontWeight = fontWeight,
+        textAlign = textAlign ?: TextAlign.Unspecified,
+        lineHeight = lineHeight,
+        fontFamily = fontFamily,
+        textDecoration = textDecoration,
+        fontStyle = fontStyle,
+        letterSpacing = letterSpacing,
+    )
+    BasicText(
+        text = text,
+        modifier = modifier,
+        style = mergedStyle,
+        overflow = overflow,
+        softWrap = softWrap,
+        maxLines = maxLines,
+        minLines = minLines,
+    )
+}
+
 internal class TvFocusMemory {
     var liveChannelId: Long? = null
     var guideTarget: TvGuideFocusTarget? = null
+    var guideWindowStartEpochSec: Long? = null
     var recordingTarget: TvRecordingFocusTarget? = null
     var settingsTarget: TvSettingsFocusTarget = TvSettingsFocusTarget.PRIMARY
+}
+
+/**
+ * Draw-phase-only TV focus background, rounded border, and optional subtle scale so D-pad focus
+ * moves never recompose list/grid items, mutate modifier chains, or push Skia rounded-rect clips.
+ */
+internal fun Modifier.tvFocusableSurface(
+    focusedState: State<Boolean>,
+    cornerRadius: Dp,
+    containerColor: Color,
+    focusedContainerColor: Color,
+    focusBorderColor: Color,
+    focusBorderWidth: Dp,
+    unfocusedBorderColor: Color = Color.Transparent,
+    unfocusedBorderWidth: Dp = 0.dp,
+    focusedScale: Float = 1f,
+): Modifier {
+    val scaled = if (focusedScale != 1f) {
+        graphicsLayer {
+            val s = if (focusedState.value) focusedScale else 1f
+            scaleX = s
+            scaleY = s
+        }
+    } else {
+        this
+    }
+    return scaled.drawWithContent {
+        val focused = focusedState.value
+        val radiusPx = cornerRadius.toPx()
+        val cr = CornerRadius(radiusPx, radiusPx)
+        drawRoundRect(
+            color = if (focused) focusedContainerColor else containerColor,
+            cornerRadius = cr,
+        )
+        drawContent()
+        val bColor = if (focused) focusBorderColor else unfocusedBorderColor
+        val bWidthDp = if (focused) focusBorderWidth else unfocusedBorderWidth
+        if (bColor != Color.Transparent && bWidthDp > 0.dp) {
+            val strokePx = bWidthDp.toPx()
+            val halfStroke = strokePx / 2f
+            drawRoundRect(
+                color = bColor,
+                topLeft = Offset(halfStroke, halfStroke),
+                size = Size(size.width - strokePx, size.height - strokePx),
+                cornerRadius = CornerRadius((radiusPx - halfStroke).coerceAtLeast(0f)),
+                style = Stroke(width = strokePx),
+            )
+        }
+    }
+}
+
+@Composable
+internal fun TvFilterChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    leadingIcon: ImageVector? = null,
+    unselectedContainerColor: Color = Color.Transparent,
+    unselectedContentColor: Color = MuxGridColors.TextMuted,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val bg = when {
+        focused -> MuxGridColors.FocusBorder
+        selected -> MuxGridColors.Accent
+        else -> unselectedContainerColor
+    }
+    val fg = when {
+        focused -> MuxGridColors.OnFocusBorder
+        selected -> MuxGridColors.OnAccent
+        else -> unselectedContentColor
+    }
+    Row(
+        modifier = modifier
+            .heightIn(min = 32.dp)
+            .background(bg, MuxGridShapes.Sm)
+            .onFocusChanged { if (focused != it.isFocused) focused = it.isFocused }
+            .clickable(
+                interactionSource = null,
+                indication = null,
+                onClick = onClick,
+            )
+            .clearAndSetSemantics {
+                role = Role.Tab
+                contentDescription = label
+            }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (leadingIcon != null) {
+            Icon(
+                imageVector = leadingIcon,
+                contentDescription = null,
+                tint = fg,
+                modifier = Modifier.size(15.dp),
+            )
+        }
+        Text(
+            text = label,
+            color = fg,
+            fontSize = 12.5.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
 }
 
 private val TV_RAIL_COLLAPSED_WIDTH = 68.dp
@@ -380,13 +548,6 @@ private fun TvContent(
     // Hoisted scroll states & non-reactive focus memory survive MAIN <-> PLAYER and MAIN <-> ONBOARDING
     val liveGridState = rememberLazyGridState()
     val guideListState = rememberLazyListState()
-    var guideWindowStartEpochSec by remember { mutableLongStateOf(0L) }
-    var hasUserAdjustedGuideWindow by remember { mutableStateOf(false) }
-    LaunchedEffect(activeTab, offsetMs) {
-        if (activeTab == MainTab.GUIDE && !hasUserAdjustedGuideWindow) {
-            guideWindowStartEpochSec = (System.currentTimeMillis() + offsetMs) / 1000L
-        }
-    }
     val recordingsListState = rememberLazyListState()
     val recordingShelfStates = remember { mutableMapOf<String, LazyListState>() }
 
@@ -609,10 +770,9 @@ private fun TvContent(
                                     nowEpochSec = nowEpochSec,
                                     imageLoader = repository.imageLoader,
                                     listState = guideListState,
-                                    windowStartEpochSec = guideWindowStartEpochSec.takeIf { it > 0L } ?: nowEpochSec,
+                                    initialWindowStartEpochSec = focusMemory.guideWindowStartEpochSec ?: nowEpochSec,
                                     onWindowStartChange = {
-                                        hasUserAdjustedGuideWindow = true
-                                        guideWindowStartEpochSec = it
+                                        focusMemory.guideWindowStartEpochSec = it
                                     },
                                     focusMemory = focusMemory,
                                     focusRequestNonce = contentFocusRequestNonce,
@@ -889,77 +1049,81 @@ private fun TvRailItem(
     modifier: Modifier = Modifier,
     statusDotColor: Color? = null,
 ) {
-    Surface(
-        onClick = onClick,
+    var isFocused by remember { mutableStateOf(false) }
+    val containerColor = when {
+        isFocused -> MuxGridColors.FocusBorder
+        selected -> MuxGridColors.CardSurfaceElevated
+        else -> Color.Transparent
+    }
+    val contentColor = when {
+        isFocused -> MuxGridColors.OnFocusBorder
+        selected -> MuxGridColors.TextPrimary
+        else -> MuxGridColors.TextMuted
+    }
+    // Lightweight focusable container avoids tv.material3.Surface's SurfaceGlowNode render targets
+    // Keep a single fixed-width [indicator + icon + label] row anchored at Start and clipped
+    // to the animated container width so icons and spacing never jump on expand/collapse.
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .focusProperties { canFocus = allowFocus },
-        shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = if (selected) MuxGridColors.CardSurfaceElevated else Color.Transparent,
-            contentColor = if (selected) MuxGridColors.TextPrimary else MuxGridColors.TextMuted,
-            focusedContainerColor = MuxGridColors.FocusBorder,
-            focusedContentColor = MuxGridColors.OnFocusBorder,
-        ),
-        border = ClickableSurfaceDefaults.border(
-            border = Border.None,
-            focusedBorder = Border(
-                border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                shape = MuxGridShapes.Sm,
-            ),
-        ),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
+            .background(containerColor, MuxGridShapes.Sm)
+            .clipToBounds()
+            .focusProperties { canFocus = allowFocus }
+            .onFocusChanged { if (isFocused != it.isFocused) isFocused = it.isFocused }
+            .clickable(
+                interactionSource = null,
+                indication = null,
+                onClick = onClick,
+            )
+            .clearAndSetSemantics {
+                role = Role.Tab
+                contentDescription = label
+            },
+        contentAlignment = Alignment.CenterStart,
     ) {
-        // Keep a single fixed-width [indicator + icon + label] row anchored at Start and clipped
-        // to the animated Surface width so icons and spacing never jump on expand/collapse.
-        Box(
+        Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .clipToBounds(),
-            contentAlignment = Alignment.CenterStart,
+                .wrapContentWidth(align = Alignment.Start, unbounded = true)
+                .width(TV_RAIL_EXPANDED_WIDTH - 20.dp)
+                .padding(vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
+            Spacer(Modifier.width(4.dp))
+            Box(
                 modifier = Modifier
-                    .wrapContentWidth(align = Alignment.Start, unbounded = true)
-                    .width(TV_RAIL_EXPANDED_WIDTH - 20.dp)
-                    .padding(vertical = 11.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Spacer(Modifier.width(4.dp))
-                Box(
-                    modifier = Modifier
-                        .width(3.dp)
-                        .height(18.dp)
-                        .background(if (selected) MuxGridColors.Accent else Color.Transparent),
+                    .width(3.dp)
+                    .height(18.dp)
+                    .background(if (selected) MuxGridColors.Accent else Color.Transparent),
+            )
+            Spacer(Modifier.width(6.dp))
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = contentColor,
+                    modifier = Modifier.size(22.dp),
                 )
-                Spacer(Modifier.width(6.dp))
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = label,
-                        modifier = Modifier.size(22.dp),
+                if (statusDotColor != null) {
+                    ConnectionStatusDot(
+                        color = statusDotColor,
+                        borderColor = if (selected) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurfaceAlt,
+                        modifier = Modifier.align(Alignment.TopEnd),
                     )
-                    if (statusDotColor != null) {
-                        ConnectionStatusDot(
-                            color = statusDotColor,
-                            borderColor = if (selected) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurfaceAlt,
-                            modifier = Modifier.align(Alignment.TopEnd),
-                        )
-                    }
                 }
-                Spacer(Modifier.width(13.dp))
-                Text(
-                    text = label,
-                    fontSize = 14.sp,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Clip,
-                    modifier = Modifier
-                        .padding(end = 10.dp)
-                        .graphicsLayer { alpha = labelAlpha() },
-                )
             }
+            Spacer(Modifier.width(13.dp))
+            Text(
+                text = label,
+                color = contentColor,
+                fontSize = 14.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
+                modifier = Modifier
+                    .padding(end = 10.dp)
+                    .graphicsLayer { alpha = labelAlpha() },
+            )
         }
     }
 }
@@ -1020,22 +1184,6 @@ private fun TvLiveChannelsTab(
         }
     }
 
-    val chipShape = FilterChipDefaults.shape(shape = MuxGridShapes.Sm)
-    val chipColors = FilterChipDefaults.colors(
-        containerColor = Color.Transparent,
-        contentColor = MuxGridColors.TextMuted,
-        selectedContainerColor = MuxGridColors.Accent,
-        selectedContentColor = MuxGridColors.OnAccent,
-        focusedContainerColor = MuxGridColors.FocusBorder,
-        focusedContentColor = MuxGridColors.OnFocusBorder,
-        focusedSelectedContainerColor = MuxGridColors.FocusBorder,
-        focusedSelectedContentColor = MuxGridColors.OnFocusBorder,
-    )
-    val chipBorder = FilterChipDefaults.border(
-        border = Border.None,
-        selectedBorder = Border.None,
-    )
-
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
@@ -1048,35 +1196,18 @@ private fun TvLiveChannelsTab(
         ) {
             filters.forEachIndexed { idx, filter ->
                 val selected = filter == activeFilter
-                val filterIcon = filter.icon()
                 val isFallbackFilterTarget = selected || (idx == 0 && filters.none { it == activeFilter })
-                FilterChip(
+                TvFilterChip(
+                    label = filter.label(),
                     selected = selected,
+                    leadingIcon = filter.icon(),
                     onClick = { onSelectFilter(filter) },
                     modifier = if (isFallbackFilterTarget) {
                         Modifier.focusRequester(activeFilterFocusRequester)
                     } else {
                         Modifier
                     },
-                    shape = chipShape,
-                    leadingIcon = filterIcon?.let { icon ->
-                        {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                modifier = Modifier.size(15.dp),
-                            )
-                        }
-                    },
-                    colors = chipColors,
-                    border = chipBorder,
-                ) {
-                    Text(
-                        text = filter.label(),
-                        fontSize = 13.sp,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                    )
-                }
+                )
             }
         }
         MuxGridDivider(modifier = Modifier.padding(horizontal = 4.dp))
@@ -1259,7 +1390,7 @@ private fun TvChannelCard(
     onLongClick: (Channel) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var isFocused by remember { mutableStateOf(false) }
+    val isFocusedState = remember { mutableStateOf(false) }
     val piconModel = remember(channel.id, channel.icon) {
         channel.icon?.let { PiconModel(channel.id, it) }
     }
@@ -1269,43 +1400,36 @@ private fun TvChannelCard(
     }
     val handleClick = remember(channel, onChannelClick) { { onChannelClick(channel) } }
     val handleLongClick = remember(channel, onLongClick) { { onLongClick(channel) } }
-    val interactionSource = remember { MutableInteractionSource() }
     val now = nowNext?.now
     val cardDescription = remember(channel.formattedNumber, channel.name, now?.title) {
         if (now != null) "${channel.formattedNumber} ${channel.name}, ${now.title}" else "${channel.formattedNumber} ${channel.name}"
     }
 
-    // Lightweight focusable card avoids tv.material3.Surface's SurfaceGlowNode shadow render targets
-    // and multi-frame scale animations, while merging child semantics into one accessibility node.
+    // Draw-phase focus styling avoids recomposition, modifier churn, and rounded-rect clip layers on dense grids
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .graphicsLayer {
-                val scale = if (isFocused) 1.015f else 1f
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(MuxGridShapes.Card)
-            .background(if (isFocused) MuxGridColors.CardSurfaceElevated else MuxGridColors.CardSurface)
-            .then(
-                if (isFocused) {
-                    Modifier.border(MuxGridBorders.FocusedCard, MuxGridColors.FocusBorder, MuxGridShapes.Card)
-                } else {
-                    Modifier
-                },
+            .tvFocusableSurface(
+                focusedState = isFocusedState,
+                cornerRadius = MuxGridRadii.Card,
+                containerColor = MuxGridColors.CardSurface,
+                focusedContainerColor = MuxGridColors.CardSurfaceElevated,
+                focusBorderColor = MuxGridColors.FocusBorder,
+                focusBorderWidth = MuxGridBorders.FocusedCard,
+                focusedScale = 1.015f,
             )
             .focusRequester(focusRequester)
             .onFocusChanged { state ->
                 val focused = state.isFocused
-                if (isFocused != focused) {
-                    isFocused = focused
+                if (isFocusedState.value != focused) {
+                    isFocusedState.value = focused
                 }
                 if (focused) {
                     onFocused()
                 }
             }
             .combinedClickable(
-                interactionSource = interactionSource,
+                interactionSource = null,
                 indication = null,
                 onClick = handleClick,
                 onLongClick = handleLongClick,
@@ -2163,29 +2287,22 @@ private fun TvIconButton(
     contentColor: Color = MuxGridColors.TextSecondary,
     content: @Composable () -> Unit,
 ) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier,
-        shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = containerColor,
-            contentColor = contentColor,
-            focusedContainerColor = MuxGridColors.FocusBorder,
-            focusedContentColor = MuxGridColors.OnFocusBorder,
-        ),
-        border = ClickableSurfaceDefaults.border(
-            border = Border.None,
-            focusedBorder = Border(
-                border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
-                shape = MuxGridShapes.Sm,
+    var focused by remember { mutableStateOf(false) }
+    val bg = if (focused) MuxGridColors.FocusBorder else containerColor
+    val fg = if (focused) MuxGridColors.OnFocusBorder else contentColor
+    Box(
+        modifier = modifier
+            .size(size)
+            .background(bg, MuxGridShapes.Sm)
+            .onFocusChanged { if (focused != it.isFocused) focused = it.isFocused }
+            .clickable(
+                interactionSource = null,
+                indication = null,
+                onClick = onClick,
             ),
-        ),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier.size(size),
-            contentAlignment = Alignment.Center,
-        ) {
+        androidx.compose.runtime.CompositionLocalProvider(LocalContentColor provides fg) {
             content()
         }
     }

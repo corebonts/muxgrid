@@ -167,6 +167,8 @@ fun BroadcastUnderlineTab(
     }
 }
 
+private val loadedPiconCache = android.util.LruCache<Any, Boolean>(512)
+
 @Composable
 fun ChannelPiconBadge(
     channelNumber: String,
@@ -181,13 +183,14 @@ fun ChannelPiconBadge(
     Box(
         modifier = modifier
             .size(size)
-            .clip(shape)
-            .background(MuxGridColors.PiconSurface)
+            .background(MuxGridColors.PiconSurface, shape)
             .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, shape),
         contentAlignment = Alignment.Center,
     ) {
         if (piconModel != null) {
-            var loadSucceeded by remember(piconModel) { mutableStateOf(false) }
+            var loadSucceeded by remember(piconModel) {
+                mutableStateOf(loadedPiconCache.get(piconModel) == true)
+            }
             if (!loadSucceeded) {
                 PiconFallbackLabel(channelNumber, channelName)
             }
@@ -196,9 +199,19 @@ fun ChannelPiconBadge(
                 imageLoader = imageLoader,
                 contentDescription = contentDescription,
                 contentScale = ContentScale.Fit,
-                onLoading = { loadSucceeded = false },
-                onError = { loadSucceeded = false },
-                onSuccess = { loadSucceeded = true },
+                onLoading = {
+                    if (loadedPiconCache.get(piconModel) != true) {
+                        loadSucceeded = false
+                    }
+                },
+                onError = {
+                    loadedPiconCache.remove(piconModel)
+                    loadSucceeded = false
+                },
+                onSuccess = {
+                    loadedPiconCache.put(piconModel, true)
+                    loadSucceeded = true
+                },
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(5.dp),
@@ -966,8 +979,7 @@ fun DvrStateBadge(
     }
     Row(
         modifier = modifier
-            .clip(MuxGridShapes.Badge)
-            .background(color.copy(alpha = MuxGridAlphas.TintFill))
+            .background(color.copy(alpha = MuxGridAlphas.TintFill), MuxGridShapes.Badge)
             .padding(horizontal = 7.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
