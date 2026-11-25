@@ -772,6 +772,36 @@ class MockHtspServer:
                     })
                     conn.sendall(encode_frame(reply))
 
+                elif method == "api":
+                    if req.get("path") == "profile/list":
+                        reply["response"] = {
+                            "entries": [
+                                {"key": "demo-pass", "val": "pass"},
+                                {"key": "demo-htsp", "val": "htsp"},
+                            ],
+                        }
+                    conn.sendall(encode_frame(reply))
+
+                elif method == "getProfiles":
+                    reply["profiles"] = [
+                        {"uuid": "demo-pass", "name": "pass", "comment": "MPEG-TS Pass-through"},
+                        {"uuid": "demo-htsp", "name": "htsp", "comment": "HTSP"},
+                    ]
+                    conn.sendall(encode_frame(reply))
+
+                elif method == "getDvrConfigs":
+                    reply["dvrconfigs"] = [
+                        {"uuid": "demo-dvr", "name": "Default"},
+                    ]
+                    conn.sendall(encode_frame(reply))
+
+                elif method == "getDiskSpace":
+                    reply.update({
+                        "freediskspace": 120 * 1024 * 1024 * 1024,
+                        "totaldiskspace": 500 * 1024 * 1024 * 1024,
+                    })
+                    conn.sendall(encode_frame(reply))
+
                 elif method == "enableAsyncMetadata":
                     conn.sendall(encode_frame(reply))
                     dataset = build_dataset(int(time.time()))
@@ -863,6 +893,14 @@ def make_http_handler(picons: dict[int, bytes], ts_bytes: bytes | None) -> type[
 
         def do_GET(self) -> None:
             clean_path = self.path.split("?", 1)[0]
+            if clean_path == "/api/serverinfo":
+                body = b'{"name":"MuxGrid Demo Server","version":"4.3-demo","htspversion":44}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if clean_path.startswith("/imagecache/"):
                 try:
                     cid = int(clean_path.split("/")[2])

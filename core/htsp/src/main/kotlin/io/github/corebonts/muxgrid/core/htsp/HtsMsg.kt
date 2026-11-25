@@ -60,6 +60,9 @@ class HtsMap(
     fun getLongList(key: String): List<Long> =
         getList(key).orEmpty().mapNotNull { (it as? HtsValue.S64)?.value }
 
+    fun getStringList(key: String): List<String> =
+        getList(key).orEmpty().mapNotNull { (it as? HtsValue.Str)?.value }
+
     fun getMapList(key: String): List<HtsMap> =
         getList(key).orEmpty().mapNotNull { (it as? HtsValue.MapVal)?.value }
 

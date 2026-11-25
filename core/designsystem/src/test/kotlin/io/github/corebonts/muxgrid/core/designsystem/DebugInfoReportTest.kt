@@ -43,6 +43,7 @@ class DebugInfoReportTest {
             backgroundPlaybackMode = null,
             pipStatus = "N/A (TV)",
             serverSoftwareSummary = "Tvheadend 4.3-2375 (HTSP v34)",
+            serverDiagnosticsSummary = "OK (Streaming · HTTP · DVR)",
         )
 
         val report = formatDebugInfoReport(snapshot)
@@ -58,6 +59,7 @@ class DebugInfoReportTest {
         assertTrue(report.contains("Storage Free: 3.2 GB / 8.0 GB"))
         assertTrue(report.contains("Decoder: MEDIACODEC_ZERO_COPY"))
         assertTrue(report.contains("Server: Tvheadend 4.3-2375 (HTSP v34)"))
+        assertTrue(report.contains("Server Health: OK (Streaming · HTTP · DVR)"))
         assertFalse(report.contains("Background Playback:"))
     }
 

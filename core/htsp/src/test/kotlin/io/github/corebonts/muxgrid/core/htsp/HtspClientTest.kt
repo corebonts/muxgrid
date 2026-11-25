@@ -698,7 +698,7 @@ class HtspClientTest {
         val challenge = ByteArray(32) { 7 }
         ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
             val serverTask = async(Dispatchers.IO) {
-                // 1. Successful auth with streaming + dvr flags
+                // 1. Successful auth with streaming + dvr RPCs granted (Tvheadend returns {} on auth)
                 server.accept().use { sock ->
                     val input = BufferedInputStream(sock.getInputStream())
                     val output = BufferedOutputStream(sock.getOutputStream())
@@ -717,16 +717,52 @@ class HtspClientTest {
                     output.flush()
                     val auth = HtsMsgCodec.readFrame(input)
                     assertEquals("alice", auth.getString("username"))
-                    output.write(
-                        HtsMsgCodec.encodeFrame(
-                            htsMap {
-                                put("seq", auth.getLong("seq")!!)
-                                put("streaming", 1L)
-                                put("dvr", 1L)
-                            },
-                        ),
-                    )
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", auth.getLong("seq")!!) }))
                     output.flush()
+
+                    while (true) {
+                        val req = runCatching { HtsMsgCodec.readFrame(input) }.getOrNull() ?: break
+                        val seq = req.getLong("seq")!!
+                        val reply = when (req.getString("method")) {
+                            "getSysTime" -> htsMap {
+                                put("seq", seq)
+                                put("time", System.currentTimeMillis() / 1000L)
+                            }
+                            "api" -> {
+                                if (req.getString("path") == "profile/list") {
+                                    htsMap {
+                                        put("seq", seq)
+                                        put(
+                                            "response",
+                                            htsMap {
+                                                put(
+                                                    "entries",
+                                                    listOf(
+                                                        HtsValue.MapVal(htsMap { put("key", "uuid-pass"); put("val", "pass") }),
+                                                        HtsValue.MapVal(htsMap { put("key", "uuid-htsp"); put("val", "htsp") }),
+                                                    ),
+                                                )
+                                            },
+                                        )
+                                    }
+                                } else {
+                                    htsMap { put("seq", seq) }
+                                }
+                            }
+                            "getDvrConfigs" -> htsMap {
+                                put("seq", seq)
+                                put("dvrconfigs", emptyList<HtsValue>())
+                            }
+                            "getDiskSpace" -> htsMap {
+                                put("seq", seq)
+                                put("freediskspace", 50_000_000_000L)
+                                put("totaldiskspace", 100_000_000_000L)
+                            }
+                            else -> htsMap { put("seq", seq) }
+                        }
+                        output.write(HtsMsgCodec.encodeFrame(reply))
+                        output.flush()
+                    }
                 }
                 // 2. Auth failure
                 server.accept().use { sock ->
@@ -775,6 +811,168 @@ class HtspClientTest {
 
             serverTask.await()
         }
+    }
+
+    @Test
+    fun `probeServer detects streaming denial read-only DVR missing pass profile and older HTSP`() = runBlocking {
+        val challenge = ByteArray(32) { 9 }
+        ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
+            val serverTask = async(Dispatchers.IO) {
+                // 1. Read-only user on older HTSP v24 without 'pass' profile
+                server.accept().use { sock ->
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val hello = HtsMsgCodec.readFrame(input)
+                    output.write(
+                        HtsMsgCodec.encodeFrame(
+                            htsMap {
+                                put("seq", hello.getLong("seq")!!)
+                                put("htspversion", 24)
+                                put("servername", "Tvheadend")
+                                put("serverversion", "4.2.8")
+                                put("challenge", challenge)
+                                put("servercapability", listOf(HtsValue.Str("timeshift")))
+                            },
+                        ),
+                    )
+                    output.flush()
+                    val auth = HtsMsgCodec.readFrame(input)
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", auth.getLong("seq")!!) }))
+                    output.flush()
+
+                    while (true) {
+                        val req = runCatching { HtsMsgCodec.readFrame(input) }.getOrNull() ?: break
+                        val seq = req.getLong("seq")!!
+                        val reply = when (req.getString("method")) {
+                            "getSysTime" -> htsMap {
+                                put("seq", seq)
+                                put("time", (System.currentTimeMillis() / 1000L) + 120L)
+                            }
+                            "api" -> {
+                                if (req.getString("path") == "profile/list") {
+                                    htsMap {
+                                        put("seq", seq)
+                                        put(
+                                            "response",
+                                            htsMap {
+                                                put(
+                                                    "entries",
+                                                    listOf(
+                                                        HtsValue.MapVal(htsMap { put("key", "uuid-htsp"); put("val", "htsp") }),
+                                                        HtsValue.MapVal(htsMap { put("key", "uuid-mkv"); put("val", "matroska") }),
+                                                    ),
+                                                )
+                                            },
+                                        )
+                                    }
+                                } else {
+                                    htsMap { put("seq", seq) }
+                                }
+                            }
+                            "getDvrConfigs" -> htsMap {
+                                put("seq", seq)
+                                put("noaccess", 1L)
+                            }
+                            else -> htsMap { put("seq", seq) }
+                        }
+                        output.write(HtsMsgCodec.encodeFrame(reply))
+                        output.flush()
+                    }
+                }
+                // 2. Streaming permission denied
+                server.accept().use { sock ->
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val hello = HtsMsgCodec.readFrame(input)
+                    output.write(
+                        HtsMsgCodec.encodeFrame(
+                            htsMap {
+                                put("seq", hello.getLong("seq")!!)
+                                put("htspversion", 44)
+                                put("challenge", challenge)
+                            },
+                        ),
+                    )
+                    output.flush()
+                    val auth = HtsMsgCodec.readFrame(input)
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", auth.getLong("seq")!!) }))
+                    output.flush()
+                    while (true) {
+                        val req = runCatching { HtsMsgCodec.readFrame(input) }.getOrNull() ?: break
+                        val seq = req.getLong("seq")!!
+                        val reply = when (req.getString("method")) {
+                            "getSysTime", "getDvrConfigs", "getDiskSpace" -> htsMap {
+                                put("seq", seq)
+                                put("noaccess", 1L)
+                            }
+                            else -> htsMap { put("seq", seq) }
+                        }
+                        output.write(HtsMsgCodec.encodeFrame(reply))
+                        output.flush()
+                    }
+                }
+            }
+
+            val readOnlyProbe = HtspClient.probeServer(
+                ServerProfile(host = "127.0.0.1", htspPort = server.localPort, username = "viewer", password = "pw"),
+            )
+            assertTrue(readOnlyProbe.connected)
+            assertTrue(readOnlyProbe.authSucceeded)
+            assertEquals(24, readOnlyProbe.htspVersion)
+            assertEquals(listOf("timeshift"), readOnlyProbe.serverCapabilities)
+            assertEquals(ProbeOutcome.GRANTED, readOnlyProbe.streamingOutcome)
+            assertEquals(ProbeOutcome.NO_ACCESS, readOnlyProbe.dvrOutcome)
+            assertEquals(false, readOnlyProbe.passProfilePresent)
+            assertEquals(listOf("htsp", "matroska"), readOnlyProbe.availableProfiles)
+            assertTrue((readOnlyProbe.clockOffsetMs ?: 0L) > 60_000L)
+
+            val noStreamProbe = HtspClient.probeServer(
+                ServerProfile(host = "127.0.0.1", htspPort = server.localPort, username = "locked", password = "pw"),
+            )
+            assertTrue(noStreamProbe.connected)
+            assertTrue(noStreamProbe.authSucceeded)
+            assertEquals(ProbeOutcome.NO_ACCESS, noStreamProbe.streamingOutcome)
+            assertEquals(ProbeOutcome.NO_ACCESS, noStreamProbe.dvrOutcome)
+
+            serverTask.await()
+        }
+    }
+
+    @Test
+    fun `probeHello reports reachability and handshake metadata`() = runBlocking {
+        val port = ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
+            val serverTask = async(Dispatchers.IO) {
+                server.accept().use { sock ->
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val hello = HtsMsgCodec.readFrame(input)
+                    assertEquals("hello", hello.getString("method"))
+                    output.write(
+                        HtsMsgCodec.encodeFrame(
+                            htsMap {
+                                put("seq", hello.getLong("seq")!!)
+                                put("htspversion", 44)
+                                put("servername", "MuxGrid Box")
+                                put("serverversion", "4.3-2375")
+                            },
+                        ),
+                    )
+                    output.flush()
+                }
+            }
+
+            val ok = HtspClient.probeHello("127.0.0.1", server.localPort)
+            assertTrue(ok.reachable)
+            assertEquals("MuxGrid Box", ok.serverName)
+            assertEquals("4.3-2375", ok.serverVersion)
+            assertEquals(44, ok.htspVersion)
+
+            serverTask.await()
+            server.localPort
+        }
+
+        val closed = HtspClient.probeHello("127.0.0.1", port)
+        assertFalse(closed.reachable)
     }
 
     @Test

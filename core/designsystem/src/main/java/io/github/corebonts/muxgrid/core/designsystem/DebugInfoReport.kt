@@ -9,6 +9,7 @@ import io.github.corebonts.muxgrid.core.model.AppBuildInfo
 import io.github.corebonts.muxgrid.core.model.BackgroundPlaybackMode
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
+import io.github.corebonts.muxgrid.core.model.ServerDiagnosticsReport
 import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import java.io.File
@@ -43,6 +44,7 @@ data class DebugEnvironmentSnapshot(
     val backgroundPlaybackMode: BackgroundPlaybackMode?,
     val pipStatus: String,
     val serverSoftwareSummary: String,
+    val serverDiagnosticsSummary: String? = null,
 )
 
 fun collectDebugEnvironmentSnapshot(
@@ -54,6 +56,7 @@ fun collectDebugEnvironmentSnapshot(
     timeshiftWindow: TimeshiftWindow,
     themeMode: ThemeMode,
     backgroundPlaybackMode: BackgroundPlaybackMode? = null,
+    serverDiagnostics: ServerDiagnosticsReport? = null,
 ): DebugEnvironmentSnapshot {
     val isDebuggable = context.isDebuggableBuild()
     val resolvedBuildType = appInfo.buildType.trim().ifEmpty {
@@ -134,6 +137,7 @@ fun collectDebugEnvironmentSnapshot(
         backgroundPlaybackMode = backgroundPlaybackMode,
         pipStatus = pipStatus,
         serverSoftwareSummary = serverSummary,
+        serverDiagnosticsSummary = serverDiagnostics?.debugSummaryLine,
     )
 }
 
@@ -258,6 +262,12 @@ fun formatDebugInfoReport(snapshot: DebugEnvironmentSnapshot): String {
             appendLine("Background Playback: ${mode.label}")
         }
         appendLine("PiP: ${snapshot.pipStatus}")
-        append("Server: ${snapshot.serverSoftwareSummary}")
+        val diagLine = snapshot.serverDiagnosticsSummary
+        if (!diagLine.isNullOrBlank()) {
+            appendLine("Server: ${snapshot.serverSoftwareSummary}")
+            append("Server Health: $diagLine")
+        } else {
+            append("Server: ${snapshot.serverSoftwareSummary}")
+        }
     }
 }

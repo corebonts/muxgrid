@@ -147,6 +147,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridSyncingState
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
+import io.github.corebonts.muxgrid.core.designsystem.ServerDiagnosticsDetailContent
 import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_EXIT_DURATION_MS
 import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_EXIT_SCALE
 import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_STATUS_DELAY_MS
@@ -179,10 +180,12 @@ import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.ConnectionState
+import io.github.corebonts.muxgrid.core.model.DiagnosticSeverity
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LiveFilter
 import io.github.corebonts.muxgrid.core.model.MainTab
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
+import io.github.corebonts.muxgrid.core.model.ServerDiagnosticsReport
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import io.github.corebonts.muxgrid.core.model.StartScreen
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
@@ -711,17 +714,14 @@ private fun TvContent(
     Box(modifier = Modifier.fillMaxSize()) {
         when (route) {
         TvRoute.ONBOARDING -> {
-            BackHandler(enabled = currentProfile.isConfigured) {
-                route = TvRoute.MAIN
-                contentFocusRequestNonce++
-            }
             OnboardingServerScreen(
                 initialProfile = currentProfile,
                 isTv = true,
                 canCancel = currentProfile.isConfigured,
-                onTestConnection = { repository.testConnection(it) },
-                onSaveAndConnect = { updated ->
-                    repository.saveAndConnect(updated)
+                onProbePorts = { host, htsp, http -> repository.probeServerPorts(host, htsp, http) },
+                onRunDiagnostics = { repository.runPreflightDiagnostics(it) },
+                onSaveAndConnect = { updated, report ->
+                    repository.saveAndConnect(updated, report)
                     route = TvRoute.MAIN
                     contentFocusRequestNonce++
                 },
@@ -966,9 +966,13 @@ private fun TvContent(
                                 val themeMode by repository.themeMode.collectAsState()
                                 val hwDecPreset by repository.hwDecPreset.collectAsState()
                                 val timeshiftWindow by repository.timeshiftWindow.collectAsState()
+                                val serverDiagnostics by repository.serverDiagnostics.collectAsState()
+                                val isRunningDiagnostics by repository.isRunningDiagnostics.collectAsState()
                                 TvSettingsTab(
                                     profile = currentProfile,
                                     connectionState = connectionState,
+                                    serverDiagnostics = serverDiagnostics,
+                                    isRunningDiagnostics = isRunningDiagnostics,
                                     startScreen = currentStartScreen,
                                     themeMode = themeMode,
                                     hwDecPreset = hwDecPreset,
@@ -992,6 +996,9 @@ private fun TvContent(
                                     onRetryConnect = {
                                         focusMemory.settingsTarget = TvSettingsFocusTarget.PRIMARY
                                         repository.reconnect()
+                                    },
+                                    onRefreshDiagnostics = {
+                                        scope.launch { repository.refreshServerDiagnostics() }
                                     },
                                     onOpenServerSetup = {
                                         focusMemory.settingsTarget = TvSettingsFocusTarget.EDIT_SERVER
@@ -1933,6 +1940,8 @@ private fun TvChannelCard(
 private fun TvSettingsTab(
     profile: ServerProfile,
     connectionState: ConnectionState,
+    serverDiagnostics: ServerDiagnosticsReport?,
+    isRunningDiagnostics: Boolean,
     startScreen: StartScreen,
     themeMode: ThemeMode,
     hwDecPreset: HwDecPreset,
@@ -1945,6 +1954,7 @@ private fun TvSettingsTab(
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
     onRetryConnect: () -> Unit,
+    onRefreshDiagnostics: () -> Unit,
     onOpenServerSetup: () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
@@ -1952,6 +1962,7 @@ private fun TvSettingsTab(
     val scope = rememberCoroutineScope()
     var debugReport by remember { mutableStateOf<String?>(null) }
     var showLicenses by remember { mutableStateOf(false) }
+    var showDiagnostics by remember { mutableStateOf(false) }
     val isServerError = connectionState is ConnectionState.Error
     val canRetryConnect = isServerError || connectionState is ConnectionState.Disconnected
     val reconnectFocusRequester = remember { FocusRequester() }
@@ -1991,6 +2002,7 @@ private fun TvSettingsTab(
                         hwDecPreset = hwDecPreset,
                         timeshiftWindow = timeshiftWindow,
                         themeMode = themeMode,
+                        serverDiagnostics = serverDiagnostics,
                     ),
                 )
             }
@@ -2021,11 +2033,19 @@ private fun TvSettingsTab(
                         TvServerSettingsCard(
                             profile = profile,
                             connectionState = connectionState,
+                            serverDiagnostics = serverDiagnostics,
+                            isRunningDiagnostics = isRunningDiagnostics,
                             isServerError = isServerError,
                             canRetryConnect = canRetryConnect,
                             reconnectFocusRequester = reconnectFocusRequester,
                             editServerFocusRequester = editServerFocusRequester,
                             onRetryConnect = onRetryConnect,
+                            onOpenDiagnostics = {
+                                if (serverDiagnostics == null && !isRunningDiagnostics) {
+                                    onRefreshDiagnostics()
+                                }
+                                showDiagnostics = true
+                            },
                             onOpenServerSetup = onOpenServerSetup,
                         )
                         TvGeneralSettingsCard(
@@ -2059,11 +2079,19 @@ private fun TvSettingsTab(
                 TvServerSettingsCard(
                     profile = profile,
                     connectionState = connectionState,
+                    serverDiagnostics = serverDiagnostics,
+                    isRunningDiagnostics = isRunningDiagnostics,
                     isServerError = isServerError,
                     canRetryConnect = canRetryConnect,
                     reconnectFocusRequester = reconnectFocusRequester,
                     editServerFocusRequester = editServerFocusRequester,
                     onRetryConnect = onRetryConnect,
+                    onOpenDiagnostics = {
+                        if (serverDiagnostics == null && !isRunningDiagnostics) {
+                            onRefreshDiagnostics()
+                        }
+                        showDiagnostics = true
+                    },
                     onOpenServerSetup = onOpenServerSetup,
                 )
                 TvGeneralSettingsCard(
@@ -2190,17 +2218,137 @@ private fun TvSettingsTab(
             onOpenUrl = onOpenUrl,
         )
     }
+
+    if (showDiagnostics) {
+        val rerunFocusRequester = remember { FocusRequester() }
+        val diagScrollState = rememberScrollState()
+        var isDiagFocused by remember { mutableStateOf(false) }
+        val scrollStepPx = with(LocalDensity.current) { 72.dp.toPx() }
+        LaunchedEffect(Unit) {
+            withFrameNanos { }
+            runCatching { rerunFocusRequester.requestFocus() }
+        }
+        TvModalDialog(
+            onDismissRequest = { showDiagnostics = false },
+            minWidth = 540.dp,
+            maxWidth = 760.dp,
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = "Server Diagnostics",
+                        style = MuxGridType.Title,
+                        fontSize = 18.sp,
+                        color = MuxGridColors.TextPrimary,
+                    )
+                    Text(
+                        text = "Tvheadend permissions, protocol capabilities, and HTTP media port status.",
+                        style = MuxGridType.CardSubtitle,
+                        fontSize = 13.sp,
+                        color = MuxGridColors.TextSecondary,
+                    )
+                }
+                TvIconButton(
+                    onClick = { if (!isRunningDiagnostics) onRefreshDiagnostics() },
+                    modifier = Modifier.focusRequester(rerunFocusRequester),
+                    size = 40.dp,
+                    containerColor = MuxGridColors.CardSurface,
+                    contentColor = MuxGridColors.AccentSoft,
+                ) {
+                    Icon(
+                        imageVector = MuxGridIcons.Refresh,
+                        contentDescription = "Re-run Diagnostics",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+            val canScrollDiag = diagScrollState.maxValue > 0
+            val showDiagFocusRing = isDiagFocused && canScrollDiag
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
+                    .clip(MuxGridShapes.Card)
+                    .border(
+                        width = if (showDiagFocusRing) MuxGridBorders.Focused else 0.dp,
+                        color = if (showDiagFocusRing) MuxGridColors.FocusBorder else Color.Transparent,
+                        shape = MuxGridShapes.Card,
+                    )
+                    .onFocusChanged { isDiagFocused = it.isFocused }
+                    .onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        when (event.key) {
+                            Key.DirectionDown -> {
+                                if (!diagScrollState.canScrollForward) return@onPreviewKeyEvent false
+                                scope.launch { diagScrollState.scrollBy(scrollStepPx) }
+                                true
+                            }
+                            Key.DirectionUp -> {
+                                if (!diagScrollState.canScrollBackward) return@onPreviewKeyEvent false
+                                scope.launch { diagScrollState.scrollBy(-scrollStepPx) }
+                                true
+                            }
+                            else -> false
+                        }
+                    }
+                    .focusable(enabled = canScrollDiag)
+                    .verticalScroll(diagScrollState)
+                    .padding(if (canScrollDiag) 2.dp else 0.dp),
+            ) {
+                ServerDiagnosticsDetailContent(
+                    report = serverDiagnostics,
+                    isRunning = isRunningDiagnostics,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+            ) {
+                Button(
+                    onClick = { showDiagnostics = false },
+                    shape = tvButtonShape(),
+                    colors = tvDialogSecondaryButtonColors(),
+                ) {
+                    Text("Close", maxLines = 1, softWrap = false)
+                }
+                if (serverDiagnostics?.hasBlockers == true || serverDiagnostics?.hasDegraded == true) {
+                    Button(
+                        onClick = {
+                            showDiagnostics = false
+                            onOpenServerSetup()
+                        },
+                        shape = tvButtonShape(),
+                        colors = tvPrimaryButtonColors(),
+                    ) {
+                        Text("Edit Server", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
 private fun TvServerSettingsCard(
     profile: ServerProfile,
     connectionState: ConnectionState,
+    serverDiagnostics: ServerDiagnosticsReport?,
+    isRunningDiagnostics: Boolean,
     isServerError: Boolean,
     canRetryConnect: Boolean,
     reconnectFocusRequester: FocusRequester,
     editServerFocusRequester: FocusRequester,
     onRetryConnect: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     onOpenServerSetup: () -> Unit,
 ) {
     Column(
@@ -2245,6 +2393,29 @@ private fun TvServerSettingsCard(
                     maxLines = if (isServerError) 3 else 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (profile.isConfigured && (serverDiagnostics != null || isRunningDiagnostics)) {
+                    val healthText = when {
+                        isRunningDiagnostics -> "Running server diagnostics…"
+                        serverDiagnostics?.hasBlockers == true ->
+                            serverDiagnostics.blockerItems.firstOrNull()?.summary ?: "Diagnostics issue"
+                        serverDiagnostics?.hasDegraded == true ->
+                            "${serverDiagnostics.capabilitySummary} · Limited features"
+                        else -> serverDiagnostics?.capabilitySummary.orEmpty()
+                    }
+                    val healthColor = when {
+                        isRunningDiagnostics || serverDiagnostics == null -> MuxGridColors.TextMuted
+                        serverDiagnostics.overallSeverity == DiagnosticSeverity.BLOCKER -> MuxGridColors.CoralLive
+                        serverDiagnostics.overallSeverity == DiagnosticSeverity.DEGRADED -> MuxGridColors.AmberWarn
+                        else -> MuxGridColors.EmeraldOk
+                    }
+                    Text(
+                        text = healthText,
+                        style = MuxGridType.TabularSmall,
+                        color = healthColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2261,6 +2432,24 @@ private fun TvServerSettingsCard(
                         Icon(
                             imageVector = MuxGridIcons.Refresh,
                             contentDescription = "Reconnect",
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+                if (profile.isConfigured) {
+                    TvIconButton(
+                        onClick = onOpenDiagnostics,
+                        size = 44.dp,
+                        containerColor = MuxGridColors.CardSurfaceElevated,
+                        contentColor = when (serverDiagnostics?.overallSeverity) {
+                            DiagnosticSeverity.BLOCKER -> MuxGridColors.CoralLive
+                            DiagnosticSeverity.DEGRADED -> MuxGridColors.AmberWarn
+                            else -> MuxGridColors.TextPrimary
+                        },
+                    ) {
+                        Icon(
+                            imageVector = MuxGridIcons.Info,
+                            contentDescription = "Server Diagnostics",
                             modifier = Modifier.size(20.dp),
                         )
                     }

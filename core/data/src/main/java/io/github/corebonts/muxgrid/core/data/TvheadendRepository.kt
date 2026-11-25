@@ -19,6 +19,8 @@ import io.github.corebonts.muxgrid.core.model.GrowingDvrFile
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
 import io.github.corebonts.muxgrid.core.model.LocalDvrProgress
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
+import io.github.corebonts.muxgrid.core.model.PortProbeResult
+import io.github.corebonts.muxgrid.core.model.ServerDiagnosticsReport
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import io.github.corebonts.muxgrid.core.model.StartScreen
 import io.github.corebonts.muxgrid.core.model.StreamTicket
@@ -41,6 +43,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Single source of truth coordinating [HtspClient], [HtspVfsClient], [TvheadendStore],
@@ -65,8 +68,13 @@ class TvheadendRepository(
     private val dvrMergeLock = Any()
     private var latestLocalDvrProgress: Map<Long, LocalDvrProgress> = emptyMap()
     private val _dvrEntries = MutableStateFlow<Map<Long, DvrEntry>>(emptyMap())
+    private val _serverDiagnostics = MutableStateFlow<ServerDiagnosticsReport?>(null)
+    private val _isRunningDiagnostics = MutableStateFlow(false)
+    private val activeDiagnosticsRefreshCount = AtomicInteger(0)
 
     val connectionState: StateFlow<ConnectionState> = htspClient.connectionState
+    val serverDiagnostics: StateFlow<ServerDiagnosticsReport?> = _serverDiagnostics.asStateFlow()
+    val isRunningDiagnostics: StateFlow<Boolean> = _isRunningDiagnostics.asStateFlow()
     val channels: StateFlow<List<Channel>> = store.channels
     val tags: StateFlow<List<ChannelTag>> = store.tags
     val nowNextByChannel: StateFlow<Map<Long, NowNextProgram>> = store.nowNextByChannel
@@ -227,12 +235,28 @@ class TvheadendRepository(
                         }
                         previousServerKey = serverKey
                     }
+                    if (_serverDiagnostics.value?.profileFingerprint != profile.diagnosticsFingerprint) {
+                        _serverDiagnostics.value = null
+                    }
                     if (profile.isConfigured) {
                         htspClient.connect(profile)
                     } else {
                         htspClient.disconnect()
                     }
                 }
+        }
+        scope.launch {
+            htspClient.connectionState.collect { state ->
+                if (state is ConnectionState.Connected) {
+                    val profile = serverProfile.value
+                    if (profile != null &&
+                        profile.isConfigured &&
+                        _serverDiagnostics.value?.profileFingerprint != profile.diagnosticsFingerprint
+                    ) {
+                        runCatching { refreshServerDiagnostics() }
+                    }
+                }
+            }
         }
         // Refresh Now/Next progress & transitions every 15 s off the main thread
         scope.launch(Dispatchers.Default) {
@@ -250,7 +274,50 @@ class TvheadendRepository(
     suspend fun testConnection(profile: ServerProfile): ConnectionTestResult =
         HtspClient.testConnection(profile)
 
-    suspend fun saveAndConnect(profile: ServerProfile) {
+    suspend fun probeServerPorts(
+        host: String,
+        htspPort: Int,
+        httpPort: Int,
+    ): PortProbeResult = ServerDiagnosticsRunner.probePorts(host, htspPort, httpPort)
+
+    suspend fun runPreflightDiagnostics(profile: ServerProfile): ServerDiagnosticsReport =
+        ServerDiagnosticsRunner.runPreflight(profile)
+
+    suspend fun refreshServerDiagnostics(): ServerDiagnosticsReport? {
+        val profile = serverProfile.value ?: return null
+        if (!profile.isConfigured) return null
+        if (activeDiagnosticsRefreshCount.incrementAndGet() > 0) {
+            _isRunningDiagnostics.value = true
+        }
+        return try {
+            val activeProbe = htspClient.probeActiveSession()
+            val report = if (activeProbe != null) {
+                ServerDiagnosticsRunner.evaluateFromHtspProbe(profile, activeProbe)
+            } else {
+                ServerDiagnosticsRunner.runPreflight(profile)
+            }
+            val current = serverProfile.value
+            if (current != null && current.diagnosticsFingerprint == profile.diagnosticsFingerprint) {
+                _serverDiagnostics.value = report
+            }
+            report
+        } finally {
+            if (activeDiagnosticsRefreshCount.decrementAndGet() <= 0) {
+                _isRunningDiagnostics.value = false
+            }
+        }
+    }
+
+    suspend fun saveAndConnect(
+        profile: ServerProfile,
+        preflightReport: ServerDiagnosticsReport? = null,
+    ) {
+        val fingerprint = profile.diagnosticsFingerprint
+        if (preflightReport != null && preflightReport.profileFingerprint == fingerprint) {
+            _serverDiagnostics.value = preflightReport
+        } else if (_serverDiagnostics.value?.profileFingerprint != fingerprint) {
+            _serverDiagnostics.value = null
+        }
         settings.saveServerProfile(profile)
     }
 

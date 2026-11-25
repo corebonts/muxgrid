@@ -110,6 +110,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridSyncingState
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
 import io.github.corebonts.muxgrid.core.designsystem.OnboardingServerScreen
+import io.github.corebonts.muxgrid.core.designsystem.ServerDiagnosticsDetailContent
 import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_EXIT_DURATION_MS
 import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_EXIT_SCALE
 import io.github.corebonts.muxgrid.core.designsystem.STARTUP_SPLASH_STATUS_DELAY_MS
@@ -141,6 +142,7 @@ import io.github.corebonts.muxgrid.core.model.AppNotices
 import io.github.corebonts.muxgrid.core.model.BackgroundPlaybackMode
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ConnectionState
+import io.github.corebonts.muxgrid.core.model.DiagnosticSeverity
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
@@ -149,6 +151,7 @@ import io.github.corebonts.muxgrid.core.model.MainTab
 import io.github.corebonts.muxgrid.core.model.NowNextProgram
 import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
+import io.github.corebonts.muxgrid.core.model.ServerDiagnosticsReport
 import io.github.corebonts.muxgrid.core.model.ServerProfile
 import io.github.corebonts.muxgrid.core.model.StartScreen
 import io.github.corebonts.muxgrid.core.model.ThemeMode
@@ -256,16 +259,14 @@ fun MobileRoot(
     Box(modifier = Modifier.fillMaxSize()) {
         when (route) {
         MobileRoute.ONBOARDING -> {
-            BackHandler(enabled = currentProfile.isConfigured) {
-                route = MobileRoute.MAIN
-            }
             OnboardingServerScreen(
                 initialProfile = currentProfile,
                 isTv = false,
                 canCancel = currentProfile.isConfigured,
-                onTestConnection = { repository.testConnection(it) },
-                onSaveAndConnect = { updated ->
-                    repository.saveAndConnect(updated)
+                onProbePorts = { host, htsp, http -> repository.probeServerPorts(host, htsp, http) },
+                onRunDiagnostics = { repository.runPreflightDiagnostics(it) },
+                onSaveAndConnect = { updated, report ->
+                    repository.saveAndConnect(updated, report)
                     route = MobileRoute.MAIN
                 },
                 onCancel = { route = MobileRoute.MAIN },
@@ -398,9 +399,13 @@ fun MobileRoot(
                             val hwDecPreset by repository.hwDecPreset.collectAsState()
                             val timeshiftWindow by repository.timeshiftWindow.collectAsState()
                             val backgroundPlaybackMode by repository.backgroundPlaybackMode.collectAsState()
+                            val serverDiagnostics by repository.serverDiagnostics.collectAsState()
+                            val isRunningDiagnostics by repository.isRunningDiagnostics.collectAsState()
                             MobileSettingsTab(
                                 profile = currentProfile,
                                 connectionState = connectionState,
+                                serverDiagnostics = serverDiagnostics,
+                                isRunningDiagnostics = isRunningDiagnostics,
                                 startScreen = currentStartScreen,
                                 themeMode = themeMode,
                                 hwDecPreset = hwDecPreset,
@@ -427,6 +432,9 @@ fun MobileRoot(
                                 },
                                 onRetryConnect = {
                                     repository.reconnect()
+                                },
+                                onRefreshDiagnostics = {
+                                    scope.launch { repository.refreshServerDiagnostics() }
                                 },
                                 onOpenServerSetup = {
                                     route = MobileRoute.ONBOARDING
@@ -1522,6 +1530,8 @@ private fun MobileChannelCard(
 private fun MobileSettingsTab(
     profile: ServerProfile,
     connectionState: ConnectionState,
+    serverDiagnostics: ServerDiagnosticsReport?,
+    isRunningDiagnostics: Boolean,
     startScreen: StartScreen,
     themeMode: ThemeMode,
     hwDecPreset: HwDecPreset,
@@ -1536,6 +1546,7 @@ private fun MobileSettingsTab(
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
     onSelectBackgroundPlaybackMode: (BackgroundPlaybackMode) -> Unit,
     onRetryConnect: () -> Unit,
+    onRefreshDiagnostics: () -> Unit,
     onOpenServerSetup: () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
@@ -1543,6 +1554,7 @@ private fun MobileSettingsTab(
     val scope = rememberCoroutineScope()
     var debugReport by remember { mutableStateOf<String?>(null) }
     var showLicenses by remember { mutableStateOf(false) }
+    var showDiagnostics by remember { mutableStateOf(false) }
 
     val backgroundModeOptions = if (pipSupported) {
         BackgroundPlaybackMode.entries
@@ -1576,6 +1588,7 @@ private fun MobileSettingsTab(
                         timeshiftWindow = timeshiftWindow,
                         themeMode = themeMode,
                         backgroundPlaybackMode = effectiveBackgroundMode,
+                        serverDiagnostics = serverDiagnostics,
                     ),
                 )
             }
@@ -1604,7 +1617,15 @@ private fun MobileSettingsTab(
                         MobileServerSettingsSection(
                             profile = profile,
                             connectionState = connectionState,
+                            serverDiagnostics = serverDiagnostics,
+                            isRunningDiagnostics = isRunningDiagnostics,
                             onRetryConnect = onRetryConnect,
+                            onOpenDiagnostics = {
+                                if (serverDiagnostics == null && !isRunningDiagnostics) {
+                                    onRefreshDiagnostics()
+                                }
+                                showDiagnostics = true
+                            },
                             onOpenServerSetup = onOpenServerSetup,
                         )
                         MobileGeneralSettingsSection(
@@ -1643,7 +1664,15 @@ private fun MobileSettingsTab(
                 MobileServerSettingsSection(
                     profile = profile,
                     connectionState = connectionState,
+                    serverDiagnostics = serverDiagnostics,
+                    isRunningDiagnostics = isRunningDiagnostics,
                     onRetryConnect = onRetryConnect,
+                    onOpenDiagnostics = {
+                        if (serverDiagnostics == null && !isRunningDiagnostics) {
+                            onRefreshDiagnostics()
+                        }
+                        showDiagnostics = true
+                    },
                     onOpenServerSetup = onOpenServerSetup,
                 )
                 MobileGeneralSettingsSection(
@@ -1747,13 +1776,102 @@ private fun MobileSettingsTab(
             onOpenUrl = onOpenUrl,
         )
     }
+
+    if (showDiagnostics) {
+        MuxGridModalSheet(
+            onDismissRequest = { showDiagnostics = false },
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = "Server Diagnostics",
+                        style = MuxGridType.Title,
+                        fontSize = 18.sp,
+                    )
+                    Text(
+                        text = "Tvheadend permissions, protocol capabilities, and HTTP media port status.",
+                        style = MuxGridType.CardSubtitle,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(MuxGridShapes.Sm)
+                        .background(MuxGridColors.CardSurface)
+                        .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Sm)
+                        .clickable(enabled = !isRunningDiagnostics, onClick = onRefreshDiagnostics),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isRunningDiagnostics) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MuxGridColors.Accent,
+                        )
+                    } else {
+                        Icon(
+                            imageVector = MuxGridIcons.Refresh,
+                            contentDescription = "Re-run diagnostics",
+                            tint = MuxGridColors.AccentSoft,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            }
+            ServerDiagnosticsDetailContent(
+                report = serverDiagnostics,
+                isRunning = isRunningDiagnostics,
+            )
+            val showEditServer = serverDiagnostics?.hasBlockers == true || serverDiagnostics?.hasDegraded == true
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedButton(
+                    onClick = { showDiagnostics = false },
+                    shape = MuxGridShapes.Sm,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Close", color = MuxGridColors.TextPrimary, maxLines = 1)
+                }
+                if (showEditServer) {
+                    Button(
+                        onClick = {
+                            showDiagnostics = false
+                            onOpenServerSetup()
+                        },
+                        shape = MuxGridShapes.Sm,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MuxGridColors.Accent,
+                            contentColor = MuxGridColors.OnAccent,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Edit Server", fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
 private fun MobileServerSettingsSection(
     profile: ServerProfile,
     connectionState: ConnectionState,
+    serverDiagnostics: ServerDiagnosticsReport?,
+    isRunningDiagnostics: Boolean,
     onRetryConnect: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     onOpenServerSetup: () -> Unit,
 ) {
     val isServerError = connectionState is ConnectionState.Error
@@ -1763,7 +1881,7 @@ private fun MobileServerSettingsSection(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text("TVHEADEND SERVER", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(MuxGridShapes.Card)
@@ -1778,67 +1896,95 @@ private fun MobileServerSettingsSection(
                     } else {
                         Modifier
                     },
-                )
-                .padding(horizontal = 12.dp, vertical = 11.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+                ),
         ) {
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(end = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Text(
-                    text = serverHeadline(profile, connectionState),
-                    style = MuxGridType.TabularNumber,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = connectionStatusText(profile, connectionState),
-                    style = MuxGridType.TabularSmall,
-                    color = connectionStatusColor(connectionState),
-                    maxLines = if (isServerError) 3 else 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 11.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (canRetryConnect) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = serverHeadline(profile, connectionState),
+                        style = MuxGridType.TabularNumber,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = connectionStatusText(profile, connectionState),
+                        style = MuxGridType.TabularSmall,
+                        color = connectionStatusColor(connectionState),
+                        maxLines = if (isServerError) 3 else 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (canRetryConnect) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(MuxGridShapes.Sm)
+                                .background(MuxGridColors.CardSurfaceElevated)
+                                .clickable(onClick = onRetryConnect),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = MuxGridIcons.Refresh,
+                                contentDescription = "Reconnect",
+                                tint = MuxGridColors.AccentSoft,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
                     Box(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(MuxGridShapes.Sm)
                             .background(MuxGridColors.CardSurfaceElevated)
-                            .clickable(onClick = onRetryConnect),
+                            .clickable(onClick = onOpenServerSetup),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
-                            imageVector = MuxGridIcons.Refresh,
-                            contentDescription = "Reconnect",
-                            tint = MuxGridColors.AccentSoft,
+                            imageVector = MuxGridIcons.Edit,
+                            contentDescription = "Edit Server",
+                            tint = MuxGridColors.TextPrimary,
                             modifier = Modifier.size(20.dp),
                         )
                     }
                 }
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(MuxGridShapes.Sm)
-                        .background(MuxGridColors.CardSurfaceElevated)
-                        .clickable(onClick = onOpenServerSetup),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = MuxGridIcons.Edit,
-                        contentDescription = "Edit Server",
-                        tint = MuxGridColors.TextPrimary,
-                        modifier = Modifier.size(20.dp),
-                    )
+            }
+            if (profile.isConfigured) {
+                MuxGridDivider()
+                val healthSubtitle = when {
+                    isRunningDiagnostics -> "Checking capabilities and media ports…"
+                    serverDiagnostics == null -> "Tap to run server capability check"
+                    serverDiagnostics.hasBlockers -> serverDiagnostics.blockerItems.firstOrNull()?.summary ?: "Issue detected"
+                    serverDiagnostics.hasDegraded -> "${serverDiagnostics.capabilitySummary} · Tap for details"
+                    else -> serverDiagnostics.capabilitySummary
                 }
+                val healthColor = when {
+                    isRunningDiagnostics || serverDiagnostics == null -> MuxGridColors.TextSecondary
+                    serverDiagnostics.overallSeverity == DiagnosticSeverity.BLOCKER -> MuxGridColors.CoralLive
+                    serverDiagnostics.overallSeverity == DiagnosticSeverity.DEGRADED -> MuxGridColors.AmberWarn
+                    else -> MuxGridColors.EmeraldOk
+                }
+                MobileSettingsActionRow(
+                    title = "Server Diagnostics",
+                    subtitle = healthSubtitle,
+                    subtitleColor = healthColor,
+                    contentDescription = "View server diagnostics",
+                    onClick = onOpenDiagnostics,
+                )
             }
         }
     }

@@ -51,5 +51,29 @@ class ServerProfileTest {
         val emptyBrackets = ServerProfile(host = "[]")
         assertFalse(emptyBrackets.isConfigured)
         assertNull(emptyBrackets.httpBaseUrl)
+        assertEquals("", emptyBrackets.diagnosticsFingerprint)
+    }
+
+    @Test
+    fun `diagnosticsFingerprint changes when ports or credentials change`() {
+        val base = ServerProfile(
+            host = "tvheadend.local",
+            htspPort = 9982,
+            httpPort = 9981,
+            username = "alice",
+            password = "secret",
+        )
+        val differentHttpPort = base.copy(httpPort = 9989)
+        val differentUser = base.copy(username = "bob")
+        val differentPass = base.copy(password = "other")
+        val whitespaceHostAndUser = base.copy(host = " tvheadend.local ", username = " alice ")
+
+        assertEquals(base.serverKey, differentHttpPort.serverKey)
+        assertEquals(base.serverKey, differentUser.serverKey)
+        assertEquals(base.diagnosticsFingerprint, whitespaceHostAndUser.diagnosticsFingerprint)
+        assertFalse(base.diagnosticsFingerprint == differentHttpPort.diagnosticsFingerprint)
+        assertFalse(base.diagnosticsFingerprint == differentUser.diagnosticsFingerprint)
+        assertFalse(base.diagnosticsFingerprint == differentPass.diagnosticsFingerprint)
+        assertFalse(base.diagnosticsFingerprint.contains("secret"))
     }
 }

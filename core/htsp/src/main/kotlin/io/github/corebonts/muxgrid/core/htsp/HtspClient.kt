@@ -64,6 +64,9 @@ class HtspClient(
     private var lastProfile: ServerProfile? = null
 
     @Volatile
+    private var lastServerCapabilities: List<String> = emptyList()
+
+    @Volatile
     var suppressTransientErrors: Boolean = false
 
     fun connect(profile: ServerProfile) {
@@ -203,6 +206,28 @@ class HtspClient(
             }
         }
         return result is ConnectionState.Connected
+    }
+
+    suspend fun probeActiveSession(): HtspCapabilityProbeResult? {
+        val session = activeSession ?: return null
+        val state = _connectionState.value
+        val (serverName, serverVersion, htspVersion) = when (state) {
+            is ConnectionState.Connected -> Triple(state.serverName, state.serverVersion, state.htspVersion)
+            is ConnectionState.Syncing -> Triple(state.serverName, state.serverVersion, state.htspVersion)
+            else -> return null
+        }
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                probeCapabilities(
+                    session = session,
+                    negotiatedVersion = htspVersion,
+                    serverName = serverName,
+                    serverVersion = serverVersion,
+                    serverCapabilities = lastServerCapabilities,
+                    rpcTimeoutMs = rpcTimeoutMs,
+                )
+            }.getOrNull()
+        }
     }
 
     suspend fun getTicket(channelId: Long): TicketResult {
@@ -481,6 +506,7 @@ class HtspClient(
             negotiatedVersion = authResult.negotiatedVersion
             serverName = authResult.serverName
             serverVersion = authResult.serverVersion
+            lastServerCapabilities = authResult.serverCapabilities
 
             publishStateIfCurrent(
                 generation,
@@ -595,72 +621,292 @@ class HtspClient(
             return md.digest()
         }
 
-        suspend fun testConnection(profile: ServerProfile): ConnectionTestResult =
-            withContext(Dispatchers.IO) {
-                if (!profile.isConfigured) {
-                    return@withContext ConnectionTestResult.Failure("Host and valid ports are required")
-                }
-                val socket = Socket()
-                val session = try {
-                    socket.tcpNoDelay = true
-                    socket.connect(
-                        InetSocketAddress(profile.normalizedHost, profile.htspPort),
-                        HtspSession.CONNECT_TIMEOUT_MS,
-                    )
-                    HtspSession(socket, AtomicLong(1L))
-                } catch (e: CancellationException) {
-                    runCatching { socket.close() }
-                    throw e
-                } catch (e: Exception) {
-                    runCatching { socket.close() }
-                    return@withContext ConnectionTestResult.Failure(
-                        message = e.message ?: "Unable to connect to ${profile.formattedHttpHost}:${profile.htspPort}",
-                        isAuthError = false,
-                    )
-                }
+        suspend fun probeHello(
+            host: String,
+            htspPort: Int,
+            timeoutMs: Int = PORT_PROBE_TIMEOUT_MS,
+        ): HtspPortProbeResult = withContext(Dispatchers.IO) {
+            val cleanHost = host.trim().removePrefix("[").removeSuffix("]")
+            if (cleanHost.isEmpty() || htspPort !in 1..65535) {
+                return@withContext HtspPortProbeResult(
+                    reachable = false,
+                    error = "Host and valid HTSP port are required",
+                )
+            }
+            val socket = Socket()
+            val session = try {
+                socket.tcpNoDelay = true
+                socket.connect(InetSocketAddress(cleanHost, htspPort), timeoutMs)
+                HtspSession(socket, AtomicLong(1L))
+            } catch (e: CancellationException) {
+                runCatching { socket.close() }
+                throw e
+            } catch (e: Exception) {
+                runCatching { socket.close() }
+                return@withContext HtspPortProbeResult(
+                    reachable = false,
+                    error = e.message ?: "Unable to connect to $cleanHost:$htspPort",
+                )
+            }
 
-                try {
-                    val auth = coroutineScope {
-                        val writeJob = launch(Dispatchers.IO) { session.writeLoop() }
-                        val readJob = launch(Dispatchers.IO) {
-                            try {
-                                session.readLoop()
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (_: Throwable) {
-                                session.close()
-                            }
-                        }
+            try {
+                val helloReply = coroutineScope {
+                    val writeJob = launch(Dispatchers.IO) { session.writeLoop() }
+                    val readJob = launch(Dispatchers.IO) {
                         try {
-                            HtspSession.handshakeAndAuthenticate(session, profile, HtspSession.RPC_TIMEOUT_MS)
-                        } finally {
-                            writeJob.cancel()
-                            readJob.cancel()
+                            session.readLoop()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Throwable) {
                             session.close()
                         }
                     }
-                    ConnectionTestResult.Success(
-                        serverName = auth.serverName,
-                        serverVersion = auth.serverVersion,
-                        htspVersion = auth.negotiatedVersion,
-                        hasDvrAccess = auth.hasDvrAccess,
-                        hasStreamingAccess = auth.hasStreamingAccess,
+                    try {
+                        session.rpc(
+                            "hello",
+                            htsMap {
+                                put("htspversion", CLIENT_HTSP_VERSION)
+                                put("clientname", CLIENT_NAME)
+                                put("clientversion", CLIENT_VERSION)
+                            },
+                            timeoutMs.toLong(),
+                        )
+                    } finally {
+                        writeJob.cancel()
+                        readJob.cancel()
+                        session.close()
+                    }
+                }
+                val serverHtspVersion = helloReply.getInt("htspversion") ?: CLIENT_HTSP_VERSION
+                HtspPortProbeResult(
+                    reachable = true,
+                    serverName = helloReply.getString("servername") ?: "Tvheadend",
+                    serverVersion = helloReply.getString("serverversion") ?: "",
+                    htspVersion = minOf(CLIENT_HTSP_VERSION, serverHtspVersion),
+                    serverCapabilities = helloReply.getStringList("servercapability"),
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                HtspPortProbeResult(
+                    reachable = false,
+                    error = e.message ?: "HTSP handshake failed on $cleanHost:$htspPort",
+                )
+            } finally {
+                session.close()
+            }
+        }
+
+        suspend fun probeServer(
+            profile: ServerProfile,
+            connectTimeoutMs: Int = HtspSession.CONNECT_TIMEOUT_MS,
+            rpcTimeoutMs: Long = PROBE_RPC_TIMEOUT_MS,
+        ): HtspCapabilityProbeResult = withContext(Dispatchers.IO) {
+            if (!profile.isConfigured) {
+                return@withContext HtspCapabilityProbeResult(
+                    connected = false,
+                    authSucceeded = false,
+                    connectionError = "Host and valid ports are required",
+                )
+            }
+            val socket = Socket()
+            val session = try {
+                socket.tcpNoDelay = true
+                socket.connect(
+                    InetSocketAddress(profile.normalizedHost, profile.htspPort),
+                    connectTimeoutMs,
+                )
+                HtspSession(socket, AtomicLong(1L))
+            } catch (e: CancellationException) {
+                runCatching { socket.close() }
+                throw e
+            } catch (e: Exception) {
+                runCatching { socket.close() }
+                return@withContext HtspCapabilityProbeResult(
+                    connected = false,
+                    authSucceeded = false,
+                    connectionError = e.message ?: "Unable to connect to ${profile.formattedHttpHost}:${profile.htspPort}",
+                )
+            }
+
+            try {
+                coroutineScope {
+                    val writeJob = launch(Dispatchers.IO) { session.writeLoop() }
+                    val readJob = launch(Dispatchers.IO) {
+                        try {
+                            session.readLoop()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Throwable) {
+                            session.close()
+                        }
+                    }
+                    try {
+                        val auth = HtspSession.handshakeAndAuthenticate(session, profile, rpcTimeoutMs)
+                        probeCapabilities(
+                            session = session,
+                            negotiatedVersion = auth.negotiatedVersion,
+                            serverName = auth.serverName,
+                            serverVersion = auth.serverVersion,
+                            serverCapabilities = auth.serverCapabilities,
+                            rpcTimeoutMs = rpcTimeoutMs,
+                        )
+                    } finally {
+                        writeJob.cancel()
+                        readJob.cancel()
+                        session.close()
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: HtspAuthException) {
+                HtspCapabilityProbeResult(
+                    connected = true,
+                    authSucceeded = false,
+                    isAuthError = true,
+                    connectionError = "Authentication failed: check username or password",
+                )
+            } catch (e: Exception) {
+                HtspCapabilityProbeResult(
+                    connected = false,
+                    authSucceeded = false,
+                    connectionError = e.message ?: "Unable to connect to ${profile.formattedHttpHost}:${profile.htspPort}",
+                )
+            } finally {
+                session.close()
+            }
+        }
+
+        internal suspend fun probeCapabilities(
+            session: HtspSession,
+            negotiatedVersion: Int,
+            serverName: String,
+            serverVersion: String,
+            serverCapabilities: List<String>,
+            rpcTimeoutMs: Long,
+        ): HtspCapabilityProbeResult {
+            var streamingOutcome = ProbeOutcome.ERROR
+            var clockOffsetMs: Long? = null
+            try {
+                val sysTime = session.rpc("getSysTime", htsMap {}, rpcTimeoutMs)
+                streamingOutcome = ProbeOutcome.GRANTED
+                val serverSec = sysTime.getLong("time")
+                if (serverSec != null) {
+                    clockOffsetMs = (serverSec * 1000L) - System.currentTimeMillis()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: HtspNoAccessException) {
+                streamingOutcome = ProbeOutcome.NO_ACCESS
+            } catch (e: Exception) {
+                streamingOutcome = classifyProbeException(e)
+            }
+
+            var passProfilePresent: Boolean? = null
+            var availableProfiles: List<String> = emptyList()
+            if (streamingOutcome == ProbeOutcome.GRANTED) {
+                try {
+                    val apiReply = session.rpc(
+                        "api",
+                        htsMap { put("path", "profile/list") },
+                        rpcTimeoutMs,
                     )
+                    val response = apiReply.getMap("response")
+                    if (response != null && response.containsKey("entries")) {
+                        val names = response.getMapList("entries")
+                            .mapNotNull { it.getString("val")?.trim()?.takeIf { n -> n.isNotEmpty() } }
+                        availableProfiles = names
+                        passProfilePresent = names.any { it.equals("pass", ignoreCase = true) }
+                    }
                 } catch (e: CancellationException) {
                     throw e
-                } catch (_: HtspAuthException) {
-                    ConnectionTestResult.Failure(
-                        message = "Authentication failed: check username or password",
-                        isAuthError = true,
-                    )
-                } catch (e: Exception) {
-                    ConnectionTestResult.Failure(
-                        message = e.message ?: "Unable to connect to ${profile.formattedHttpHost}:${profile.htspPort}",
-                        isAuthError = false,
-                    )
-                } finally {
-                    session.close()
+                } catch (_: Exception) {
+                    // Older Tvheadend or servers without HTSP api("profile/list"): skip cleanly.
                 }
             }
+
+            var dvrOutcome = ProbeOutcome.ERROR
+            if (negotiatedVersion >= 16) {
+                try {
+                    session.rpc("getDvrConfigs", htsMap {}, rpcTimeoutMs)
+                    dvrOutcome = ProbeOutcome.GRANTED
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: HtspNoAccessException) {
+                    dvrOutcome = ProbeOutcome.NO_ACCESS
+                } catch (e: Exception) {
+                    val outcome = classifyProbeException(e)
+                    dvrOutcome = if (outcome == ProbeOutcome.UNSUPPORTED) ProbeOutcome.ERROR else outcome
+                }
+            }
+
+            var freeDiskBytes: Long? = null
+            var totalDiskBytes: Long? = null
+            var diskError: String? = null
+            if (dvrOutcome == ProbeOutcome.GRANTED || negotiatedVersion < 16 || dvrOutcome == ProbeOutcome.ERROR) {
+                try {
+                    val diskReply = session.rpc("getDiskSpace", htsMap {}, rpcTimeoutMs)
+                    freeDiskBytes = diskReply.getLong("freediskspace")
+                    totalDiskBytes = diskReply.getLong("totaldiskspace")
+                    if (negotiatedVersion < 16 || dvrOutcome == ProbeOutcome.ERROR) {
+                        dvrOutcome = ProbeOutcome.GRANTED
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: HtspNoAccessException) {
+                    if (negotiatedVersion < 16 || dvrOutcome == ProbeOutcome.ERROR) {
+                        dvrOutcome = ProbeOutcome.NO_ACCESS
+                    }
+                } catch (e: Exception) {
+                    diskError = e.message
+                }
+            }
+
+            return HtspCapabilityProbeResult(
+                connected = true,
+                authSucceeded = true,
+                serverName = serverName,
+                serverVersion = serverVersion,
+                htspVersion = negotiatedVersion,
+                serverCapabilities = serverCapabilities,
+                streamingOutcome = streamingOutcome,
+                dvrOutcome = dvrOutcome,
+                passProfilePresent = passProfilePresent,
+                availableProfiles = availableProfiles,
+                clockOffsetMs = clockOffsetMs,
+                freeDiskBytes = freeDiskBytes,
+                totalDiskBytes = totalDiskBytes,
+                diskSpaceError = diskError,
+            )
+        }
+
+        private fun classifyProbeException(e: Exception): ProbeOutcome {
+            val msg = e.message?.lowercase().orEmpty()
+            return if ("unknown method" in msg || "method not found" in msg || "unsupported" in msg) {
+                ProbeOutcome.UNSUPPORTED
+            } else {
+                ProbeOutcome.ERROR
+            }
+        }
+
+        suspend fun testConnection(profile: ServerProfile): ConnectionTestResult {
+            val probe = probeServer(profile)
+            return when {
+                !probe.connected || !probe.authSucceeded -> ConnectionTestResult.Failure(
+                    message = probe.connectionError ?: "Unable to connect to ${profile.formattedHttpHost}:${profile.htspPort}",
+                    isAuthError = probe.isAuthError,
+                )
+                else -> ConnectionTestResult.Success(
+                    serverName = probe.serverName,
+                    serverVersion = probe.serverVersion,
+                    htspVersion = probe.htspVersion ?: CLIENT_HTSP_VERSION,
+                    hasDvrAccess = probe.dvrOutcome == ProbeOutcome.GRANTED,
+                    hasStreamingAccess = probe.streamingOutcome == ProbeOutcome.GRANTED,
+                )
+            }
+        }
+
+        private const val PORT_PROBE_TIMEOUT_MS = 2_500
+        private const val PROBE_RPC_TIMEOUT_MS = 4_000L
     }
 }

@@ -1,5 +1,7 @@
 package io.github.corebonts.muxgrid.core.model
 
+import java.security.MessageDigest
+
 data class ServerProfile(
     val id: String = "default",
     val name: String = "Tvheadend",
@@ -23,6 +25,14 @@ data class ServerProfile(
 
     val serverKey: String
         get() = if (isConfigured) "$formattedHttpHost:$htspPort" else ""
+
+    val diagnosticsFingerprint: String
+        get() {
+            if (!isConfigured) return ""
+            val payload = "$formattedHttpHost\u0000$htspPort\u0000$httpPort\u0000${username.trim()}\u0000$password"
+            val digest = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(Charsets.UTF_8))
+            return digest.joinToString("") { "%02x".format(it) }
+        }
 
     val httpBaseUrl: String?
         get() = if (isConfigured) "http://$formattedHttpHost:$httpPort" else null

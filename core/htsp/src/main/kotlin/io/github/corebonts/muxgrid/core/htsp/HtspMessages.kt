@@ -28,6 +28,41 @@ data class HtspFileInfo(
     val mtime: Long,
 )
 
+enum class ProbeOutcome {
+    GRANTED,
+    NO_ACCESS,
+    UNSUPPORTED,
+    ERROR,
+}
+
+data class HtspPortProbeResult(
+    val reachable: Boolean,
+    val serverName: String? = null,
+    val serverVersion: String? = null,
+    val htspVersion: Int? = null,
+    val serverCapabilities: List<String> = emptyList(),
+    val error: String? = null,
+)
+
+data class HtspCapabilityProbeResult(
+    val connected: Boolean,
+    val authSucceeded: Boolean,
+    val isAuthError: Boolean = false,
+    val connectionError: String? = null,
+    val serverName: String = "Tvheadend",
+    val serverVersion: String = "",
+    val htspVersion: Int? = null,
+    val serverCapabilities: List<String> = emptyList(),
+    val streamingOutcome: ProbeOutcome = ProbeOutcome.ERROR,
+    val dvrOutcome: ProbeOutcome = ProbeOutcome.ERROR,
+    val passProfilePresent: Boolean? = null,
+    val availableProfiles: List<String> = emptyList(),
+    val clockOffsetMs: Long? = null,
+    val freeDiskBytes: Long? = null,
+    val totalDiskBytes: Long? = null,
+    val diskSpaceError: String? = null,
+)
+
 data class ChannelUpdateDelta(
     val id: Long,
     val number: Int? = null,

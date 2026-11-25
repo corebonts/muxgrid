@@ -16,8 +16,7 @@ internal data class HelloAuthResult(
     val negotiatedVersion: Int,
     val serverName: String,
     val serverVersion: String,
-    val hasStreamingAccess: Boolean = true,
-    val hasDvrAccess: Boolean = false,
+    val serverCapabilities: List<String> = emptyList(),
 )
 
 /**
@@ -145,10 +144,9 @@ internal class HtspSession(
             val negotiatedVersion = min(HtspClient.CLIENT_HTSP_VERSION, serverHtspVersion)
             val serverName = helloReply.getString("servername") ?: "Tvheadend"
             val serverVersion = helloReply.getString("serverversion") ?: ""
+            val serverCapabilities = helloReply.getStringList("servercapability")
             val challenge = helloReply.getBytes("challenge")
 
-            var hasStreamingAccess = true
-            var hasDvrAccess = false
             if (profile.username.isNotBlank() || profile.password.isNotBlank()) {
                 val authParams = htsMap {
                     put("username", profile.username)
@@ -164,16 +162,13 @@ internal class HtspSession(
                 if ((authReply.getLong("noaccess") ?: 0L) != 0L) {
                     throw HtspAuthException("Invalid username or password")
                 }
-                hasStreamingAccess = (authReply.getLong("streaming") ?: 1L) != 0L
-                hasDvrAccess = (authReply.getLong("dvr") ?: 0L) != 0L
             }
 
             return HelloAuthResult(
                 negotiatedVersion = negotiatedVersion,
                 serverName = serverName,
                 serverVersion = serverVersion,
-                hasStreamingAccess = hasStreamingAccess,
-                hasDvrAccess = hasDvrAccess,
+                serverCapabilities = serverCapabilities,
             )
         }
     }
