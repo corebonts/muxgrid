@@ -45,7 +45,7 @@ class PiconFetcherTest {
                         val hello = HtsMsgCodec.readFrame(input)
                         output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
                         output.flush()
-                        val sync = HtsMsgCodec.readFrame(input)
+                        val sync = readUntilEnableAsyncMetadata(input, output)
                         output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
                         output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
                         output.flush()
@@ -129,7 +129,7 @@ class PiconFetcherTest {
                         val hello = HtsMsgCodec.readFrame(input)
                         output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
                         output.flush()
-                        val sync = HtsMsgCodec.readFrame(input)
+                        val sync = readUntilEnableAsyncMetadata(input, output)
                         output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
                         output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
                         output.flush()
@@ -210,6 +210,28 @@ class PiconFetcherTest {
                     htspClient.disconnect()
                     scope.cancel()
                 }
+            }
+        }
+    }
+
+    private fun readUntilEnableAsyncMetadata(
+        input: BufferedInputStream,
+        output: BufferedOutputStream,
+    ): io.github.corebonts.muxgrid.core.htsp.HtsMap {
+        while (true) {
+            val req = HtsMsgCodec.readFrame(input)
+            if (req.getString("method") == "getSysTime") {
+                output.write(
+                    HtsMsgCodec.encodeFrame(
+                        htsMap {
+                            put("seq", req.getLong("seq")!!)
+                            put("time", 1_000L)
+                        },
+                    ),
+                )
+                output.flush()
+            } else {
+                return req
             }
         }
     }

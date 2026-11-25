@@ -8,6 +8,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -67,7 +68,16 @@ class HtspClient(
     private var lastServerCapabilities: List<String> = emptyList()
 
     @Volatile
+    private var lastClockOffsetMs: Long = 0L
+
+    @Volatile
+    private var lastSysTimeProbe: CachedSysTimeProbe? = null
+
+    @Volatile
     var suppressTransientErrors: Boolean = false
+
+    fun currentServerClockOffsetMs(): Long =
+        (_connectionState.value as? ConnectionState.Connected)?.serverClockOffsetMs ?: lastClockOffsetMs
 
     fun connect(profile: ServerProfile) {
         val generation: Long
@@ -79,6 +89,8 @@ class HtspClient(
             oldJob = connectionJob
             oldSession = activeSession
             activeSession = null
+            lastClockOffsetMs = 0L
+            lastSysTimeProbe = null
             if (!profile.isConfigured) {
                 connectionJob = null
                 _connectionState.value = ConnectionState.Disconnected
@@ -163,6 +175,8 @@ class HtspClient(
             oldSession = activeSession
             connectionJob = null
             activeSession = null
+            lastClockOffsetMs = 0L
+            lastSysTimeProbe = null
             _connectionState.value = ConnectionState.Disconnected
         }
         oldJob?.cancel()
@@ -190,6 +204,8 @@ class HtspClient(
             oldSession = activeSession
             connectionJob = null
             activeSession = null
+            lastClockOffsetMs = 0L
+            lastSysTimeProbe = null
         }
         oldJob?.cancel()
         // Closing the socket first unblocks the reader loop so join cannot hang.
@@ -225,6 +241,7 @@ class HtspClient(
                     serverVersion = serverVersion,
                     serverCapabilities = lastServerCapabilities,
                     rpcTimeoutMs = rpcTimeoutMs,
+                    cachedSysTime = lastSysTimeProbe?.takeIf { it.streamingOutcome == ProbeOutcome.GRANTED },
                 )
             }.getOrNull()
         }
@@ -522,6 +539,18 @@ class HtspClient(
             }
             eventChannel.trySend(HtspPushEvent.SyncStarting)
 
+            // Pipeline getSysTime before enableAsyncMetadata so the server replies immediately
+            // before streaming the initial EPG snapshot, giving NowNext an accurate clock offset
+            // at sync completion without an extra post-sync RTT.
+            lastSysTimeProbe = null
+            val pendingSysTime = session.enqueueRpc("getSysTime", htsMap {}) { reply ->
+                if (connectionGeneration.get() == generation) {
+                    val probed = parseSysTimeReply(reply)
+                    lastSysTimeProbe = probed
+                    probed.clockOffsetMs?.let { lastClockOffsetMs = it }
+                }
+            }
+
             val epgMaxTime = (System.currentTimeMillis() / 1000L) + epgWindowSeconds
             session.rpc(
                 "enableAsyncMetadata",
@@ -535,11 +564,18 @@ class HtspClient(
             withTimeoutOrNull(initialSyncTimeoutMs) {
                 initialSyncDeferred.await()
             } ?: throw HtspException("HTSP initial sync timed out after ${initialSyncTimeoutMs}ms")
+
+            val sysTimeProbe = awaitSysTimeProbe(session, pendingSysTime, rpcTimeoutMs)
+            var clockOffsetMs = sysTimeProbe.clockOffsetMs ?: 0L
+            if (connectionGeneration.get() == generation) {
+                lastSysTimeProbe = sysTimeProbe
+                lastClockOffsetMs = clockOffsetMs
+            }
+
             // Keep state in Syncing until the store has finished applying and publishing the sync batch.
             syncAppliedAck?.await()
             onSyncCompleted()
 
-            var clockOffsetMs = fetchClockOffsetOrZero(session)
             publishStateIfCurrent(
                 generation,
                 ConnectionState.Connected(
@@ -557,8 +593,10 @@ class HtspClient(
                         delay(heartbeatIntervalMs)
                         val sysTime = session.rpc("getSysTime", htsMap {}, rpcTimeoutMs)
                         val serverSec = sysTime.getLong("time")
-                        if (serverSec != null) {
+                        if (serverSec != null && connectionGeneration.get() == generation) {
                             clockOffsetMs = (serverSec * 1000L) - System.currentTimeMillis()
+                            lastClockOffsetMs = clockOffsetMs
+                            lastSysTimeProbe = CachedSysTimeProbe(ProbeOutcome.GRANTED, clockOffsetMs)
                             publishStateIfCurrent(
                                 generation,
                                 ConnectionState.Connected(
@@ -592,15 +630,25 @@ class HtspClient(
         }
     }
 
-    private suspend fun fetchClockOffsetOrZero(session: HtspSession): Long = try {
-        val sysTime = session.rpc("getSysTime", htsMap {}, rpcTimeoutMs)
-        val serverSec = sysTime.getLong("time") ?: return 0L
-        (serverSec * 1000L) - System.currentTimeMillis()
-    } catch (e: CancellationException) {
-        throw e
-    } catch (_: Exception) {
-        0L
+    private suspend fun awaitSysTimeProbe(
+        session: HtspSession,
+        pendingSysTime: HtspSession.PendingRpc,
+        timeoutMs: Long,
+    ): CachedSysTimeProbe = mapSysTimeProbe {
+        session.awaitRpc(pendingSysTime, timeoutMs)
     }
+
+    internal data class CachedSysTimeProbe(
+        val streamingOutcome: ProbeOutcome,
+        val clockOffsetMs: Long?,
+    )
+
+    private data class DiskSpaceProbe(
+        val freeBytes: Long? = null,
+        val totalBytes: Long? = null,
+        val error: String? = null,
+        val noAccess: Boolean = false,
+    )
 
     companion object {
         const val CLIENT_HTSP_VERSION = 44
@@ -784,85 +832,91 @@ class HtspClient(
             serverVersion: String,
             serverCapabilities: List<String>,
             rpcTimeoutMs: Long,
-        ): HtspCapabilityProbeResult {
-            var streamingOutcome = ProbeOutcome.ERROR
-            var clockOffsetMs: Long? = null
-            try {
-                val sysTime = session.rpc("getSysTime", htsMap {}, rpcTimeoutMs)
-                streamingOutcome = ProbeOutcome.GRANTED
-                val serverSec = sysTime.getLong("time")
-                if (serverSec != null) {
-                    clockOffsetMs = (serverSec * 1000L) - System.currentTimeMillis()
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: HtspNoAccessException) {
-                streamingOutcome = ProbeOutcome.NO_ACCESS
-            } catch (e: Exception) {
-                streamingOutcome = classifyProbeException(e)
-            }
-
-            var passProfilePresent: Boolean? = null
-            var availableProfiles: List<String> = emptyList()
-            if (streamingOutcome == ProbeOutcome.GRANTED) {
-                try {
-                    val apiReply = session.rpc(
-                        "api",
-                        htsMap { put("path", "profile/list") },
-                        rpcTimeoutMs,
-                    )
-                    val response = apiReply.getMap("response")
-                    if (response != null && response.containsKey("entries")) {
-                        val names = response.getMapList("entries")
-                            .mapNotNull { it.getString("val")?.trim()?.takeIf { n -> n.isNotEmpty() } }
-                        availableProfiles = names
-                        passProfilePresent = names.any { it.equals("pass", ignoreCase = true) }
+            cachedSysTime: CachedSysTimeProbe? = null,
+        ): HtspCapabilityProbeResult = coroutineScope {
+            val sysTimeDeferred = if (cachedSysTime == null) {
+                async {
+                    mapSysTimeProbe {
+                        session.rpc("getSysTime", htsMap {}, rpcTimeoutMs)
                     }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Exception) {
-                    // Older Tvheadend or servers without HTSP api("profile/list"): skip cleanly.
                 }
+            } else {
+                null
             }
 
-            var dvrOutcome = ProbeOutcome.ERROR
-            if (negotiatedVersion >= 16) {
-                try {
-                    session.rpc("getDvrConfigs", htsMap {}, rpcTimeoutMs)
-                    dvrOutcome = ProbeOutcome.GRANTED
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: HtspNoAccessException) {
-                    dvrOutcome = ProbeOutcome.NO_ACCESS
-                } catch (e: Exception) {
-                    val outcome = classifyProbeException(e)
-                    dvrOutcome = if (outcome == ProbeOutcome.UNSUPPORTED) ProbeOutcome.ERROR else outcome
-                }
+            // When streaming access is already known from the active session, profile/list runs
+            // concurrently with getDvrConfigs in the very first RTT.
+            val profileListDeferredEarly = if (cachedSysTime?.streamingOutcome == ProbeOutcome.GRANTED) {
+                async { fetchPassProfileOutcome(session, rpcTimeoutMs) }
+            } else {
+                null
             }
 
-            var freeDiskBytes: Long? = null
-            var totalDiskBytes: Long? = null
-            var diskError: String? = null
-            if (dvrOutcome == ProbeOutcome.GRANTED || negotiatedVersion < 16 || dvrOutcome == ProbeOutcome.ERROR) {
-                try {
-                    val diskReply = session.rpc("getDiskSpace", htsMap {}, rpcTimeoutMs)
-                    freeDiskBytes = diskReply.getLong("freediskspace")
-                    totalDiskBytes = diskReply.getLong("totaldiskspace")
-                    if (negotiatedVersion < 16 || dvrOutcome == ProbeOutcome.ERROR) {
-                        dvrOutcome = ProbeOutcome.GRANTED
+            val dvrOutcomeDeferred = if (negotiatedVersion >= 16) {
+                async {
+                    try {
+                        session.rpc("getDvrConfigs", htsMap {}, rpcTimeoutMs)
+                        ProbeOutcome.GRANTED
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: HtspNoAccessException) {
+                        ProbeOutcome.NO_ACCESS
+                    } catch (e: Exception) {
+                        val outcome = classifyProbeException(e)
+                        if (outcome == ProbeOutcome.UNSUPPORTED) ProbeOutcome.ERROR else outcome
                     }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: HtspNoAccessException) {
+                }
+            } else {
+                null
+            }
+
+            val sysTimeResult = cachedSysTime ?: sysTimeDeferred!!.await()
+            val streamingOutcome = sysTimeResult.streamingOutcome
+            val clockOffsetMs = sysTimeResult.clockOffsetMs
+            var dvrOutcome = dvrOutcomeDeferred?.await() ?: ProbeOutcome.ERROR
+
+            val profileListDeferred = profileListDeferredEarly ?: if (streamingOutcome == ProbeOutcome.GRANTED) {
+                async { fetchPassProfileOutcome(session, rpcTimeoutMs) }
+            } else {
+                null
+            }
+
+            val diskSpaceDeferred = if (dvrOutcome == ProbeOutcome.GRANTED || negotiatedVersion < 16 || dvrOutcome == ProbeOutcome.ERROR) {
+                async {
+                    try {
+                        val diskReply = session.rpc("getDiskSpace", htsMap {}, rpcTimeoutMs)
+                        DiskSpaceProbe(
+                            freeBytes = diskReply.getLong("freediskspace"),
+                            totalBytes = diskReply.getLong("totaldiskspace"),
+                        )
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: HtspNoAccessException) {
+                        DiskSpaceProbe(noAccess = true)
+                    } catch (e: Exception) {
+                        DiskSpaceProbe(error = e.message)
+                    }
+                }
+            } else {
+                null
+            }
+
+            val (passProfilePresent, availableProfiles) = profileListDeferred?.await() ?: (null to emptyList())
+            val diskResult = diskSpaceDeferred?.await()
+            if (diskResult != null) {
+                if (diskResult.noAccess) {
                     if (negotiatedVersion < 16 || dvrOutcome == ProbeOutcome.ERROR) {
                         dvrOutcome = ProbeOutcome.NO_ACCESS
                     }
-                } catch (e: Exception) {
-                    diskError = e.message
+                } else if (diskResult.error == null && (negotiatedVersion < 16 || dvrOutcome == ProbeOutcome.ERROR)) {
+                    dvrOutcome = ProbeOutcome.GRANTED
                 }
             }
+            val freeDiskBytes = diskResult?.freeBytes
+            val totalDiskBytes = diskResult?.totalBytes
+            val diskError = diskResult?.error
 
-            return HtspCapabilityProbeResult(
+            HtspCapabilityProbeResult(
                 connected = true,
                 authSucceeded = true,
                 serverName = serverName,
@@ -880,8 +934,62 @@ class HtspClient(
             )
         }
 
-        private fun classifyProbeException(e: Exception): ProbeOutcome {
-            val msg = e.message?.lowercase().orEmpty()
+        private suspend fun fetchPassProfileOutcome(
+            session: HtspSession,
+            rpcTimeoutMs: Long,
+        ): Pair<Boolean?, List<String>> {
+            return try {
+                val apiReply = session.rpc(
+                    "api",
+                    htsMap { put("path", "profile/list") },
+                    rpcTimeoutMs,
+                )
+                val response = apiReply.getMap("response")
+                if (response != null && response.containsKey("entries")) {
+                    val names = response.getMapList("entries")
+                        .mapNotNull { it.getString("val")?.trim()?.takeIf { n -> n.isNotEmpty() } }
+                    names.any { it.equals("pass", ignoreCase = true) } to names
+                } else {
+                    null to emptyList()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Older Tvheadend or servers without HTSP api("profile/list"): skip cleanly.
+                null to emptyList()
+            }
+        }
+
+        private inline fun mapSysTimeProbe(block: () -> HtsMap): CachedSysTimeProbe = try {
+            val sysTime = block()
+            CachedSysTimeProbe(ProbeOutcome.GRANTED, parseSysTimeOffset(sysTime))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: HtspNoAccessException) {
+            CachedSysTimeProbe(ProbeOutcome.NO_ACCESS, null)
+        } catch (e: Exception) {
+            CachedSysTimeProbe(classifyProbeException(e), null)
+        }
+
+        private fun parseSysTimeReply(reply: HtsMap): CachedSysTimeProbe {
+            if ((reply.getLong("noaccess") ?: 0L) != 0L) {
+                return CachedSysTimeProbe(ProbeOutcome.NO_ACCESS, null)
+            }
+            val error = reply.getString("error")
+            if (!error.isNullOrBlank()) {
+                return CachedSysTimeProbe(classifyProbeMessage(error), null)
+            }
+            return CachedSysTimeProbe(ProbeOutcome.GRANTED, parseSysTimeOffset(reply))
+        }
+
+        private fun parseSysTimeOffset(reply: HtsMap): Long? =
+            reply.getLong("time")?.let { (it * 1000L) - System.currentTimeMillis() }
+
+        private fun classifyProbeException(e: Exception): ProbeOutcome =
+            classifyProbeMessage(e.message)
+
+        private fun classifyProbeMessage(message: String?): ProbeOutcome {
+            val msg = message?.lowercase().orEmpty()
             return if ("unknown method" in msg || "method not found" in msg || "unsupported" in msg) {
                 ProbeOutcome.UNSUPPORTED
             } else {

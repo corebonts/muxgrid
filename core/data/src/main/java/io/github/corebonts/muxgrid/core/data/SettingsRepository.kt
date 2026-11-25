@@ -23,9 +23,12 @@ import io.github.corebonts.muxgrid.core.model.StartScreen
 import io.github.corebonts.muxgrid.core.model.SubtitlePreference
 import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import java.nio.charset.StandardCharsets
 import java.security.GeneralSecurityException
 import java.security.KeyStore
@@ -81,6 +84,7 @@ class SettingsRepository(
                 password = password,
             )
         }
+        .flowOn(Dispatchers.IO)
 
     val favoriteChannelIds: Flow<Set<Long>> = context.muxGridDataStore.data.map { prefs ->
         prefs[KEY_FAVORITES]?.mapNotNull { it.toLongOrNull() }?.toSet() ?: emptySet()
@@ -156,7 +160,11 @@ class SettingsRepository(
     }
 
     suspend fun saveServerProfile(profile: ServerProfile) {
-        val encrypted = if (profile.password.isNotEmpty()) encryptPassword(profile.password) else ""
+        val encrypted = if (profile.password.isNotEmpty()) {
+            withContext(Dispatchers.IO) { encryptPassword(profile.password) }
+        } else {
+            ""
+        }
         context.muxGridDataStore.edit { prefs ->
             prefs[KEY_NAME] = profile.name
             prefs[KEY_HOST] = profile.host.trim()

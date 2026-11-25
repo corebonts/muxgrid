@@ -27,11 +27,13 @@ import io.github.corebonts.muxgrid.core.model.TrackType
 import io.github.corebonts.muxgrid.core.model.VideoAspectMode
 import `is`.xyz.mpv.MPV
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -263,7 +265,9 @@ class MpvPlaybackEngine(
         },
     )
 
+    private val systemDiagnosticsLock = Any()
     private var cacheMonitorJob: Job? = null
+    private var systemDiagnosticsJob: Job? = null
     private var noticeClearJob: Job? = null
     private var activeBinarySeekJob: Job? = null
 
@@ -1106,15 +1110,12 @@ class MpvPlaybackEngine(
         diagnosticsEnabled = enabled
         if (enabled && !explicitlyStopped) {
             val gen = playbackGeneration.get()
-            engineScope.launch {
-                if (explicitlyStopped || playbackGeneration.get() != gen) return@launch
-                refreshSystemDiagnosticsOffMpvThread()
-                submitMpvTask {
-                    if (explicitlyStopped || playbackGeneration.get() != gen) return@submitMpvTask
-                    val instance = mpv ?: return@submitMpvTask
-                    if (instance.isInitialized) {
-                        collectDiagnosticsLocked(instance, preloadedCacheMap = null)
-                    }
+            scheduleSystemDiagnosticsRefresh(gen = gen, refreshMpvOnCompletion = true)
+            submitMpvTask {
+                if (explicitlyStopped || playbackGeneration.get() != gen || !diagnosticsEnabled) return@submitMpvTask
+                val instance = mpv ?: return@submitMpvTask
+                if (instance.isInitialized) {
+                    collectDiagnosticsLocked(instance, preloadedCacheMap = null)
                 }
             }
         }
@@ -1252,6 +1253,7 @@ class MpvPlaybackEngine(
         playbackGeneration.incrementAndGet()
         explicitlyStopped = true
         cacheMonitorJob?.cancel()
+        cancelSystemDiagnosticsRefresh()
         noticeClearJob?.cancel()
         platformLocks.destroy()
         liveStrategy.stopActive()
@@ -1341,7 +1343,7 @@ class MpvPlaybackEngine(
                 delay(pollMs)
                 if (explicitlyStopped || playbackGeneration.get() != gen) break
                 if (diagnosticsEnabled) {
-                    refreshSystemDiagnosticsOffMpvThread()
+                    scheduleSystemDiagnosticsRefresh(gen = gen, refreshMpvOnCompletion = false)
                 }
                 submitMpvTask {
                     if (explicitlyStopped || playbackGeneration.get() != gen) return@submitMpvTask
@@ -1364,6 +1366,54 @@ class MpvPlaybackEngine(
         }
     }
 
+    private fun cancelSystemDiagnosticsRefresh() {
+        val job = synchronized(systemDiagnosticsLock) {
+            systemDiagnosticsJob.also { systemDiagnosticsJob = null }
+        }
+        job?.cancel()
+    }
+
+    private fun scheduleSystemDiagnosticsRefresh(
+        gen: Long,
+        refreshMpvOnCompletion: Boolean,
+    ) {
+        if (explicitlyStopped || playbackGeneration.get() != gen) return
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val needMem = cachedMemoryStats == null ||
+            nowElapsed - lastMemorySampleElapsedMs >= MEMORY_STATS_SAMPLE_INTERVAL_MS
+        val needDisk = currentCacheOnDisk && !mpvReportsFileCacheBytes &&
+            (cachedDiskCacheBytes == null || nowElapsed - lastDiskCacheSampleElapsedMs >= DISK_CACHE_SAMPLE_INTERVAL_MS)
+        if (!needMem && !needDisk) return
+        synchronized(systemDiagnosticsLock) {
+            if (explicitlyStopped || playbackGeneration.get() != gen || systemDiagnosticsJob?.isActive == true) {
+                return
+            }
+            engineScope.launch(start = CoroutineStart.LAZY) {
+                try {
+                    refreshSystemDiagnosticsOffMpvThread()
+                    if (refreshMpvOnCompletion && diagnosticsEnabled && !explicitlyStopped && playbackGeneration.get() == gen) {
+                        submitMpvTask {
+                            if (explicitlyStopped || playbackGeneration.get() != gen || !diagnosticsEnabled) return@submitMpvTask
+                            val instance = mpv ?: return@submitMpvTask
+                            if (instance.isInitialized) {
+                                collectDiagnosticsLocked(instance, preloadedCacheMap = null)
+                            }
+                        }
+                    }
+                } finally {
+                    synchronized(systemDiagnosticsLock) {
+                        if (systemDiagnosticsJob === coroutineContext[Job]) {
+                            systemDiagnosticsJob = null
+                        }
+                    }
+                }
+            }.also { created ->
+                systemDiagnosticsJob = created
+                created.start()
+            }
+        }
+    }
+
     private suspend fun refreshSystemDiagnosticsOffMpvThread() {
         val nowElapsed = SystemClock.elapsedRealtime()
         val needMem = cachedMemoryStats == null ||
@@ -1373,11 +1423,15 @@ class MpvPlaybackEngine(
         if (!needMem && !needDisk) return
         withContext(Dispatchers.IO) {
             if (needMem) {
-                cachedMemoryStats = sampleMemoryStats()
+                val stats = sampleMemoryStats()
+                coroutineContext.ensureActive()
+                cachedMemoryStats = stats
                 lastMemorySampleElapsedMs = SystemClock.elapsedRealtime()
             }
             if (needDisk) {
-                cachedDiskCacheBytes = runCatching { measureDiskCacheBytes(mpvCacheDir) }.getOrNull()
+                val diskBytes = runCatching { measureDiskCacheBytes(mpvCacheDir) }.getOrNull()
+                coroutineContext.ensureActive()
+                cachedDiskCacheBytes = diskBytes
                 lastDiskCacheSampleElapsedMs = SystemClock.elapsedRealtime()
             }
         }
@@ -2051,6 +2105,7 @@ class MpvPlaybackEngine(
     }
 
     private fun resetDiagnosticsSession() {
+        cancelSystemDiagnosticsRefresh()
         sessionStartElapsedMs = SystemClock.elapsedRealtime()
         prevProxyBytes = 0L
         prevProxySampleElapsedMs = sessionStartElapsedMs

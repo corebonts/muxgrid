@@ -5,10 +5,18 @@ import io.github.corebonts.muxgrid.core.htsp.ProbeOutcome
 import io.github.corebonts.muxgrid.core.model.DiagnosticCheckId
 import io.github.corebonts.muxgrid.core.model.DiagnosticSeverity
 import io.github.corebonts.muxgrid.core.model.ServerProfile
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.nio.charset.StandardCharsets
 
 class ServerDiagnosticsRunnerTest {
 
@@ -147,5 +155,48 @@ class ServerDiagnosticsRunnerTest {
         val httpItem = authFailed.itemFor(DiagnosticCheckId.HTTP_MEDIA)
         assertEquals(DiagnosticSeverity.ADVISORY, httpItem?.severity)
         assertFalse(httpItem?.detail?.contains("stream tickets still work") == true)
+    }
+
+    @Test
+    fun `runLiveOrPreflight runs HTTP probe concurrently with active HTSP probe`() = runBlocking {
+        ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
+            val httpAccepted = CompletableDeferred<Unit>()
+            val httpTask = async(Dispatchers.IO) {
+                server.accept().use { sock ->
+                    httpAccepted.complete(Unit)
+                    val reader = sock.getInputStream().bufferedReader()
+                    while (true) {
+                        val line = reader.readLine() ?: break
+                        if (line.isEmpty()) break
+                    }
+                    val body = "{}"
+                    val resp = "HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body"
+                    sock.getOutputStream().write(resp.toByteArray(StandardCharsets.US_ASCII))
+                    sock.getOutputStream().flush()
+                }
+            }
+
+            val profile = defaultProfile.copy(host = "127.0.0.1", httpPort = server.localPort)
+            val report = ServerDiagnosticsRunner.runLiveOrPreflight(profile) {
+                // Must observe the HTTP request in flight before HTSP probing finishes.
+                withTimeout(5_000) { httpAccepted.await() }
+                HtspCapabilityProbeResult(
+                    connected = true,
+                    authSucceeded = true,
+                    serverName = "Tvheadend",
+                    serverVersion = "4.3",
+                    htspVersion = 44,
+                    streamingOutcome = ProbeOutcome.GRANTED,
+                    dvrOutcome = ProbeOutcome.GRANTED,
+                    passProfilePresent = true,
+                    clockOffsetMs = 0L,
+                )
+            }
+            httpTask.await()
+
+            assertEquals(DiagnosticSeverity.OK, report.overallSeverity)
+            assertEquals(DiagnosticSeverity.OK, report.itemFor(DiagnosticCheckId.HTTP_MEDIA)?.severity)
+            assertEquals(DiagnosticSeverity.OK, report.itemFor(DiagnosticCheckId.HTSP_STREAMING)?.severity)
+        }
     }
 }

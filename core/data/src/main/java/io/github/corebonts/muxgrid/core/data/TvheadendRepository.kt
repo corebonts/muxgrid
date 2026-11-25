@@ -29,8 +29,11 @@ import io.github.corebonts.muxgrid.core.model.ThemeMode
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -39,11 +42,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Single source of truth coordinating [HtspClient], [HtspVfsClient], [TvheadendStore],
@@ -60,7 +63,7 @@ class TvheadendRepository(
     private var backgroundDisconnectJob: Job? = null
     private val store = TvheadendStore(
         epochSecondsProvider = {
-            val offsetMs = (connectionState.value as? ConnectionState.Connected)?.serverClockOffsetMs ?: 0L
+            val offsetMs = htspClient.currentServerClockOffsetMs()
             (System.currentTimeMillis() + offsetMs) / 1000L
         },
     )
@@ -70,7 +73,9 @@ class TvheadendRepository(
     private val _dvrEntries = MutableStateFlow<Map<Long, DvrEntry>>(emptyMap())
     private val _serverDiagnostics = MutableStateFlow<ServerDiagnosticsReport?>(null)
     private val _isRunningDiagnostics = MutableStateFlow(false)
-    private val activeDiagnosticsRefreshCount = AtomicInteger(0)
+    private val diagnosticsLock = Any()
+    private var inFlightDiagnosticsFingerprint: String? = null
+    private var inFlightDiagnosticsJob: Deferred<ServerDiagnosticsReport?>? = null
 
     val connectionState: StateFlow<ConnectionState> = htspClient.connectionState
     val serverDiagnostics: StateFlow<ServerDiagnosticsReport?> = _serverDiagnostics.asStateFlow()
@@ -246,17 +251,20 @@ class TvheadendRepository(
                 }
         }
         scope.launch {
-            htspClient.connectionState.collect { state ->
-                if (state is ConnectionState.Connected) {
-                    val profile = serverProfile.value
-                    if (profile != null &&
-                        profile.isConfigured &&
-                        _serverDiagnostics.value?.profileFingerprint != profile.diagnosticsFingerprint
-                    ) {
-                        runCatching { refreshServerDiagnostics() }
+            htspClient.connectionState
+                .map { it is ConnectionState.Connected }
+                .distinctUntilChanged()
+                .collect { connected ->
+                    if (connected) {
+                        val profile = serverProfile.value
+                        if (profile != null &&
+                            profile.isConfigured &&
+                            _serverDiagnostics.value?.profileFingerprint != profile.diagnosticsFingerprint
+                        ) {
+                            runCatching { refreshServerDiagnostics() }
+                        }
                     }
                 }
-            }
         }
         // Refresh Now/Next progress & transitions every 15 s off the main thread
         scope.launch(Dispatchers.Default) {
@@ -286,26 +294,40 @@ class TvheadendRepository(
     suspend fun refreshServerDiagnostics(): ServerDiagnosticsReport? {
         val profile = serverProfile.value ?: return null
         if (!profile.isConfigured) return null
-        if (activeDiagnosticsRefreshCount.incrementAndGet() > 0) {
-            _isRunningDiagnostics.value = true
-        }
-        return try {
-            val activeProbe = htspClient.probeActiveSession()
-            val report = if (activeProbe != null) {
-                ServerDiagnosticsRunner.evaluateFromHtspProbe(profile, activeProbe)
+        val fingerprint = profile.diagnosticsFingerprint
+        val job = synchronized(diagnosticsLock) {
+            val existing = inFlightDiagnosticsJob
+            if (existing != null && !existing.isCompleted && inFlightDiagnosticsFingerprint == fingerprint) {
+                existing
             } else {
-                ServerDiagnosticsRunner.runPreflight(profile)
-            }
-            val current = serverProfile.value
-            if (current != null && current.diagnosticsFingerprint == profile.diagnosticsFingerprint) {
-                _serverDiagnostics.value = report
-            }
-            report
-        } finally {
-            if (activeDiagnosticsRefreshCount.decrementAndGet() <= 0) {
-                _isRunningDiagnostics.value = false
+                inFlightDiagnosticsFingerprint = fingerprint
+                _isRunningDiagnostics.value = true
+                scope.async(start = CoroutineStart.LAZY) {
+                    try {
+                        val report = ServerDiagnosticsRunner.runLiveOrPreflight(profile) {
+                            htspClient.probeActiveSession()
+                        }
+                        val current = serverProfile.value
+                        if (current != null && current.diagnosticsFingerprint == fingerprint) {
+                            _serverDiagnostics.value = report
+                        }
+                        report
+                    } finally {
+                        synchronized(diagnosticsLock) {
+                            if (inFlightDiagnosticsJob === coroutineContext[Job]) {
+                                inFlightDiagnosticsJob = null
+                                inFlightDiagnosticsFingerprint = null
+                                _isRunningDiagnostics.value = false
+                            }
+                        }
+                    }
+                }.also { created ->
+                    inFlightDiagnosticsJob = created
+                    created.start()
+                }
             }
         }
+        return job.await()
     }
 
     suspend fun saveAndConnect(

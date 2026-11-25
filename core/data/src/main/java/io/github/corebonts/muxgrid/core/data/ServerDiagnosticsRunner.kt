@@ -93,17 +93,20 @@ internal object ServerDiagnosticsRunner {
         )
     }
 
-    suspend fun evaluateFromHtspProbe(
+    suspend fun runLiveOrPreflight(
         profile: ServerProfile,
-        htspProbe: HtspCapabilityProbeResult,
-    ): ServerDiagnosticsReport {
-        val http = withContext(Dispatchers.IO) {
+        probeActiveHtsp: suspend () -> HtspCapabilityProbeResult?,
+    ): ServerDiagnosticsReport = coroutineScope {
+        val httpDeferred = async(Dispatchers.IO) {
             probeHttp(profile)
         }
-        return buildDiagnosticsReport(
+        val htsp = probeActiveHtsp() ?: withContext(Dispatchers.IO) {
+            HtspClient.probeServer(profile)
+        }
+        buildDiagnosticsReport(
             profile = profile,
-            htsp = htspProbe,
-            http = http,
+            htsp = htsp,
+            http = httpDeferred.await(),
         )
     }
 

@@ -60,7 +60,7 @@ class HtspClientTest {
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", auth.getLong("seq")!!) }))
                     output.flush()
 
-                    val sync = HtsMsgCodec.readFrame(input)
+                    val sync = readUntilEnableAsyncMetadata(input, output)
                     assertEquals("enableAsyncMetadata", sync.getString("method"))
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
                     output.write(
@@ -76,8 +76,8 @@ class HtspClientTest {
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
                     output.flush()
 
-                    // Handle initial getSysTime + two concurrent RPCs
-                    repeat(3) {
+                    // Handle two concurrent RPCs
+                    repeat(2) {
                         val req = HtsMsgCodec.readFrame(input)
                         val seq = req.getLong("seq")!!
                         when (req.getString("method")) {
@@ -224,15 +224,15 @@ class HtspClientTest {
                     )
                     output.flush()
 
-                    val sync = HtsMsgCodec.readFrame(input)
+                    val sync = readUntilEnableAsyncMetadata(input, output)
                     val epgMaxTime = sync.getLong("epgMaxTime")!!
                     capturedEpgWindowSec = epgMaxTime - (System.currentTimeMillis() / 1000L)
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
                     output.flush()
 
-                    // Handle initial getSysTime + 5 DVR RPCs + getTicket(dvrId)
-                    repeat(7) {
+                    // Handle 5 DVR RPCs + getTicket(dvrId)
+                    repeat(6) {
                         val req = HtsMsgCodec.readFrame(input)
                         val seq = req.getLong("seq")!!
                         val method = req.getString("method")!!
@@ -430,7 +430,7 @@ class HtspClientTest {
                         )
                         output.flush()
 
-                        val sync = HtsMsgCodec.readFrame(input)
+                        val sync = readUntilEnableAsyncMetadata(input, output)
                         assertEquals("enableAsyncMetadata", sync.getString("method"))
                         syncCount.incrementAndGet()
                         output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
@@ -494,7 +494,7 @@ class HtspClientTest {
                     val hello = HtsMsgCodec.readFrame(input)
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
                     output.flush()
-                    val sync = HtsMsgCodec.readFrame(input)
+                    val sync = readUntilEnableAsyncMetadata(input, output)
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
                     output.flush()
                     // Keep reading until client closes after timeout
@@ -509,7 +509,7 @@ class HtspClientTest {
                     val hello = HtsMsgCodec.readFrame(input)
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
                     output.flush()
-                    val sync = HtsMsgCodec.readFrame(input)
+                    val sync = readUntilEnableAsyncMetadata(input, output)
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
                     output.flush()
@@ -557,30 +557,20 @@ class HtspClientTest {
         val syncCount = AtomicInteger(0)
         ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
             val serverTask = async(Dispatchers.IO) {
-                // Connection 1: complete sync and initial getSysTime, then drop heartbeat getSysTime.
+                // Connection 1: complete sync and pipelined getSysTime, then drop heartbeat getSysTime.
                 server.accept().use { sock ->
                     val input = BufferedInputStream(sock.getInputStream())
                     val output = BufferedOutputStream(sock.getOutputStream())
                     val hello = HtsMsgCodec.readFrame(input)
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
                     output.flush()
-                    val sync = HtsMsgCodec.readFrame(input)
+                    val sync = readUntilEnableAsyncMetadata(input, output)
                     syncCount.incrementAndGet()
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
                     output.flush()
 
-                    // Answer first getSysTime (clock offset), ignore subsequent heartbeat getSysTime
-                    val firstTime = HtsMsgCodec.readFrame(input)
-                    output.write(
-                        HtsMsgCodec.encodeFrame(
-                            htsMap {
-                                put("seq", firstTime.getLong("seq")!!)
-                                put("time", System.currentTimeMillis() / 1000L)
-                            },
-                        ),
-                    )
-                    output.flush()
+                    // Ignore subsequent heartbeat getSysTime
                     runCatching { while (true) HtsMsgCodec.readFrame(input) }
                 }
 
@@ -591,7 +581,7 @@ class HtspClientTest {
                     val hello = HtsMsgCodec.readFrame(input)
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
                     output.flush()
-                    val sync = HtsMsgCodec.readFrame(input)
+                    val sync = readUntilEnableAsyncMetadata(input, output)
                     syncCount.incrementAndGet()
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
@@ -652,7 +642,7 @@ class HtspClientTest {
                     val hello = HtsMsgCodec.readFrame(input)
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
                     output.flush()
-                    val sync = HtsMsgCodec.readFrame(input)
+                    val sync = readUntilEnableAsyncMetadata(input, output)
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
                     output.flush()
@@ -1086,7 +1076,7 @@ class HtspClientTest {
                     val hello = HtsMsgCodec.readFrame(input)
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", hello.getLong("seq")!!); put("htspversion", 44) }))
                     output.flush()
-                    val sync = HtsMsgCodec.readFrame(input)
+                    val sync = readUntilEnableAsyncMetadata(input, output)
                     output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
                     output.write(
                         HtsMsgCodec.encodeFrame(
@@ -1151,6 +1141,244 @@ class HtspClientTest {
                 client.disconnect()
                 scope.cancel()
                 serverTask.await()
+            }
+        }
+    }
+
+    @Test
+    fun `probeActiveSession reuses pipelined getSysTime and avoids duplicate clock RPC`() = runBlocking {
+        val sysTimeCount = AtomicInteger(0)
+        ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
+            val serverTask = async(Dispatchers.IO) {
+                server.accept().use { sock ->
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val hello = HtsMsgCodec.readFrame(input)
+                    output.write(
+                        HtsMsgCodec.encodeFrame(
+                            htsMap {
+                                put("seq", hello.getLong("seq")!!)
+                                put("htspversion", 44)
+                                put("servername", "MockTvh")
+                                put("serverversion", "4.3")
+                            },
+                        ),
+                    )
+                    output.flush()
+
+                    val sync = readUntilEnableAsyncMetadata(
+                        input = input,
+                        output = output,
+                        sysTimeOffsetSec = 120L,
+                        onSysTime = { sysTimeCount.incrementAndGet() },
+                    )
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
+                    output.flush()
+
+                    runCatching {
+                        while (true) {
+                            val req = HtsMsgCodec.readFrame(input)
+                            val seq = req.getLong("seq")!!
+                            val reply = when (req.getString("method")) {
+                                "getSysTime" -> {
+                                    sysTimeCount.incrementAndGet()
+                                    htsMap {
+                                        put("seq", seq)
+                                        put("time", (System.currentTimeMillis() / 1000L) + 120L)
+                                    }
+                                }
+                                "api" -> htsMap {
+                                    put("seq", seq)
+                                    put(
+                                        "response",
+                                        htsMap {
+                                            put(
+                                                "entries",
+                                                listOf(HtsValue.MapVal(htsMap { put("key", "p1"); put("val", "pass") })),
+                                            )
+                                        },
+                                    )
+                                }
+                                "getDvrConfigs" -> htsMap { put("seq", seq) }
+                                "getDiskSpace" -> htsMap {
+                                    put("seq", seq)
+                                    put("freediskspace", 20_000_000_000L)
+                                    put("totaldiskspace", 100_000_000_000L)
+                                }
+                                else -> htsMap { put("seq", seq) }
+                            }
+                            output.write(HtsMsgCodec.encodeFrame(reply))
+                            output.flush()
+                        }
+                    }
+                }
+            }
+
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val client = HtspClient(scope = scope, awaitConsumerSyncAck = true)
+            val syncSeen = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val allowAck = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val collector = scope.launch {
+                client.events.collect { ev ->
+                    if (ev is HtspPushEvent.InitialSyncCompleted) {
+                        syncSeen.complete(Unit)
+                        allowAck.await()
+                        client.acknowledgeInitialSync()
+                    }
+                }
+            }
+            try {
+                client.connect(ServerProfile(host = "127.0.0.1", htspPort = server.localPort))
+                withTimeout(5_000) { syncSeen.await() }
+                // Clock offset from pipelined getSysTime is already available before Connected.
+                assertTrue(client.currentServerClockOffsetMs() > 60_000L)
+
+                allowAck.complete(Unit)
+                withTimeout(5_000) {
+                    client.connectionState.first { it is ConnectionState.Connected }
+                }
+
+                val probe = client.probeActiveSession()!!
+                assertEquals(1, sysTimeCount.get())
+                assertEquals(ProbeOutcome.GRANTED, probe.streamingOutcome)
+                assertEquals(ProbeOutcome.GRANTED, probe.dvrOutcome)
+                assertEquals(true, probe.passProfilePresent)
+                assertTrue((probe.clockOffsetMs ?: 0L) > 60_000L)
+
+                // Reconnecting clears stale cached clock offset until the new session probes it.
+                client.connect(ServerProfile(host = ""))
+                assertEquals(0L, client.currentServerClockOffsetMs())
+            } finally {
+                allowAck.complete(Unit)
+                collector.cancel()
+                client.disconnect()
+                scope.cancel()
+                serverTask.await()
+            }
+        }
+    }
+
+    @Test
+    fun `probeActiveSession re-probes getSysTime when pipelined startup probe failed`() = runBlocking {
+        val sysTimeCount = AtomicInteger(0)
+        ServerSocket(0, 5, InetAddress.getByName("127.0.0.1")).use { server ->
+            val serverTask = async(Dispatchers.IO) {
+                server.accept().use { sock ->
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val output = BufferedOutputStream(sock.getOutputStream())
+                    val hello = HtsMsgCodec.readFrame(input)
+                    output.write(
+                        HtsMsgCodec.encodeFrame(
+                            htsMap {
+                                put("seq", hello.getLong("seq")!!)
+                                put("htspversion", 44)
+                                put("servername", "MockTvh")
+                                put("serverversion", "4.3")
+                            },
+                        ),
+                    )
+                    output.flush()
+
+                    // Fail the initial pipelined getSysTime with noaccess.
+                    val firstSysTime = HtsMsgCodec.readFrame(input)
+                    assertEquals("getSysTime", firstSysTime.getString("method"))
+                    sysTimeCount.incrementAndGet()
+                    output.write(
+                        HtsMsgCodec.encodeFrame(
+                            htsMap {
+                                put("seq", firstSysTime.getLong("seq")!!)
+                                put("noaccess", 1L)
+                            },
+                        ),
+                    )
+                    output.flush()
+
+                    val sync = readUntilEnableAsyncMetadata(input, output)
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("seq", sync.getLong("seq")!!) }))
+                    output.write(HtsMsgCodec.encodeFrame(htsMap { put("method", "initialSyncCompleted") }))
+                    output.flush()
+
+                    runCatching {
+                        while (true) {
+                            val req = HtsMsgCodec.readFrame(input)
+                            val seq = req.getLong("seq")!!
+                            val reply = when (req.getString("method")) {
+                                "getSysTime" -> {
+                                    sysTimeCount.incrementAndGet()
+                                    htsMap {
+                                        put("seq", seq)
+                                        put("time", (System.currentTimeMillis() / 1000L) + 120L)
+                                    }
+                                }
+                                "api" -> htsMap {
+                                    put("seq", seq)
+                                    put(
+                                        "response",
+                                        htsMap {
+                                            put(
+                                                "entries",
+                                                listOf(HtsValue.MapVal(htsMap { put("key", "p1"); put("val", "pass") })),
+                                            )
+                                        },
+                                    )
+                                }
+                                "getDvrConfigs" -> htsMap { put("seq", seq) }
+                                "getDiskSpace" -> htsMap {
+                                    put("seq", seq)
+                                    put("freediskspace", 20_000_000_000L)
+                                    put("totaldiskspace", 100_000_000_000L)
+                                }
+                                else -> htsMap { put("seq", seq) }
+                            }
+                            output.write(HtsMsgCodec.encodeFrame(reply))
+                            output.flush()
+                        }
+                    }
+                }
+            }
+
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val client = HtspClient(scope = scope)
+            try {
+                client.connect(ServerProfile(host = "127.0.0.1", htspPort = server.localPort))
+                withTimeout(5_000) {
+                    client.connectionState.first { it is ConnectionState.Connected }
+                }
+                val probe = client.probeActiveSession()!!
+                assertEquals(2, sysTimeCount.get())
+                assertEquals(ProbeOutcome.GRANTED, probe.streamingOutcome)
+                assertTrue((probe.clockOffsetMs ?: 0L) > 60_000L)
+            } finally {
+                client.disconnect()
+                scope.cancel()
+                serverTask.await()
+            }
+        }
+    }
+
+    private fun readUntilEnableAsyncMetadata(
+        input: BufferedInputStream,
+        output: BufferedOutputStream,
+        sysTimeOffsetSec: Long = 0L,
+        onSysTime: () -> Unit = {},
+    ): HtsMap {
+        while (true) {
+            val req = HtsMsgCodec.readFrame(input)
+            if (req.getString("method") == "getSysTime") {
+                onSysTime()
+                output.write(
+                    HtsMsgCodec.encodeFrame(
+                        htsMap {
+                            put("seq", req.getLong("seq")!!)
+                            put("time", (System.currentTimeMillis() / 1000L) + sysTimeOffsetSec)
+                            put("gmtoffset", 3600L)
+                        },
+                    ),
+                )
+                output.flush()
+            } else {
+                return req
             }
         }
     }
