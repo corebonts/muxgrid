@@ -64,6 +64,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -159,7 +161,9 @@ internal fun MobilePlayerScreen(
 ) {
     val context = LocalContext.current
     val view = LocalView.current
-    val isPortrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
+    val configuration = LocalConfiguration.current
+    val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+    val showHudActionLabels = !isPortrait && configuration.screenWidthDp >= 560
     val activity = remember(context) { context.findActivity() }
     val audioManager = remember(context) {
         context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -643,86 +647,149 @@ internal fun MobilePlayerScreen(
                     }
                 }
 
-                // Centered transport controls (Prev, -10s, Play/Pause, +30s, Next)
+                // Centered timeline transport (+ portrait Ch+/Ch- cross above/below Play/Pause)
                 val canZapChannels = !playbackState.isRecordingPlayback && canZap
-                Row(
+                val canJumpStart = when {
+                    playbackState.isRecordingPlayback -> true
+                    activeRecording != null && onPlayRecording != null -> true
+                    else -> playbackState.isTimeshiftSeekable
+                }
+                val jumpStartDescription = when {
+                    playbackState.isRecordingPlayback -> "Start Over"
+                    activeRecording != null -> if (activeRecording.hasResumePosition) "Resume Chase Play" else "Watch from Start"
+                    else -> "Jump to start of timeshift buffer"
+                }
+                val canJumpLive = when {
+                    playbackState.isRecordingPlayback -> playbackState.isGrowingRecording && activeChannel != null
+                    else -> playbackState.isBehindLive
+                }
+                val centerRowSpacing = if (isPortrait) 12.dp else 16.dp
+
+                Column(
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        .padding(horizontal = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    CenterTransportButton(
-                        icon = MuxGridIcons.SkipPrevious,
-                        contentDescription = "Previous channel",
-                        enabled = canZapChannels,
-                        size = 44.dp,
-                        iconSize = 22.dp,
-                        onClick = {
-                            hudInteractionNonce++
-                            onZapPrevious()
-                        },
-                    )
-                    CenterTransportButton(
-                        icon = MuxGridIcons.Replay10,
-                        contentDescription = "Seek back 10 seconds",
-                        enabled = canSeekTimeline,
-                        size = 46.dp,
-                        iconSize = 24.dp,
-                        onClick = {
-                            hudInteractionNonce++
-                            playbackEngine.seekBy(-PlaybackSeekDefaults.SEEK_BACK_STEP_MS)
-                        },
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.56f))
-                            .border(MuxGridBorders.Hairline, Color.White.copy(alpha = 0.18f), CircleShape)
-                            .clickable {
+                    if (isPortrait && canZap) {
+                        CenterTransportButton(
+                            icon = MuxGridIcons.ExpandLess,
+                            contentDescription = "Next channel",
+                            enabled = canZapChannels,
+                            size = 40.dp,
+                            iconSize = 22.dp,
+                            onClick = {
                                 hudInteractionNonce++
-                                playbackEngine.togglePause()
+                                onZapNext()
                             },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (playbackState.status == PlaybackStatus.BUFFERING) {
-                            CircularProgressIndicator(
-                                color = Color.White,
-                                strokeWidth = 2.5.dp,
-                                modifier = Modifier.size(28.dp),
-                            )
-                        } else {
-                            Icon(
-                                imageVector = if (playbackState.isPaused) MuxGridIcons.Play else MuxGridIcons.Pause,
-                                contentDescription = if (playbackState.isPaused) "Play" else "Pause",
-                                tint = Color.White,
-                                modifier = Modifier.size(34.dp),
-                            )
-                        }
+                        )
                     }
-                    CenterTransportButton(
-                        icon = MuxGridIcons.Forward30,
-                        contentDescription = "Seek forward 30 seconds",
-                        enabled = canSeekTimeline,
-                        size = 46.dp,
-                        iconSize = 24.dp,
-                        onClick = {
-                            hudInteractionNonce++
-                            playbackEngine.seekBy(PlaybackSeekDefaults.SEEK_FORWARD_STEP_MS)
-                        },
-                    )
-                    CenterTransportButton(
-                        icon = MuxGridIcons.SkipNext,
-                        contentDescription = "Next channel",
-                        enabled = canZapChannels,
-                        size = 44.dp,
-                        iconSize = 22.dp,
-                        onClick = {
-                            hudInteractionNonce++
-                            onZapNext()
-                        },
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(centerRowSpacing),
+                    ) {
+                        CenterTransportButton(
+                            icon = MuxGridIcons.SkipPrevious,
+                            contentDescription = jumpStartDescription,
+                            enabled = canJumpStart,
+                            borderColor = if (!playbackState.isRecordingPlayback && activeRecording != null) {
+                                MuxGridColors.AccentSoft.copy(alpha = MuxGridAlphas.BorderSubtle)
+                            } else {
+                                null
+                            },
+                            size = 44.dp,
+                            iconSize = 22.dp,
+                            onClick = {
+                                hudInteractionNonce++
+                                when {
+                                    playbackState.isRecordingPlayback -> playbackEngine.seekTo(0L)
+                                    activeRecording != null && onPlayRecording != null ->
+                                        onPlayRecording(activeRecording, activeRecording.effectiveStartSec)
+                                    playbackState.isTimeshiftSeekable ->
+                                        playbackEngine.seekTo(playbackState.bufferStartMs)
+                                }
+                            },
+                        )
+                        CenterTransportButton(
+                            icon = MuxGridIcons.Replay10,
+                            contentDescription = "Seek back 10 seconds",
+                            enabled = canSeekTimeline,
+                            size = 46.dp,
+                            iconSize = 24.dp,
+                            onClick = {
+                                hudInteractionNonce++
+                                playbackEngine.seekBy(-PlaybackSeekDefaults.SEEK_BACK_STEP_MS)
+                            },
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.56f))
+                                .border(MuxGridBorders.Hairline, Color.White.copy(alpha = 0.18f), CircleShape)
+                                .clickable {
+                                    hudInteractionNonce++
+                                    playbackEngine.togglePause()
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (playbackState.status == PlaybackStatus.BUFFERING) {
+                                CircularProgressIndicator(
+                                    color = Color.White,
+                                    strokeWidth = 2.5.dp,
+                                    modifier = Modifier.size(28.dp),
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = if (playbackState.isPaused) MuxGridIcons.Play else MuxGridIcons.Pause,
+                                    contentDescription = if (playbackState.isPaused) "Play" else "Pause",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(34.dp),
+                                )
+                            }
+                        }
+                        CenterTransportButton(
+                            icon = MuxGridIcons.Forward30,
+                            contentDescription = "Seek forward 30 seconds",
+                            enabled = canSeekTimeline,
+                            size = 46.dp,
+                            iconSize = 24.dp,
+                            onClick = {
+                                hudInteractionNonce++
+                                playbackEngine.seekBy(PlaybackSeekDefaults.SEEK_FORWARD_STEP_MS)
+                            },
+                        )
+                        CenterTransportButton(
+                            icon = MuxGridIcons.SkipNext,
+                            contentDescription = "Watch Live",
+                            enabled = canJumpLive,
+                            highlighted = canJumpLive,
+                            size = 44.dp,
+                            iconSize = 22.dp,
+                            onClick = {
+                                hudInteractionNonce++
+                                if (playbackState.isRecordingPlayback) {
+                                    activeChannel?.let(onSelectChannel)
+                                } else {
+                                    playbackEngine.seekToLiveEdge()
+                                }
+                            },
+                        )
+                    }
+                    if (isPortrait && canZap) {
+                        CenterTransportButton(
+                            icon = MuxGridIcons.ExpandMore,
+                            contentDescription = "Previous channel",
+                            enabled = canZapChannels,
+                            size = 40.dp,
+                            iconSize = 22.dp,
+                            onClick = {
+                                hudInteractionNonce++
+                                onZapPrevious()
+                            },
+                        )
+                    }
                 }
 
                 // Bottom dark gradient scrim
@@ -760,53 +827,33 @@ internal fun MobilePlayerScreen(
                         val stablePosSec = rememberStableDurationSec(displayPosMs, playbackState.dvrEntryId)
                         val stableDurSec = rememberStableDurationSec(playbackState.durationMs, playbackState.dvrEntryId)
                         val shownPosSec = if (isScrubbing) (displayPosMs + 500L) / 1000L else stablePosSec
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
+                        MobileHudActionBar(
+                            leadingContent = {
                                 if (playbackState.isGrowingRecording) {
                                     DvrStateBadge(state = DvrState.RECORDING)
-                                    if (activeChannel != null) {
-                                        MuxGridCompactButton(
-                                            text = "Watch Live",
-                                            leadingIcon = MuxGridIcons.Live,
-                                            containerColor = MuxGridColors.ScrimSurface,
-                                            contentColor = Color.White,
-                                            borderColor = Color.White.copy(alpha = MuxGridAlphas.ScrimBorder),
-                                            onClick = {
-                                                hudInteractionNonce++
-                                                onSelectChannel(activeChannel)
-                                            },
-                                        )
-                                    }
-                                } else {
-                                    Spacer(Modifier.width(1.dp))
                                 }
-                            }
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                CompactHudButton(
-                                    icon = MuxGridIcons.Info,
-                                    label = "Playback info",
-                                    showLabel = !isPortrait,
-                                    onClick = { infoPanelOpen = !infoPanelOpen },
-                                )
-                                CompactHudButton(
-                                    icon = MuxGridIcons.Tracks,
-                                    label = "Options",
-                                    contentDescription = "Display Options",
-                                    showLabel = !isPortrait,
-                                    onClick = { trackPanelOpen = !trackPanelOpen },
-                                )
-                            }
-                        }
+                            },
+                            trailingContent = {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    CompactHudButton(
+                                        icon = MuxGridIcons.Info,
+                                        label = "Playback info",
+                                        showLabel = showHudActionLabels,
+                                        onClick = { infoPanelOpen = !infoPanelOpen },
+                                    )
+                                    CompactHudButton(
+                                        icon = MuxGridIcons.Tracks,
+                                        label = "Options",
+                                        contentDescription = "Display Options",
+                                        showLabel = showHudActionLabels,
+                                        onClick = { trackPanelOpen = !trackPanelOpen },
+                                    )
+                                }
+                            },
+                        )
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             MuxGridSeekBar(
                                 value = if (isScrubbing) sliderFraction else animatedFraction,
@@ -852,94 +899,85 @@ internal fun MobilePlayerScreen(
                     } else {
                         val streamStatsText = if (!isAudioStage) playbackState.streamBadgeText() else null
 
-                        // Live status / Back to Live button + Chase-Play handoff + Channels drawer button
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                if (playbackState.isBehindLive) {
-                                    val stableLiveOffsetSec = rememberStableDurationSec(
-                                        playbackState.liveEdgeOffsetMs,
-                                        playbackState.channelId,
+                        // Live status + Info/Options + Landscape Ch-/Channels/Ch+
+                        MobileHudActionBar(
+                            leadingContent = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(MuxGridColors.CoralLive),
                                     )
-                                    MuxGridCompactButton(
-                                        text = "-${formatDurationSec(stableLiveOffsetSec)} · Back to Live",
-                                        leadingIcon = MuxGridIcons.Sensors,
-                                        containerColor = MuxGridColors.Accent,
-                                        contentColor = MuxGridColors.OnAccent,
-                                        onClick = { playbackEngine.seekToLiveEdge() },
+                                    Text(
+                                        text = if (playbackState.isRadio) "RADIO" else "LIVE",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
                                     )
-                                } else {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .clip(CircleShape)
-                                                .background(MuxGridColors.CoralLive),
+                                    if (activeRecording != null) {
+                                        DvrStateBadge(state = DvrState.RECORDING)
+                                    }
+                                }
+                            },
+                            trailingContent = {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    CompactHudButton(
+                                        icon = MuxGridIcons.Info,
+                                        label = "Playback info",
+                                        showLabel = showHudActionLabels,
+                                        onClick = { infoPanelOpen = !infoPanelOpen },
+                                    )
+                                    CompactHudButton(
+                                        icon = MuxGridIcons.Tracks,
+                                        label = "Options",
+                                        contentDescription = "Display Options",
+                                        showLabel = showHudActionLabels,
+                                        onClick = { trackPanelOpen = !trackPanelOpen },
+                                    )
+                                    if (canZap) {
+                                        if (!isPortrait) {
+                                            MuxGridCompactButton(
+                                                text = "Ch −",
+                                                containerColor = MuxGridColors.ScrimSurface,
+                                                contentColor = Color.White,
+                                                borderColor = Color.White.copy(alpha = MuxGridAlphas.ScrimBorder),
+                                                onClick = {
+                                                    hudInteractionNonce++
+                                                    onZapPrevious()
+                                                },
+                                            )
+                                        }
+                                        MuxGridCompactButton(
+                                            text = "Channels",
+                                            leadingIcon = MuxGridIcons.ChannelsList,
+                                            containerColor = MuxGridColors.ScrimSurface,
+                                            contentColor = Color.White,
+                                            borderColor = Color.White.copy(alpha = MuxGridAlphas.ScrimBorder),
+                                            onClick = { quickZapOpen = true },
                                         )
-                                        Text(
-                                            text = if (playbackState.isRadio) "RADIO" else "LIVE",
-                                            color = Color.White,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                        if (activeRecording != null) {
-                                            DvrStateBadge(state = DvrState.RECORDING)
+                                        if (!isPortrait) {
+                                            MuxGridCompactButton(
+                                                text = "Ch +",
+                                                containerColor = MuxGridColors.ScrimSurface,
+                                                contentColor = Color.White,
+                                                borderColor = Color.White.copy(alpha = MuxGridAlphas.ScrimBorder),
+                                                onClick = {
+                                                    hudInteractionNonce++
+                                                    onZapNext()
+                                                },
+                                            )
                                         }
                                     }
                                 }
-                                if (activeRecording != null && onPlayRecording != null) {
-                                    MuxGridCompactButton(
-                                        text = if (activeRecording.hasResumePosition) "Resume Chase Play" else "Watch from Start",
-                                        leadingIcon = if (activeRecording.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
-                                        containerColor = MuxGridColors.ScrimSurface,
-                                        contentColor = MuxGridColors.AccentSoft,
-                                        borderColor = MuxGridColors.AccentSoft.copy(alpha = MuxGridAlphas.BorderSubtle),
-                                        onClick = {
-                                            hudInteractionNonce++
-                                            onPlayRecording(activeRecording, activeRecording.effectiveStartSec)
-                                        },
-                                    )
-                                }
-                            }
-
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                CompactHudButton(
-                                    icon = MuxGridIcons.Info,
-                                    label = "Playback info",
-                                    showLabel = !isPortrait,
-                                    onClick = { infoPanelOpen = !infoPanelOpen },
-                                )
-                                CompactHudButton(
-                                    icon = MuxGridIcons.Tracks,
-                                    label = "Options",
-                                    contentDescription = "Display Options",
-                                    showLabel = !isPortrait,
-                                    onClick = { trackPanelOpen = !trackPanelOpen },
-                                )
-                                if (canZap) {
-                                    MuxGridCompactButton(
-                                        text = "Channels",
-                                        leadingIcon = MuxGridIcons.ChannelsList,
-                                        containerColor = MuxGridColors.ScrimSurface,
-                                        contentColor = Color.White,
-                                        borderColor = Color.White.copy(alpha = MuxGridAlphas.ScrimBorder),
-                                        onClick = { quickZapOpen = true },
-                                    )
-                                }
-                            }
-                        }
+                            },
+                        )
 
                         if (playbackState.isTimeshiftSeekable) {
                             val bufStart = playbackState.bufferStartMs
@@ -1274,6 +1312,86 @@ internal fun MobilePlayerScreen(
     }
 }
 
+/**
+ * Places [leadingContent] items along the top row(s) and aligns [trailingContent] flush-right
+ * on the final row—staying on one row whenever everything fits and wrapping cleanly on narrow
+ * portrait screens so HUD action buttons never clip off-screen.
+ */
+@Composable
+private fun MobileHudActionBar(
+    leadingContent: @Composable () -> Unit,
+    trailingContent: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Layout(
+        contents = listOf(leadingContent, trailingContent),
+        modifier = modifier.fillMaxWidth(),
+    ) { (leadingMeasurables, trailingMeasurables), constraints ->
+        val maxWidth = constraints.maxWidth
+        val childConstraints = constraints.copy(minWidth = 0, minHeight = 0)
+        val itemGapPx = 8.dp.roundToPx()
+        val rowGapPx = 8.dp.roundToPx()
+
+        val leadingPlaceables = leadingMeasurables.map { it.measure(childConstraints) }
+        val trailingPlaceables = trailingMeasurables.map { it.measure(childConstraints) }
+
+        val rows = mutableListOf<MutableList<Placeable>>()
+        val rowWidths = mutableListOf<Int>()
+        val rowHeights = mutableListOf<Int>()
+
+        for (placeable in leadingPlaceables) {
+            val lastIdx = rows.lastIndex
+            if (lastIdx >= 0 && rowWidths[lastIdx] + itemGapPx + placeable.width <= maxWidth) {
+                rows[lastIdx].add(placeable)
+                rowWidths[lastIdx] += itemGapPx + placeable.width
+                rowHeights[lastIdx] = maxOf(rowHeights[lastIdx], placeable.height)
+            } else {
+                rows.add(mutableListOf(placeable))
+                rowWidths.add(placeable.width)
+                rowHeights.add(placeable.height)
+            }
+        }
+
+        val trailing = trailingPlaceables.firstOrNull()
+        var trailingRowIndex = -1
+        if (trailing != null) {
+            val lastIdx = rows.lastIndex
+            if (lastIdx >= 0 && rowWidths[lastIdx] + itemGapPx + trailing.width <= maxWidth) {
+                trailingRowIndex = lastIdx
+                rowHeights[lastIdx] = maxOf(rowHeights[lastIdx], trailing.height)
+            } else {
+                rows.add(mutableListOf())
+                rowWidths.add(0)
+                rowHeights.add(trailing.height)
+                trailingRowIndex = rows.lastIndex
+            }
+        }
+
+        val totalHeight = if (rowHeights.isEmpty()) {
+            0
+        } else {
+            rowHeights.sum() + rowGapPx * (rowHeights.size - 1)
+        }
+
+        layout(maxWidth, totalHeight) {
+            var y = 0
+            rows.forEachIndexed { idx, rowItems ->
+                val rowH = rowHeights[idx]
+                var x = 0
+                for (placeable in rowItems) {
+                    placeable.placeRelative(x, y + (rowH - placeable.height) / 2)
+                    x += placeable.width + itemGapPx
+                }
+                if (idx == trailingRowIndex && trailing != null) {
+                    val trailingX = (maxWidth - trailing.width).coerceAtLeast(0)
+                    trailing.placeRelative(trailingX, y + (rowH - trailing.height) / 2)
+                }
+                y += rowH + rowGapPx
+            }
+        }
+    }
+}
+
 @Composable
 private fun TopHudIconButton(
     icon: ImageVector,
@@ -1342,19 +1460,38 @@ private fun CenterTransportButton(
     size: androidx.compose.ui.unit.Dp,
     iconSize: androidx.compose.ui.unit.Dp,
     onClick: () -> Unit,
+    highlighted: Boolean = false,
+    borderColor: Color? = null,
 ) {
+    val bgColor = when {
+        highlighted && enabled -> MuxGridColors.Accent
+        enabled -> Color.Black.copy(alpha = 0.48f)
+        else -> Color.Black.copy(alpha = 0.28f)
+    }
+    val tintColor = when {
+        highlighted && enabled -> MuxGridColors.OnAccent
+        enabled -> Color.White
+        else -> Color.White.copy(alpha = 0.36f)
+    }
     Box(
         modifier = Modifier
             .size(size)
             .clip(CircleShape)
-            .background(Color.Black.copy(alpha = if (enabled) 0.48f else 0.28f))
+            .background(bgColor)
+            .then(
+                if (borderColor != null && enabled && !highlighted) {
+                    Modifier.border(MuxGridBorders.Hairline, borderColor, CircleShape)
+                } else {
+                    Modifier
+                },
+            )
             .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = Color.White.copy(alpha = if (enabled) 1f else 0.36f),
+            tint = tintColor,
             modifier = Modifier.size(iconSize),
         )
     }

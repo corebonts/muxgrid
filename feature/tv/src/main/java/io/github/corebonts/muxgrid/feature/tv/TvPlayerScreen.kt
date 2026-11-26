@@ -995,6 +995,7 @@ internal fun TvPlayerScreen(
                         } else {
                             null
                         },
+                        onStartOver = { playbackEngine.seekTo(0L) },
                         onZapDelta = onZapDelta,
                         onToggleTrackPanel = { trackPanelOpen = !trackPanelOpen },
                         onToggleInfoPanel = { infoPanelOpen = !infoPanelOpen },
@@ -1086,6 +1087,7 @@ private fun TvHudControlsRow(
     onBackToLiveFocusChanged: (Boolean) -> Unit,
     onSwitchToLive: (() -> Unit)?,
     onSwitchToChasePlay: (() -> Unit)?,
+    onStartOver: () -> Unit,
     onZapDelta: (Int) -> Unit,
     onToggleTrackPanel: () -> Unit,
     onToggleInfoPanel: () -> Unit,
@@ -1111,6 +1113,39 @@ private fun TvHudControlsRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (!isRecordingPlayback && activeRecording != null && onSwitchToChasePlay != null) {
+            Button(
+                onClick = onSwitchToChasePlay,
+                shape = buttonShape,
+                colors = secondaryColors,
+            ) {
+                Icon(
+                    imageVector = MuxGridIcons.SkipPrevious,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = if (activeRecording.hasResumePosition) "Resume Chase Play" else "Watch from Start",
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+        } else if (isRecordingPlayback) {
+            Button(
+                onClick = onStartOver,
+                shape = buttonShape,
+                colors = secondaryColors,
+            ) {
+                Icon(
+                    imageVector = MuxGridIcons.SkipPrevious,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("Start Over", maxLines = 1, softWrap = false)
+            }
+        }
         if (canSeekTimeline) {
             Button(
                 onClick = { onSeekBy(-PlaybackSeekDefaults.SEEK_FORWARD_STEP_MS) },
@@ -1151,6 +1186,36 @@ private fun TvHudControlsRow(
                 )
             }
         }
+        if (isBehindLive) {
+            Button(
+                onClick = onSeekToLiveEdge,
+                modifier = Modifier.onFocusChanged { onBackToLiveFocusChanged(it.isFocused) },
+                shape = buttonShape,
+                colors = primaryColors,
+            ) {
+                Text("Watch Live", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    imageVector = MuxGridIcons.SkipNext,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        } else if (isRecordingPlayback && isGrowingRecording && activeChannel != null && onSwitchToLive != null) {
+            Button(
+                onClick = onSwitchToLive,
+                shape = buttonShape,
+                colors = primaryColors,
+            ) {
+                Text("Watch Live", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    imageVector = MuxGridIcons.SkipNext,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
         Button(
             onClick = onExit,
             shape = buttonShape,
@@ -1164,82 +1229,20 @@ private fun TvHudControlsRow(
             Spacer(Modifier.width(6.dp))
             Text("Stop")
         }
-        if (isBehindLive) {
-            Button(
-                onClick = onSeekToLiveEdge,
-                modifier = Modifier.onFocusChanged { onBackToLiveFocusChanged(it.isFocused) },
-                shape = buttonShape,
-                colors = primaryColors,
-            ) {
-                Icon(
-                    imageVector = MuxGridIcons.Sensors,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text("Back to Live", fontWeight = FontWeight.SemiBold)
-            }
-        }
-        if (!isRecordingPlayback && activeRecording != null && onSwitchToChasePlay != null) {
-            Button(
-                onClick = onSwitchToChasePlay,
-                shape = buttonShape,
-                colors = secondaryColors,
-            ) {
-                Icon(
-                    imageVector = if (activeRecording.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = if (activeRecording.hasResumePosition) "Resume Chase Play" else "Watch from Start",
-                    maxLines = 1,
-                    softWrap = false,
-                )
-            }
-        }
-        if (isRecordingPlayback && isGrowingRecording && activeChannel != null && onSwitchToLive != null) {
-            Button(
-                onClick = onSwitchToLive,
-                shape = buttonShape,
-                colors = secondaryColors,
-            ) {
-                Icon(
-                    imageVector = MuxGridIcons.Live,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text("Watch Live", maxLines = 1, softWrap = false)
-            }
-        }
         if (!isRecordingPlayback && canZap) {
             Button(
                 onClick = { onZapDelta(-1) },
                 shape = buttonShape,
                 colors = secondaryColors,
             ) {
-                Icon(
-                    imageVector = MuxGridIcons.SkipPrevious,
-                    contentDescription = "Previous channel",
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text("Ch -")
+                Text("Ch −", maxLines = 1, softWrap = false)
             }
             Button(
                 onClick = { onZapDelta(1) },
                 shape = buttonShape,
                 colors = secondaryColors,
             ) {
-                Text("Ch +")
-                Spacer(Modifier.width(4.dp))
-                Icon(
-                    imageVector = MuxGridIcons.SkipNext,
-                    contentDescription = "Next channel",
-                    modifier = Modifier.size(18.dp),
-                )
+                Text("Ch +", maxLines = 1, softWrap = false)
             }
         }
         Button(

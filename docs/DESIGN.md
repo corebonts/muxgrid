@@ -71,8 +71,8 @@ Navigation stays minimal and consistent across both form factors:
 - **Top bar:** Back button, Channel picon + Title + Current Show, minimize/background action (**PiP** or **Background Audio** depending on mode), **Playback Info**, and **Display Options** (Audio / Subtitles / Aspect / Decoder preset).
 - **Bottom bar:**
   - Smooth scrub bar showing buffered timeshift range (Live) or growing/total duration (Recordings).
-  - **`-MM:SS · Back to Live`** pill when behind the live edge.
-  - Centered transport controls (`-10s`, `Play/Pause`, `+30s`) plus quick-zap **Channels** drawer and **Display Options** shortcut.
+  - Centered timeline transport (`|<`, `-10s`, `Play/Pause`, `+30s`, `>|`) where `|<` jumps to the active recording / start over (`0:00`) / timeshift buffer start and `>|` catches up or returns to **Watch Live**.
+  - Hybrid channel zapping: `Ch+` / `Ch-` sit above and below `Play/Pause` in portrait, and flank the quick-zap **Channels** button in the landscape bottom bar alongside **Playback Info** and **Display Options**.
 - **Gestures:**
   - Double-tap left (`-10s`) / double-tap right (`+30s`) with visual feedback.
   - Vertical drag on left edge = brightness; right edge = volume.
@@ -98,7 +98,7 @@ Designed strictly for **10-foot viewing** and a standard TV remote (`D-pad`, `OK
 
 ### TV Fullscreen Player (Zero-Friction Remote Controls)
 - **Channel Zapping (`Ch+`/`Ch-` or `D-pad Up` while HUD hidden):** Stops the previous stream cleanly, tunes the next/previous channel, and displays a minimal bottom-left OSD pill fading after 3 seconds.
-- **HUD Open (`OK`/`Select` or `D-pad Down` while HUD hidden):** Reveals the translucent dark scrim bottom HUD with focusable seek bar, `Play/Pause`, `Back to Live` pill, seamless Live ↔ Chase-Play handoff (**Watch from Start** / **Resume Chase Play** when an active recording is running on the tuned channel, or **Watch Live** when watching an in-progress recording), **Playback Info**, **Display Options**, and horizontal **Quick Channel Strip**.
+- **HUD Open (`OK`/`Select` or `D-pad Down` while HUD hidden):** Reveals the translucent dark scrim bottom HUD with focusable seek bar, `|<` (**Watch from Start** / **Resume Chase Play** / **Start Over**), `-30s`, `Play/Pause`, `+30s`, `>|` (**Watch Live** when behind the live edge or watching an in-progress recording), `Stop`, `Ch-`/`Ch+`, **Display Options**, **Playback Info**, and horizontal **Quick Channel Strip**.
 - **Progressive Seeking (`D-pad Left`/`Right` while HUD hidden or on focused seek bar):** Quick taps follow an exact-target ladder (`10s → 30s → 1m → 5m → 10m`, then `+5m` per tap, stepping back down on opposite taps), while holding scrubs continuously at the active tap's step size (capped at `30s` per throttled tick) with instant preview timestamp and settle/release commit.
 - **Back key:** Dismisses open panels or the HUD first; otherwise stops playback cleanly and returns to the previous screen.
 - **Single-Tuner Notice:** Auto-dismissing top-right toast naming the blocking active recording rather than an infinite loading spinner.
