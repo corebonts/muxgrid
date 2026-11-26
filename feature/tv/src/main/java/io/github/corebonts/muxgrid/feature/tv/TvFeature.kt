@@ -143,6 +143,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridRadii
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridSplashScreen
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridSwitch
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridSyncingState
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
@@ -964,6 +965,7 @@ private fun TvContent(
                             }
                             MainTab.SETTINGS -> {
                                 val themeMode by repository.themeMode.collectAsState()
+                                val radioAmbientGlowEnabled by repository.radioAmbientGlowEnabled.collectAsState()
                                 val hwDecPreset by repository.hwDecPreset.collectAsState()
                                 val timeshiftWindow by repository.timeshiftWindow.collectAsState()
                                 val serverDiagnostics by repository.serverDiagnostics.collectAsState()
@@ -975,6 +977,7 @@ private fun TvContent(
                                     isRunningDiagnostics = isRunningDiagnostics,
                                     startScreen = currentStartScreen,
                                     themeMode = themeMode,
+                                    radioAmbientGlowEnabled = radioAmbientGlowEnabled,
                                     hwDecPreset = hwDecPreset,
                                     timeshiftWindow = timeshiftWindow,
                                     appInfo = appInfo,
@@ -985,6 +988,9 @@ private fun TvContent(
                                     },
                                     onSelectThemeMode = { mode ->
                                         scope.launch { repository.setThemeMode(mode) }
+                                    },
+                                    onSetRadioAmbientGlowEnabled = { enabled ->
+                                        scope.launch { repository.setRadioAmbientGlowEnabled(enabled) }
                                     },
                                     onSelectPreset = { preset ->
                                         scope.launch { repository.setHwDecPreset(preset) }
@@ -1032,6 +1038,7 @@ private fun TvContent(
             val playbackState by playbackEngine.state.collectAsState()
             val nowNextMap by repository.nowNextByChannel.collectAsState()
             val hwDecPreset by repository.hwDecPreset.collectAsState()
+            val radioAmbientGlowEnabled by repository.radioAmbientGlowEnabled.collectAsState()
             val nowEpochSec = rememberNowEpochSec(offsetMs)
 
             val zapList = filteredChannels.ifEmpty { channels }
@@ -1056,6 +1063,7 @@ private fun TvContent(
                     hwDecPreset = hwDecPreset,
                     imageLoader = repository.imageLoader,
                     canZap = zapList.size > 1,
+                    radioAmbientGlowEnabled = radioAmbientGlowEnabled,
                     onSelectChannel = { channel ->
                         playbackEngine.playChannel(channel, hwDecPreset)
                     },
@@ -1944,6 +1952,7 @@ private fun TvSettingsTab(
     isRunningDiagnostics: Boolean,
     startScreen: StartScreen,
     themeMode: ThemeMode,
+    radioAmbientGlowEnabled: Boolean,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
     appInfo: AppBuildInfo,
@@ -1951,6 +1960,7 @@ private fun TvSettingsTab(
     focusRequestNonce: Int,
     onSelectStartScreen: (StartScreen) -> Unit,
     onSelectThemeMode: (ThemeMode) -> Unit,
+    onSetRadioAmbientGlowEnabled: (Boolean) -> Unit,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
     onRetryConnect: () -> Unit,
@@ -2051,8 +2061,10 @@ private fun TvSettingsTab(
                         TvGeneralSettingsCard(
                             startScreen = startScreen,
                             themeMode = themeMode,
+                            radioAmbientGlowEnabled = radioAmbientGlowEnabled,
                             onSelectStartScreen = onSelectStartScreen,
                             onSelectThemeMode = onSelectThemeMode,
+                            onSetRadioAmbientGlowEnabled = onSetRadioAmbientGlowEnabled,
                         )
                     }
                     Column(
@@ -2097,8 +2109,10 @@ private fun TvSettingsTab(
                 TvGeneralSettingsCard(
                     startScreen = startScreen,
                     themeMode = themeMode,
+                    radioAmbientGlowEnabled = radioAmbientGlowEnabled,
                     onSelectStartScreen = onSelectStartScreen,
                     onSelectThemeMode = onSelectThemeMode,
+                    onSetRadioAmbientGlowEnabled = onSetRadioAmbientGlowEnabled,
                 )
                 TvDecoderTimeshiftSettingsCard(
                     hwDecPreset = hwDecPreset,
@@ -2477,8 +2491,10 @@ private fun TvServerSettingsCard(
 private fun TvGeneralSettingsCard(
     startScreen: StartScreen,
     themeMode: ThemeMode,
+    radioAmbientGlowEnabled: Boolean,
     onSelectStartScreen: (StartScreen) -> Unit,
     onSelectThemeMode: (ThemeMode) -> Unit,
+    onSetRadioAmbientGlowEnabled: (Boolean) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -2550,6 +2566,53 @@ private fun TvGeneralSettingsCard(
                 style = MuxGridType.TabularSmall,
                 color = MuxGridColors.TextMuted,
             )
+        }
+
+        MuxGridDivider()
+
+        Surface(
+            onClick = { onSetRadioAmbientGlowEnabled(!radioAmbientGlowEnabled) },
+            modifier = Modifier.fillMaxWidth(),
+            shape = ClickableSurfaceDefaults.shape(MuxGridShapes.Sm),
+            colors = ClickableSurfaceDefaults.colors(
+                containerColor = MuxGridColors.CardSurfaceElevated,
+                contentColor = MuxGridColors.TextPrimary,
+                focusedContainerColor = MuxGridColors.CardSurfaceElevated,
+                focusedContentColor = MuxGridColors.TextPrimary,
+            ),
+            border = ClickableSurfaceDefaults.border(
+                border = Border.None,
+                focusedBorder = Border(
+                    border = BorderStroke(MuxGridBorders.Focused, MuxGridColors.FocusBorder),
+                    shape = MuxGridShapes.Sm,
+                ),
+            ),
+            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.015f),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = "Radio Ambient Glow",
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                MuxGridSwitch(
+                    checked = radioAmbientGlowEnabled,
+                    onCheckedChange = onSetRadioAmbientGlowEnabled,
+                )
+            }
         }
     }
 }

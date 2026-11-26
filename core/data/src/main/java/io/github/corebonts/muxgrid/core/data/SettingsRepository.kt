@@ -117,6 +117,10 @@ class SettingsRepository(
         ThemeMode.fromPersisted(prefs[KEY_THEME_MODE], formFactor)
     }
 
+    val radioAmbientGlowEnabled: Flow<Boolean> = context.muxGridDataStore.data.map { prefs ->
+        prefs[KEY_RADIO_AMBIENT_GLOW] ?: true
+    }
+
     val subtitlePreference: Flow<SubtitlePreference> = context.muxGridDataStore.data.map { prefs ->
         SubtitlePreference(
             enabled = prefs[KEY_SUBTITLE_ENABLED] ?: true,
@@ -216,6 +220,12 @@ class SettingsRepository(
         }
     }
 
+    suspend fun setRadioAmbientGlowEnabled(enabled: Boolean) {
+        context.muxGridDataStore.edit { prefs ->
+            prefs[KEY_RADIO_AMBIENT_GLOW] = enabled
+        }
+    }
+
     suspend fun setSubtitlePreference(preference: SubtitlePreference) {
         context.muxGridDataStore.edit { prefs ->
             prefs[KEY_SUBTITLE_ENABLED] = preference.enabled
@@ -276,6 +286,7 @@ class SettingsRepository(
         private val KEY_PIP_ENABLED = booleanPreferencesKey("pip_enabled")
         private val KEY_START_SCREEN = stringPreferencesKey("start_screen")
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
+        private val KEY_RADIO_AMBIENT_GLOW = booleanPreferencesKey("radio_ambient_glow_enabled")
         private val KEY_SUBTITLE_ENABLED = booleanPreferencesKey("subtitle_enabled")
         private val KEY_SUBTITLE_LANG = stringPreferencesKey("subtitle_preferred_lang")
         private val KEY_LOCAL_DVR_PROGRESS = stringSetPreferencesKey("dvr_local_progress")

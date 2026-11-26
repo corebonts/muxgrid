@@ -106,6 +106,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridModalSheet
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridSplashScreen
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridSwitch
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridSyncingState
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
@@ -396,6 +397,7 @@ fun MobileRoot(
                         }
                         MainTab.SETTINGS -> {
                             val themeMode by repository.themeMode.collectAsState()
+                            val radioAmbientGlowEnabled by repository.radioAmbientGlowEnabled.collectAsState()
                             val hwDecPreset by repository.hwDecPreset.collectAsState()
                             val timeshiftWindow by repository.timeshiftWindow.collectAsState()
                             val backgroundPlaybackMode by repository.backgroundPlaybackMode.collectAsState()
@@ -408,6 +410,7 @@ fun MobileRoot(
                                 isRunningDiagnostics = isRunningDiagnostics,
                                 startScreen = currentStartScreen,
                                 themeMode = themeMode,
+                                radioAmbientGlowEnabled = radioAmbientGlowEnabled,
                                 hwDecPreset = hwDecPreset,
                                 timeshiftWindow = timeshiftWindow,
                                 backgroundPlaybackMode = backgroundPlaybackMode,
@@ -419,6 +422,9 @@ fun MobileRoot(
                                 },
                                 onSelectThemeMode = { mode ->
                                     scope.launch { repository.setThemeMode(mode) }
+                                },
+                                onSetRadioAmbientGlowEnabled = { enabled ->
+                                    scope.launch { repository.setRadioAmbientGlowEnabled(enabled) }
                                 },
                                 onSelectPreset = { preset ->
                                     scope.launch { repository.setHwDecPreset(preset) }
@@ -449,6 +455,7 @@ fun MobileRoot(
             val playbackState by playbackEngine.state.collectAsState()
             val nowNextMap by repository.nowNextByChannel.collectAsState()
             val hwDecPreset by repository.hwDecPreset.collectAsState()
+            val radioAmbientGlowEnabled by repository.radioAmbientGlowEnabled.collectAsState()
             val nowEpochSec = rememberNowEpochSec(offsetMs)
             val activeChannel = channels.firstOrNull { it.id == playbackState.channelId }
             val activeNowNext = activeChannel?.let { nowNextMap[it.id] }
@@ -477,6 +484,7 @@ fun MobileRoot(
                     isInPip = isInPictureInPictureMode,
                     canEnterPip = canEnterPip,
                     canZap = zapPool.size > 1,
+                    radioAmbientGlowEnabled = radioAmbientGlowEnabled,
                     onEnterPip = onEnterPip,
                     onSelectChannel = { channel ->
                         playbackEngine.playChannel(channel, hwDecPreset)
@@ -1534,6 +1542,7 @@ private fun MobileSettingsTab(
     isRunningDiagnostics: Boolean,
     startScreen: StartScreen,
     themeMode: ThemeMode,
+    radioAmbientGlowEnabled: Boolean,
     hwDecPreset: HwDecPreset,
     timeshiftWindow: TimeshiftWindow,
     backgroundPlaybackMode: BackgroundPlaybackMode,
@@ -1542,6 +1551,7 @@ private fun MobileSettingsTab(
     bottomContentPadding: Dp,
     onSelectStartScreen: (StartScreen) -> Unit,
     onSelectThemeMode: (ThemeMode) -> Unit,
+    onSetRadioAmbientGlowEnabled: (Boolean) -> Unit,
     onSelectPreset: (HwDecPreset) -> Unit,
     onSelectTimeshiftWindow: (TimeshiftWindow) -> Unit,
     onSelectBackgroundPlaybackMode: (BackgroundPlaybackMode) -> Unit,
@@ -1631,8 +1641,10 @@ private fun MobileSettingsTab(
                         MobileGeneralSettingsSection(
                             startScreen = startScreen,
                             themeMode = themeMode,
+                            radioAmbientGlowEnabled = radioAmbientGlowEnabled,
                             onSelectStartScreen = onSelectStartScreen,
                             onSelectThemeMode = onSelectThemeMode,
+                            onSetRadioAmbientGlowEnabled = onSetRadioAmbientGlowEnabled,
                         )
                         MobileBackgroundPlaybackSection(
                             options = backgroundModeOptions,
@@ -1678,8 +1690,10 @@ private fun MobileSettingsTab(
                 MobileGeneralSettingsSection(
                     startScreen = startScreen,
                     themeMode = themeMode,
+                    radioAmbientGlowEnabled = radioAmbientGlowEnabled,
                     onSelectStartScreen = onSelectStartScreen,
                     onSelectThemeMode = onSelectThemeMode,
+                    onSetRadioAmbientGlowEnabled = onSetRadioAmbientGlowEnabled,
                 )
                 MobileBackgroundPlaybackSection(
                     options = backgroundModeOptions,
@@ -1994,8 +2008,10 @@ private fun MobileServerSettingsSection(
 private fun MobileGeneralSettingsSection(
     startScreen: StartScreen,
     themeMode: ThemeMode,
+    radioAmbientGlowEnabled: Boolean,
     onSelectStartScreen: (StartScreen) -> Unit,
     onSelectThemeMode: (ThemeMode) -> Unit,
+    onSetRadioAmbientGlowEnabled: (Boolean) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -2073,6 +2089,33 @@ private fun MobileGeneralSettingsSection(
                     text = themeMode.description,
                     style = MuxGridType.TabularSmall,
                     color = MuxGridColors.TextSecondary,
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MuxGridColors.CardSurface)
+                    .clickable { onSetRadioAmbientGlowEnabled(!radioAmbientGlowEnabled) }
+                    .padding(horizontal = 12.dp, vertical = 11.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = "Radio Ambient Glow",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MuxGridColors.TextPrimary,
+                    )
+                }
+                MuxGridSwitch(
+                    checked = radioAmbientGlowEnabled,
+                    onCheckedChange = onSetRadioAmbientGlowEnabled,
                 )
             }
         }

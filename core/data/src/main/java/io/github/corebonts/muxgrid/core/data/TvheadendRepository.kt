@@ -107,6 +107,9 @@ class TvheadendRepository(
     val themeMode: StateFlow<ThemeMode> = settings.themeMode
         .stateIn(scope, SharingStarted.Eagerly, ThemeMode.defaultFor(formFactor))
 
+    val radioAmbientGlowEnabled: StateFlow<Boolean> = settings.radioAmbientGlowEnabled
+        .stateIn(scope, SharingStarted.Eagerly, true)
+
     val subtitlePreference: StateFlow<SubtitlePreference> = settings.subtitlePreference
         .stateIn(scope, SharingStarted.Eagerly, SubtitlePreference())
 
@@ -397,6 +400,10 @@ class TvheadendRepository(
 
     suspend fun setThemeMode(mode: ThemeMode) {
         settings.setThemeMode(mode)
+    }
+
+    suspend fun setRadioAmbientGlowEnabled(enabled: Boolean) {
+        settings.setRadioAmbientGlowEnabled(enabled)
     }
 
     suspend fun setSubtitlePreference(preference: SubtitlePreference) {

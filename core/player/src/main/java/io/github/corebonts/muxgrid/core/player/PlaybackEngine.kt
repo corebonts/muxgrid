@@ -1,6 +1,7 @@
 package io.github.corebonts.muxgrid.core.player
 
 import android.view.Surface
+import io.github.corebonts.muxgrid.core.model.AudioLevels
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.HwDecPreset
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 interface PlaybackEngine {
     val state: StateFlow<PlaybackState>
     val diagnostics: StateFlow<PlaybackDiagnostics>
+    val audioLevels: StateFlow<AudioLevels>
 
     fun playChannel(channel: Channel, preset: HwDecPreset)
     fun playDvrEntry(entry: DvrEntry, channel: Channel?, preset: HwDecPreset, startPositionSec: Long = 0L)
@@ -35,6 +37,7 @@ interface PlaybackEngine {
     fun setAudioOnly(audioOnly: Boolean)
     fun setVideoAspectMode(mode: VideoAspectMode)
     fun setDiagnosticsEnabled(enabled: Boolean)
+    fun setAudioMeteringEnabled(enabled: Boolean)
 
     fun attachSurface(surface: Surface, width: Int, height: Int)
     fun updateSurfaceSize(width: Int, height: Int)

@@ -9,6 +9,7 @@ import android.system.Os
 import android.system.OsConstants
 import android.util.Log
 import android.view.Surface
+import io.github.corebonts.muxgrid.core.model.AudioLevels
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
@@ -37,6 +38,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -104,6 +106,18 @@ class MpvPlaybackEngine(
 
     private val _diagnostics = MutableStateFlow(PlaybackDiagnostics())
     override val diagnostics: StateFlow<PlaybackDiagnostics> = _diagnostics.asStateFlow()
+
+    private val _audioLevels = MutableStateFlow(AudioLevels.ZERO)
+    override val audioLevels: StateFlow<AudioLevels> = _audioLevels.asStateFlow()
+
+    private val _audioMeteringRequested = MutableStateFlow(false)
+
+    @Volatile
+    private var audioMeteringEnabled: Boolean = false
+
+    private var audioMeterFilterAttached: Boolean = false
+    private val audioMeterPollInFlight = AtomicBoolean(false)
+    private val radioVibeTracker = RadioVibeTracker()
 
     private data class MemorySnapshot(
         val totalPssMb: Double?,
@@ -267,9 +281,18 @@ class MpvPlaybackEngine(
 
     private val systemDiagnosticsLock = Any()
     private var cacheMonitorJob: Job? = null
+    private var audioMeterJob: Job? = null
+    private var audioMeterJobGen: Long = 0L
     private var systemDiagnosticsJob: Job? = null
     private var noticeClearJob: Job? = null
     private var activeBinarySeekJob: Job? = null
+
+    private data class AudioMeterTriggerState(
+        val requested: Boolean,
+        val status: PlaybackStatus,
+        val isPaused: Boolean,
+        val isAudioStage: Boolean,
+    )
 
     init {
         submitMpvTask {
@@ -290,6 +313,43 @@ class MpvPlaybackEngine(
                                 (status == PlaybackStatus.PLAYING || status == PlaybackStatus.BUFFERING)
                             platformLocks.onPlaybackActive(isRadio = isRadio, isPlayingOrBuffering = active)
                         }
+                    }
+                }
+        }
+        engineScope.launch {
+            combine(
+                _audioMeteringRequested,
+                _state.map { Triple(it.status, it.isPaused, it.isRadio || it.isAudioOnly) }.distinctUntilChanged(),
+            ) { requested, (status, isPaused, isAudioStage) ->
+                AudioMeterTriggerState(
+                    requested = requested,
+                    status = status,
+                    isPaused = isPaused,
+                    isAudioStage = isAudioStage,
+                )
+            }
+                .distinctUntilChanged()
+                .collect { trigger ->
+                    val shouldAttachFilter = trigger.requested &&
+                        !explicitlyStopped &&
+                        trigger.isAudioStage &&
+                        trigger.status != PlaybackStatus.IDLE &&
+                        trigger.status != PlaybackStatus.ERROR
+                    val shouldPoll = shouldAttachFilter &&
+                        trigger.status == PlaybackStatus.PLAYING &&
+                        !trigger.isPaused
+
+                    if (!shouldPoll) {
+                        stopAudioMeterPolling()
+                    }
+                    submitMpvTask {
+                        val instance = mpv ?: return@submitMpvTask
+                        if (instance.isInitialized) {
+                            syncAudioMeterFilterLocked(instance, shouldAttachFilter)
+                        }
+                    }
+                    if (shouldPoll) {
+                        startAudioMeterPolling(playbackGeneration.get())
                     }
                 }
         }
@@ -421,6 +481,7 @@ class MpvPlaybackEngine(
             instance.setPropertyDouble("volume", MPV_VOLUME_FULL)
             instance.setPropertyString("vid", if (explicitAudioOnly) "no" else "auto")
             videoOutputDisabled = explicitAudioOnly
+            syncAudioMeterFilterLocked(instance, audioMeteringEnabled && explicitAudioOnly)
             instance.setPropertyBoolean("pause", false)
             if (hasSurface || channel.isRadio) {
                 pendingUrl = null
@@ -542,6 +603,7 @@ class MpvPlaybackEngine(
             instance.setPropertyDouble("volume", MPV_VOLUME_FULL)
             instance.setPropertyString("vid", if (explicitAudioOnly) "no" else "auto")
             videoOutputDisabled = explicitAudioOnly
+            syncAudioMeterFilterLocked(instance, audioMeteringEnabled && explicitAudioOnly)
             instance.setPropertyBoolean("pause", false)
             if (needsColdBinarySearch) {
                 return@submitMpvTask
@@ -617,6 +679,7 @@ class MpvPlaybackEngine(
         timeshiftSmoother.reset()
         cacheMonitorJob?.cancel()
         cacheMonitorJob = null
+        stopAudioMeterPolling()
         noticeClearJob?.cancel()
         noticeClearJob = null
         platformLocks.onPlaybackStopped()
@@ -628,6 +691,7 @@ class MpvPlaybackEngine(
         submitMpvTask {
             val instance = mpv
             if (instance != null && instance.isInitialized) {
+                syncAudioMeterFilterLocked(instance, false)
                 instance.command("stop")
                 instance.setPropertyString("start", "none")
                 instance.setPropertyString("force-seekable", "no")
@@ -1121,6 +1185,14 @@ class MpvPlaybackEngine(
         }
     }
 
+    override fun setAudioMeteringEnabled(enabled: Boolean) {
+        audioMeteringEnabled = enabled
+        _audioMeteringRequested.value = enabled
+        if (!enabled) {
+            stopAudioMeterPolling()
+        }
+    }
+
     override fun attachSurface(surface: Surface, width: Int, height: Int) {
         submitMpvTask {
             val instance = mpv ?: return@submitMpvTask
@@ -1253,6 +1325,7 @@ class MpvPlaybackEngine(
         playbackGeneration.incrementAndGet()
         explicitlyStopped = true
         cacheMonitorJob?.cancel()
+        stopAudioMeterPolling()
         cancelSystemDiagnosticsRefresh()
         noticeClearJob?.cancel()
         platformLocks.destroy()
@@ -1845,6 +1918,7 @@ class MpvPlaybackEngine(
                     val dead = mpv
                     mpv = null
                     surfaceAttachedToMpv = false
+                    audioMeterFilterAttached = false
                     if (dead != null) {
                         runCatching { dead.removeObserver(mpvEventObserver) }
                         runCatching { dead.close() }
@@ -2346,8 +2420,84 @@ class MpvPlaybackEngine(
         return total
     }
 
+    private fun startAudioMeterPolling(gen: Long) {
+        if (audioMeterJob?.isActive == true && audioMeterJobGen == gen) return
+        audioMeterJob?.cancel()
+        audioMeterJobGen = gen
+        audioMeterJob = engineScope.launch {
+            while (isActive && audioMeteringEnabled && !explicitlyStopped && playbackGeneration.get() == gen) {
+                if (audioMeterPollInFlight.compareAndSet(false, true)) {
+                    submitMpvTask {
+                        try {
+                            if (audioMeteringEnabled && !explicitlyStopped && playbackGeneration.get() == gen) {
+                                mpv?.let { pollAudioMeterLocked(it) }
+                            }
+                        } finally {
+                            audioMeterPollInFlight.set(false)
+                        }
+                    }
+                }
+                delay(AUDIO_METER_POLL_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun stopAudioMeterPolling() {
+        audioMeterJob?.cancel()
+        audioMeterJob = null
+        audioMeterPollInFlight.set(false)
+        radioVibeTracker.reset()
+        _audioLevels.value = AudioLevels.ZERO
+    }
+
+    private fun syncAudioMeterFilterLocked(instance: MPV, shouldAttach: Boolean) {
+        if (shouldAttach == audioMeterFilterAttached) return
+        if (shouldAttach) {
+            val rc = runCatching {
+                instance.command("af", "add", ASTATS_FILTER_SPEC)
+            }.getOrElse { err ->
+                Log.w(TAG, "Failed to attach audio meter filter", err)
+                -1
+            }
+            if (rc >= 0) {
+                audioMeterFilterAttached = true
+            }
+        } else {
+            runCatching {
+                instance.command("af", "remove", ASTATS_FILTER_LABEL)
+            }.onFailure { err ->
+                Log.w(TAG, "Failed to remove audio meter filter", err)
+            }
+            audioMeterFilterAttached = false
+        }
+    }
+
+    private fun pollAudioMeterLocked(instance: MPV) {
+        if (!audioMeteringEnabled || explicitlyStopped || !audioMeterFilterAttached || !instance.isInitialized) {
+            return
+        }
+        val metaMap = runCatching {
+            instance.getPropertyNode(ASTATS_METADATA_PROP)?.asMap()
+        }.getOrNull() ?: return
+        val rmsRaw = readMetadataValue(metaMap[AudioLevelMapper.KEY_RMS_LEVEL])
+        val peakRaw = readMetadataValue(metaMap[AudioLevelMapper.KEY_PEAK_LEVEL])
+        if (rmsRaw == null && peakRaw == null) return
+        _audioLevels.value = radioVibeTracker.update(rmsRaw, peakRaw)
+    }
+
+    private fun readMetadataValue(node: `is`.xyz.mpv.MPVNode?): String? {
+        if (node == null) return null
+        return runCatching { node.asString() }.getOrNull()
+            ?: runCatching { node.asDouble()?.toString() }.getOrNull()
+    }
+
     companion object {
         private const val TAG = "MuxGridPlayer"
+        private const val AUDIO_METER_POLL_INTERVAL_MS = 100L
+        private const val ASTATS_FILTER_LABEL = "@muxgrid_meter"
+        private const val ASTATS_FILTER_SPEC =
+            "$ASTATS_FILTER_LABEL:lavfi=[astats=metadata=1:reset=6:measure_overall=RMS_level+Peak_level:measure_perchannel=none]"
+        private const val ASTATS_METADATA_PROP = "af-metadata/muxgrid_meter"
         private const val POSITION_EMIT_INTERVAL_MS = 250L
         private const val POSITION_JUMP_THRESHOLD_MS = 1_500L
         private const val CACHE_POLL_INTERVAL_MS = 500L

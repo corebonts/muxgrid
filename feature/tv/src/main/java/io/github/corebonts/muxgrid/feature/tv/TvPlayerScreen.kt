@@ -70,6 +70,7 @@ import androidx.tv.material3.Button
 import androidx.tv.material3.Icon
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
+import io.github.corebonts.muxgrid.core.designsystem.AmbientRadioGlow
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
@@ -88,6 +89,7 @@ import io.github.corebonts.muxgrid.core.designsystem.displayTitle
 import io.github.corebonts.muxgrid.core.designsystem.formatDurationSec
 import io.github.corebonts.muxgrid.core.designsystem.rememberStableDurationSec
 import io.github.corebonts.muxgrid.core.designsystem.streamBadgeText
+import io.github.corebonts.muxgrid.core.model.AudioLevels
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
@@ -115,6 +117,7 @@ internal fun TvPlayerScreen(
     hwDecPreset: HwDecPreset,
     imageLoader: ImageLoader,
     canZap: Boolean,
+    radioAmbientGlowEnabled: Boolean = true,
     onSelectChannel: (Channel) -> Unit,
     onZapDelta: (Int) -> Unit,
     onSelectPreset: (HwDecPreset) -> Unit,
@@ -151,7 +154,19 @@ internal fun TvPlayerScreen(
     var wasInfoPanelOpen by remember { mutableStateOf(false) }
     var backToLiveFocused by remember { mutableStateOf(false) }
     val canSeekTimeline = playbackState.isRecordingPlayback || playbackState.isTimeshiftSeekable
+    val isAudioStage = playbackState.isRadio || playbackState.isAudioOnly
     val lifecycleOwner = LocalLifecycleOwner.current
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsState()
+    val audioMeteringActive = radioAmbientGlowEnabled && isAudioStage && lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+
+    LaunchedEffect(playbackEngine, audioMeteringActive) {
+        playbackEngine.setAudioMeteringEnabled(audioMeteringActive)
+    }
+    DisposableEffect(playbackEngine) {
+        onDispose {
+            playbackEngine.setAudioMeteringEnabled(false)
+        }
+    }
 
     fun cancelPendingSeek() {
         if (seekUiState.pendingTargetMs != null || seekUiState.osdVisible || seekCommitDelayMs != null) {
@@ -472,10 +487,23 @@ internal fun TvPlayerScreen(
             .focusRequester(playerFocusRequester)
             .focusable(enabled = !hudVisible && !trackPanelOpen && !infoPanelOpen && playbackState.error == null),
     ) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx -> MuxGridVideoView(ctx, playbackEngine) },
-        )
+        if (!isAudioStage) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx -> MuxGridVideoView(ctx, playbackEngine) },
+            )
+        } else {
+            TvAudioStage(
+                playbackState = playbackState,
+                activeChannel = activeChannel,
+                nowNext = nowNext,
+                nowEpochSec = nowEpochSec,
+                imageLoader = imageLoader,
+                hudVisible = hudVisible,
+                radioAmbientGlowEnabled = radioAmbientGlowEnabled,
+                audioLevelsProvider = { playbackEngine.audioLevels.value },
+            )
+        }
 
         if (playbackState.status == PlaybackStatus.BUFFERING) {
             CircularProgressIndicator(
@@ -1344,6 +1372,105 @@ private fun TvQuickChannelStrip(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvAudioStage(
+    playbackState: PlaybackState,
+    activeChannel: Channel?,
+    nowNext: NowNextProgram?,
+    nowEpochSec: Long,
+    imageLoader: ImageLoader,
+    hudVisible: Boolean,
+    radioAmbientGlowEnabled: Boolean,
+    audioLevelsProvider: () -> AudioLevels,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .then(
+                if (radioAmbientGlowEnabled) {
+                    Modifier.background(Color(0xFF040405))
+                } else {
+                    Modifier.background(
+                        Brush.verticalGradient(
+                            listOf(MuxGridColors.AudioStageTop, MuxGridColors.CanvasTv, Color.Black),
+                        ),
+                    )
+                },
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (radioAmbientGlowEnabled) {
+            AmbientRadioGlow(
+                audioLevelsProvider = audioLevelsProvider,
+                playbackStatus = playbackState.status,
+                isPaused = playbackState.isPaused,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .padding(horizontal = 48.dp)
+                .padding(bottom = if (hudVisible) 180.dp else 40.dp, top = 40.dp),
+        ) {
+            if (activeChannel != null) {
+                ChannelPiconBadge(
+                    channelNumber = activeChannel.formattedNumber,
+                    channelName = activeChannel.name,
+                    piconModel = activeChannel.icon?.let { PiconModel(activeChannel.id, it) },
+                    imageLoader = imageLoader,
+                    size = 112.dp,
+                )
+            }
+            Text(
+                text = playbackState.channelName ?: activeChannel?.name ?: "Audio Stream",
+                style = MuxGridType.Title,
+                fontSize = 26.sp,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            (playbackState.programTitle ?: nowNext?.now?.title)?.let { show ->
+                Text(
+                    text = show,
+                    style = MuxGridType.CardSubtitle,
+                    fontSize = 16.sp,
+                    color = MuxGridColors.TextSecondary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (!playbackState.isRecordingPlayback) {
+                nowNext?.now?.let {
+                    LiveProgressBar(
+                        progress = nowNext.progressFraction(nowEpochSec),
+                        modifier = Modifier.width(260.dp),
+                    )
+                }
+            }
+            val badgeLabel = when {
+                playbackState.isPaused -> if (playbackState.isRadio) "PAUSED · RADIO" else "PAUSED · AUDIO"
+                playbackState.isRadio -> "LIVE RADIO"
+                else -> "BACKGROUND AUDIO"
+            }
+            Box(
+                modifier = Modifier
+                    .background(MuxGridColors.Accent.copy(alpha = 0.16f), MuxGridShapes.Sm)
+                    .border(MuxGridBorders.Divider, MuxGridColors.AccentSoft.copy(alpha = 0.45f), MuxGridShapes.Sm)
+                    .padding(horizontal = 12.dp, vertical = 5.dp),
+            ) {
+                Text(
+                    text = badgeLabel,
+                    color = MuxGridColors.AccentSoft,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                )
             }
         }
     }

@@ -75,8 +75,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
+import io.github.corebonts.muxgrid.core.designsystem.AmbientRadioGlow
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrStateBadge
 import io.github.corebonts.muxgrid.core.designsystem.LiveProgressBar
@@ -141,6 +144,7 @@ internal fun MobilePlayerScreen(
     isInPip: Boolean,
     canEnterPip: Boolean,
     canZap: Boolean,
+    radioAmbientGlowEnabled: Boolean = true,
     onEnterPip: () -> Unit,
     onSelectChannel: (Channel) -> Unit,
     onZapPrevious: () -> Unit,
@@ -182,6 +186,21 @@ internal fun MobilePlayerScreen(
     val canSeekTimeline = playbackState.isRecordingPlayback || playbackState.isTimeshiftSeekable
     val isAudioStage = playbackState.isRadio || playbackState.isAudioOnly
     val hasError = playbackState.error != null
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsState()
+    val audioMeteringActive = radioAmbientGlowEnabled &&
+        isAudioStage &&
+        !isInPip &&
+        lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+
+    LaunchedEffect(playbackEngine, audioMeteringActive) {
+        playbackEngine.setAudioMeteringEnabled(audioMeteringActive)
+    }
+    DisposableEffect(playbackEngine) {
+        onDispose {
+            playbackEngine.setAudioMeteringEnabled(false)
+        }
+    }
 
     BackHandler(enabled = trackPanelOpen || infoPanelOpen || quickZapOpen || playbackState.isSeeking) {
         when {
@@ -368,17 +387,31 @@ internal fun MobilePlayerScreen(
                 factory = { ctx -> MuxGridVideoView(ctx, playbackEngine) },
             )
         } else {
-            // Calm audio/radio stage
+            // Calm audio/radio stage with optional zero-permission ambient audio glow
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(MuxGridColors.AudioStageTop, MuxGridColors.CanvasPhone, Color.Black),
-                        ),
+                    .then(
+                        if (radioAmbientGlowEnabled) {
+                            Modifier.background(Color(0xFF040405))
+                        } else {
+                            Modifier.background(
+                                Brush.verticalGradient(
+                                    listOf(MuxGridColors.AudioStageTop, MuxGridColors.CanvasPhone, Color.Black),
+                                ),
+                            )
+                        },
                     ),
                 contentAlignment = Alignment.Center,
             ) {
+                if (radioAmbientGlowEnabled && !isInPip) {
+                    AmbientRadioGlow(
+                        audioLevelsProvider = { playbackEngine.audioLevels.value },
+                        playbackStatus = playbackState.status,
+                        isPaused = playbackState.isPaused,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp),

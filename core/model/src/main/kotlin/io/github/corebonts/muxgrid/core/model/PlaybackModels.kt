@@ -33,6 +33,19 @@ enum class PlaybackStatus {
     ERROR,
 }
 
+/**
+ * Normalized 3-band audio energy levels in `[0f, 1f]` used to drive ambient radio visuals.
+ */
+data class AudioLevels(
+    val low: Float = 0f,
+    val mid: Float = 0f,
+    val high: Float = 0f,
+) {
+    companion object {
+        val ZERO = AudioLevels()
+    }
+}
+
 sealed interface PlaybackError {
     val message: String
 
