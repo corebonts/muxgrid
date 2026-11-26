@@ -53,6 +53,7 @@ class LocalMediaProxy(
     private val growingIndexStore: GrowingMkvIndexStore? = null,
     private val dvrStartEpochProvider: (dvrId: Long) -> Long = { 0L },
     private val onLiveOpenFailed: (channelId: Long, reason: String, isEmptyReply: Boolean) -> Unit = { _, _, _ -> },
+    private val onLiveOpened: (channelId: Long, statusCode: Int, ticketMs: Long, headersMs: Long) -> Unit = { _, _, _, _ -> },
     private val ticketTtlMs: Long = DEFAULT_TICKET_TTL_MS,
     private val growingPollIntervalMs: Long = DEFAULT_GROWING_POLL_INTERVAL_MS,
     private val nowMsProvider: () -> Long = { System.currentTimeMillis() },
@@ -190,6 +191,7 @@ class LocalMediaProxy(
         var dvrHandle: ActiveStreamHandle? = null
         try {
             clientSocket.soTimeout = SOCKET_READ_TIMEOUT_MS
+            runCatching { clientSocket.tcpNoDelay = true }
             val clientIn = BufferedInputStream(clientSocket.getInputStream(), CLIENT_HEADER_BUFFER_BYTES)
             val requestLine = readHeaderLine(clientIn) ?: return
             var rangeHeader: String? = null
@@ -317,6 +319,7 @@ class LocalMediaProxy(
         val httpMethod = if (method == "HEAD") "HEAD" else "GET"
 
         var forceRefresh = false
+        val openStartNs = System.nanoTime()
         for (attempt in 0..1) {
             if (handle.cancelled.get()) return
             val ticket = try {
@@ -327,6 +330,7 @@ class LocalMediaProxy(
                 writeHttpError(clientOut, 502, msg)
                 return
             }
+            val ticketDoneNs = System.nanoTime()
 
             val reqPath = buildUpstreamPath(endpoint.basePath, ticket, appendPassProfile = true)
             val response = try {
@@ -368,6 +372,14 @@ class LocalMediaProxy(
                 }
                 return
             }
+
+            val headersNs = System.nanoTime()
+            onLiveOpened(
+                channelId,
+                response.statusCode,
+                (ticketDoneNs - openStartNs) / 1_000_000L,
+                (headersNs - ticketDoneNs) / 1_000_000L,
+            )
 
             activeUpstreamStatus = "HTTP ${response.statusCode}"
             val chunked = isChunkedResponse(response.headers)
@@ -926,6 +938,7 @@ class LocalMediaProxy(
         var activeSock: Socket = tcpSock
         return try {
             tcpSock.soTimeout = SOCKET_READ_TIMEOUT_MS
+            runCatching { tcpSock.tcpNoDelay = true }
             val connectHost = endpoint.host.removePrefix("[").removeSuffix("]")
             tcpSock.connect(InetSocketAddress(connectHost, endpoint.port), UPSTREAM_CONNECT_TIMEOUT_MS)
 

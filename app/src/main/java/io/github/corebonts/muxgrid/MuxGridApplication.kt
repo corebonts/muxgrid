@@ -179,6 +179,7 @@ class MuxGridAppContainer(context: Context) {
         nowEpochSecProvider = { repository.currentServerEpochSec() },
         initialTimeshiftWindow = repository.timeshiftWindow.value,
         initialSubtitlePreference = repository.subtitlePreference.value,
+        initialRadioAmbientGlowEnabled = repository.radioAmbientGlowEnabled.value,
         onSubtitlePreferenceChanged = { preference ->
             applicationScope.launch {
                 runCatching { repository.setSubtitlePreference(preference) }
@@ -217,6 +218,11 @@ class MuxGridAppContainer(context: Context) {
         applicationScope.launch {
             repository.subtitlePreference.collect { preference ->
                 playbackEngine.setSubtitlePreference(preference)
+            }
+        }
+        applicationScope.launch {
+            repository.radioAmbientGlowEnabled.collect { enabled ->
+                playbackEngine.setRadioAmbientGlowEnabled(enabled)
             }
         }
         dvrProgressTracker.start()

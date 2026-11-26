@@ -38,6 +38,7 @@ interface PlaybackEngine {
     fun setVideoAspectMode(mode: VideoAspectMode)
     fun setDiagnosticsEnabled(enabled: Boolean)
     fun setAudioMeteringEnabled(enabled: Boolean)
+    fun setRadioAmbientGlowEnabled(enabled: Boolean)
 
     fun attachSurface(surface: Surface, width: Int, height: Int)
     fun updateSurfaceSize(width: Int, height: Int)

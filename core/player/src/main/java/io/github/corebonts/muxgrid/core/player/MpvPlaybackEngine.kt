@@ -75,6 +75,7 @@ class MpvPlaybackEngine(
     private val nowEpochSecProvider: () -> Long = { System.currentTimeMillis() / 1000L },
     initialTimeshiftWindow: TimeshiftWindow = TimeshiftWindow.GB_1,
     initialSubtitlePreference: SubtitlePreference = SubtitlePreference(),
+    initialRadioAmbientGlowEnabled: Boolean = true,
     private val onSubtitlePreferenceChanged: (SubtitlePreference) -> Unit = {},
     private val conflictFinder: (channelId: Long) -> Pair<DvrEntry, String?>?,
 ) : PlaybackEngine {
@@ -97,6 +98,9 @@ class MpvPlaybackEngine(
         onLiveOpenFailed = { channelId, reason, isEmptyReply ->
             handleProxyFailure(channelId, reason, isEmptyReply)
         },
+        onLiveOpened = { channelId, statusCode, ticketMs, headersMs ->
+            Log.i(TAG, "proxy live open ch=$channelId status=$statusCode ticketMs=$ticketMs headersMs=$headersMs")
+        },
     )
     private val liveStrategy: LiveStreamStrategy = HttpPassStrategy(proxy)
     private val timeshiftSmoother = TimeshiftRangeSmoother()
@@ -111,9 +115,13 @@ class MpvPlaybackEngine(
     override val audioLevels: StateFlow<AudioLevels> = _audioLevels.asStateFlow()
 
     private val _audioMeteringRequested = MutableStateFlow(false)
+    private val _radioAmbientGlowEnabled = MutableStateFlow(initialRadioAmbientGlowEnabled)
 
     @Volatile
     private var audioMeteringEnabled: Boolean = false
+
+    @Volatile
+    private var radioAmbientGlowEnabled: Boolean = initialRadioAmbientGlowEnabled
 
     private var audioMeterFilterAttached: Boolean = false
     private val audioMeterPollInFlight = AtomicBoolean(false)
@@ -289,8 +297,10 @@ class MpvPlaybackEngine(
 
     private data class AudioMeterTriggerState(
         val requested: Boolean,
+        val glowEnabled: Boolean,
         val status: PlaybackStatus,
         val isPaused: Boolean,
+        val isRadio: Boolean,
         val isAudioStage: Boolean,
     )
 
@@ -319,23 +329,36 @@ class MpvPlaybackEngine(
         engineScope.launch {
             combine(
                 _audioMeteringRequested,
-                _state.map { Triple(it.status, it.isPaused, it.isRadio || it.isAudioOnly) }.distinctUntilChanged(),
-            ) { requested, (status, isPaused, isAudioStage) ->
+                _radioAmbientGlowEnabled,
+                _state.map {
+                    Triple(it.status, it.isPaused, it.isRadio to (it.isRadio || it.isAudioOnly))
+                }.distinctUntilChanged(),
+            ) { requested, glowEnabled, (status, isPaused, audioFlags) ->
+                val (isRadio, isAudioStage) = audioFlags
                 AudioMeterTriggerState(
                     requested = requested,
+                    glowEnabled = glowEnabled,
                     status = status,
                     isPaused = isPaused,
+                    isRadio = isRadio,
                     isAudioStage = isAudioStage,
                 )
             }
                 .distinctUntilChanged()
                 .collect { trigger ->
-                    val shouldAttachFilter = trigger.requested &&
-                        !explicitlyStopped &&
-                        trigger.isAudioStage &&
+                    val isPlaybackActive = !explicitlyStopped &&
                         trigger.status != PlaybackStatus.IDLE &&
                         trigger.status != PlaybackStatus.ERROR
+                    val shouldAttachFilter = shouldAttachAudioMeterFilter(
+                        isPlaybackActive = isPlaybackActive,
+                        isRadio = trigger.isRadio,
+                        isAudioStage = trigger.isAudioStage,
+                        radioAmbientGlowEnabled = trigger.glowEnabled,
+                        audioMeteringRequested = trigger.requested,
+                    )
                     val shouldPoll = shouldAttachFilter &&
+                        trigger.requested &&
+                        trigger.isAudioStage &&
                         trigger.status == PlaybackStatus.PLAYING &&
                         !trigger.isPaused
 
@@ -381,11 +404,14 @@ class MpvPlaybackEngine(
             setOptionString("gpu-context", "android")
             setOptionString("opengl-es", "yes")
             setOptionString("hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
-            // Give DVB MPEG-TS streams enough probe budget to catch an H.264/HEVC SPS/PPS
+            // Give DVB MPEG-TS video streams enough probe budget to catch an H.264/HEVC SPS/PPS
             // keyframe so h264_mediacodec opens with valid dimensions instead of falling back
             // to software decode (FFmpeg returns early as soon as stream info is complete).
-            setOptionString("demuxer-lavf-o", "analyzeduration=2500000,probesize=2097152")
+            setOptionString("demuxer-lavf-o", VIDEO_DEMUXER_LAVF_O)
             setOptionString("cache", "yes")
+            setOptionString("cache-pause", "yes")
+            setOptionString("cache-pause-initial", "yes")
+            setOptionString("cache-pause-wait", DEFAULT_CACHE_PAUSE_WAIT_ARG)
             setOptionString("demuxer-seekable-cache", "yes")
             setOptionString("demuxer-donate-buffer", "yes")
             setOptionString("demuxer-cache-dir", mpvCacheDir.absolutePath)
@@ -439,6 +465,7 @@ class MpvPlaybackEngine(
         lastObservedMpvDurationMs = 0L
         lastPositionEmitElapsedMs = 0L
         lastEmittedPosMs = -1L
+        sessionStartElapsedMs = SystemClock.elapsedRealtime()
         resetSeekTracking()
         lastGrowingServerSec = 0L
         lastGrowingTickElapsedMs = 0L
@@ -476,12 +503,22 @@ class MpvPlaybackEngine(
             applyAspectModeLocked(instance, currentAspectMode)
             applySubtitlePreferenceLocked(instance, currentSubtitlePreference)
             configureLiveTimeshiftLocked(instance, requestedWindow)
+            applyCachePauseSettingsLocked(instance, isRadio = channel.isRadio)
+            applyDemuxerProbeSettingsLocked(instance, isRadio = channel.isRadio)
             instance.setPropertyString("idle", "yes")
             instance.setPropertyString("start", "none")
             instance.setPropertyDouble("volume", MPV_VOLUME_FULL)
-            instance.setPropertyString("vid", if (explicitAudioOnly) "no" else "auto")
-            videoOutputDisabled = explicitAudioOnly
-            syncAudioMeterFilterLocked(instance, audioMeteringEnabled && explicitAudioOnly)
+            configureVideoModeForStartLocked(instance, audioOnly = explicitAudioOnly)
+            syncAudioMeterFilterLocked(
+                instance,
+                shouldAttachAudioMeterFilter(
+                    isPlaybackActive = true,
+                    isRadio = channel.isRadio,
+                    isAudioStage = explicitAudioOnly,
+                    radioAmbientGlowEnabled = radioAmbientGlowEnabled,
+                    audioMeteringRequested = audioMeteringEnabled,
+                ),
+            )
             instance.setPropertyBoolean("pause", false)
             if (hasSurface || channel.isRadio) {
                 pendingUrl = null
@@ -515,6 +552,7 @@ class MpvPlaybackEngine(
         lastObservedMpvDurationMs = 0L
         lastPositionEmitElapsedMs = 0L
         lastEmittedPosMs = -1L
+        sessionStartElapsedMs = SystemClock.elapsedRealtime()
         resetSeekTracking()
         lastGrowingServerSec = 0L
         lastGrowingTickElapsedMs = 0L
@@ -599,11 +637,21 @@ class MpvPlaybackEngine(
             applyAspectModeLocked(instance, currentAspectMode)
             applySubtitlePreferenceLocked(instance, currentSubtitlePreference)
             configureDvrCacheLocked(instance, isGrowing)
+            applyCachePauseSettingsLocked(instance, isRadio = isRadio)
+            applyDemuxerProbeSettingsLocked(instance, isRadio = isRadio)
             instance.setPropertyString("idle", "yes")
             instance.setPropertyDouble("volume", MPV_VOLUME_FULL)
-            instance.setPropertyString("vid", if (explicitAudioOnly) "no" else "auto")
-            videoOutputDisabled = explicitAudioOnly
-            syncAudioMeterFilterLocked(instance, audioMeteringEnabled && explicitAudioOnly)
+            configureVideoModeForStartLocked(instance, audioOnly = explicitAudioOnly)
+            syncAudioMeterFilterLocked(
+                instance,
+                shouldAttachAudioMeterFilter(
+                    isPlaybackActive = true,
+                    isRadio = isRadio,
+                    isAudioStage = explicitAudioOnly,
+                    radioAmbientGlowEnabled = radioAmbientGlowEnabled,
+                    audioMeteringRequested = audioMeteringEnabled,
+                ),
+            )
             instance.setPropertyBoolean("pause", false)
             if (needsColdBinarySearch) {
                 return@submitMpvTask
@@ -1191,6 +1239,11 @@ class MpvPlaybackEngine(
         if (!enabled) {
             stopAudioMeterPolling()
         }
+    }
+
+    override fun setRadioAmbientGlowEnabled(enabled: Boolean) {
+        radioAmbientGlowEnabled = enabled
+        _radioAmbientGlowEnabled.value = enabled
     }
 
     override fun attachSurface(surface: Surface, width: Int, height: Int) {
@@ -1810,6 +1863,7 @@ class MpvPlaybackEngine(
             }
             "paused-for-cache" -> {
                 mpvPausedForCache = value
+                Log.d(TAG, "paused-for-cache=$value radio=${activeChannel?.isRadio == true}")
                 _state.update { current ->
                     if (current.status == PlaybackStatus.IDLE || current.status == PlaybackStatus.ERROR) {
                         current
@@ -1946,6 +2000,8 @@ class MpvPlaybackEngine(
                 if (eventId == MPV.mpvEvent.MPV_EVENT_FILE_LOADED) {
                     hadFileLoaded = true
                     retriedLiveReconnect = false
+                    val elapsed = if (sessionStartElapsedMs > 0L) SystemClock.elapsedRealtime() - sessionStartElapsedMs else -1L
+                    Log.i(TAG, "event=FILE_LOADED elapsedMs=$elapsed radio=${activeChannel?.isRadio == true}")
                 } else if (eventId == MPV.mpvEvent.MPV_EVENT_PLAYBACK_RESTART &&
                     completedSeekSeq >= seekRequestSeq.get()
                 ) {
@@ -2095,6 +2151,8 @@ class MpvPlaybackEngine(
                             instance.command("stop")
                             liveStrategy.stopActive()
                             configureLiveTimeshiftLocked(instance, currentTimeshiftWindow)
+                            applyCachePauseSettingsLocked(instance, isRadio = channel.isRadio)
+                            applyDemuxerProbeSettingsLocked(instance, isRadio = channel.isRadio)
                             instance.setPropertyBoolean("pause", false)
                             pendingLoadGeneration = eventGen
                             instance.command("loadfile", url)
@@ -2528,8 +2586,62 @@ class MpvPlaybackEngine(
         private const val BACK_CACHE_SEEK_MARGIN_MS = 2_000L
         private const val COLD_RESUME_BINARY_SEARCH_MIN_SEC = 15L
         private const val TIMESHIFT_NEARLY_FULL_NOTICE = "Timeshift pause buffer nearly full"
+        internal const val RADIO_CACHE_PAUSE_WAIT_ARG = "0.95"
+        internal const val DEFAULT_CACHE_PAUSE_WAIT_ARG = "1.0"
+        internal const val RADIO_DEMUXER_LAVF_O = "analyzeduration=500000,probesize=262144"
+        internal const val VIDEO_DEMUXER_LAVF_O = "analyzeduration=2500000,probesize=2097152"
+        internal const val RADIO_ANALYZE_DURATION_SEC = 0.5
+        internal const val VIDEO_ANALYZE_DURATION_SEC = 2.5
+        internal const val RADIO_PROBE_SIZE_BYTES = 262144L
+        internal const val VIDEO_PROBE_SIZE_BYTES = 2097152L
+    }
+
+    private fun applyCachePauseSettingsLocked(instance: MPV, isRadio: Boolean) {
+        instance.setPropertyString("cache-pause", "yes")
+        instance.setPropertyString("cache-pause-initial", "yes")
+        instance.setPropertyString("cache-pause-wait", resolveCachePauseWaitArg(isRadio))
+    }
+
+    private fun applyDemuxerProbeSettingsLocked(instance: MPV, isRadio: Boolean) {
+        val lavfOpts = resolveDemuxerLavfOptions(isRadio)
+        val analyzeSec = if (isRadio) RADIO_ANALYZE_DURATION_SEC else VIDEO_ANALYZE_DURATION_SEC
+        val probeBytes = if (isRadio) RADIO_PROBE_SIZE_BYTES else VIDEO_PROBE_SIZE_BYTES
+        val rc1 = instance.setPropertyString("demuxer-lavf-o", lavfOpts)
+        val rc2 = instance.setPropertyDouble("demuxer-lavf-analyzeduration", analyzeSec)
+        val rc3 = instance.setPropertyLong("demuxer-lavf-probesize", probeBytes)
+        if (rc1 < 0 || rc2 < 0 || rc3 < 0) {
+            Log.w(TAG, "demuxer probe props radio=$isRadio rc=($rc1,$rc2,$rc3)")
+        }
+    }
+
+    private fun configureVideoModeForStartLocked(instance: MPV, audioOnly: Boolean) {
+        if (audioOnly) {
+            instance.setPropertyString("vid", "no")
+            instance.setPropertyString("vo", "null")
+            instance.setPropertyString("force-window", "no")
+        } else {
+            instance.setPropertyString("vid", "auto")
+        }
+        videoOutputDisabled = audioOnly
     }
 }
+
+internal fun resolveCachePauseWaitArg(isRadio: Boolean): String =
+    if (isRadio) MpvPlaybackEngine.RADIO_CACHE_PAUSE_WAIT_ARG else MpvPlaybackEngine.DEFAULT_CACHE_PAUSE_WAIT_ARG
+
+internal fun resolveDemuxerLavfOptions(isRadio: Boolean): String =
+    if (isRadio) MpvPlaybackEngine.RADIO_DEMUXER_LAVF_O else MpvPlaybackEngine.VIDEO_DEMUXER_LAVF_O
+
+internal fun shouldAttachAudioMeterFilter(
+    isPlaybackActive: Boolean,
+    isRadio: Boolean,
+    isAudioStage: Boolean,
+    radioAmbientGlowEnabled: Boolean,
+    audioMeteringRequested: Boolean,
+): Boolean = isPlaybackActive && (
+    (isRadio && radioAmbientGlowEnabled) ||
+        (audioMeteringRequested && isAudioStage)
+    )
 
 internal fun computeLiveVideoRestoreSeekSec(
     posSec: Double?,
