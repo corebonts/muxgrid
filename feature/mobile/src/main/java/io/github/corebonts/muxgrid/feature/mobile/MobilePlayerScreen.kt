@@ -416,8 +416,7 @@ internal fun MobilePlayerScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier
-                        .padding(horizontal = 32.dp)
-                        .padding(bottom = if (hudVisible && !isInPip) 170.dp else 32.dp, top = 32.dp),
+                        .padding(32.dp),
                 ) {
                     if (activeChannel != null) {
                         ChannelPiconBadge(
