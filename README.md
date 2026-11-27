@@ -35,7 +35,7 @@ Built as a **single unified codebase** producing ABI-split APKs for Android phon
 - **Live TV & Radio:**
   - Instant channel zapping on LAN via Tvheadend's `pass` (MPEG-TS) stream profile with zero server-side transcoding.
   - Native broadcast decoding via `libmpv`: `1080i` interlaced H.264 (with `bwdif` software deinterlacing on mobile and zero-copy hardware decoding on TV), `MP2`/`AC3`/`AAC` audio track switching, and bitmap DVB subtitles (`DVBSUB`).
-  - Channel filtering (`All`, `TV`, `Radio`, `Favorites`, and server channel tags), automatic real-time metadata sync, and clear tuner-conflict notices on single-tuner servers.
+  - Channel filtering (`All`, `TV`, `Radio`, `Favorites`, and server channel tags), automatic real-time metadata sync, audio-reactive **Ambient Radio Glow** stage for radio channels, and clear tuner-conflict notices on single-tuner servers.
 - **Live Timeshift (Pause & Rewind):**
   - Disk-backed local `libmpv` ring buffer with configurable size limits in Settings (`Off`, `512 MB`, `1 GB`, `2 GB`, `4 GB`), free-space checks, and automatic recovery when pause reaches the forward buffer cap.
   - Buffered-range seekbar with `-MM:SS · Back to Live` quick jump.
@@ -51,8 +51,8 @@ Built as a **single unified codebase** producing ABI-split APKs for Android phon
   - Media3 `MediaSessionService` foreground playback with lock-screen controls, Bluetooth/headset media keys, audio focus handling, headphone-disconnect pause, and Wi-Fi/partial wake locks.
   - Persistent mini-player bar and unified **Background Playback** selector (`Off`, `Audio` with `vid=no` backgrounding, or `PiP`) in Settings, with automatic radio backgrounding.
 - **Tailored Mobile & 10-ft TV Controls:**
-  - **Mobile:** Double-tap seek (`-10s` / `+30s`), vertical edge drags for brightness and volume, aspect ratio selector, in-player **Playback Info** diagnostics, persisted subtitle preferences, Quick-Zap channel drawer, adaptive tablet/landscape layout, **Auto / Light / Dark** themes, configurable **Start Screen**, and Haze backdrop blur on non-video chrome.
-  - **Android TV:** Collapsible left Navigation Rail (`androidx.tv:tv-material`), instant `Ch+`/`Ch-` / D-pad Up/Down zapping with minimal OSD, progressive D-pad seeking (`10s → 30s → 1m → 5m → 10m` tap ladder with gear-locked continuous hold capped at `30s`), in-player **Playback Info** panel, **Auto / Light / Dark** themes, configurable **Start Screen**, and an overlay Quick Channel Strip.
+  - **Mobile:** Swipeable category/filter tabs on Live TV and Recordings, double-tap seek (`-10s` / `+30s`), vertical edge drags for brightness and volume, aspect ratio selector, in-player **Playback Info** diagnostics, persisted subtitle preferences, Quick-Zap channel drawer, adaptive tablet/landscape layout, **Auto / Light / Dark** themes, in-app **Language** selector (English & Hungarian, plus Android 13+ per-app language), configurable **Start Screen**, and Haze backdrop blur on non-video chrome.
+  - **Android TV:** Collapsible left Navigation Rail (`androidx.tv:tv-material`), instant `Ch+`/`Ch-` / D-pad Up/Down zapping with minimal OSD, progressive D-pad seeking (`10s → 30s → 1m → 5m → 10m` tap ladder with gear-locked continuous hold capped at `30s`), in-player **Playback Info** panel, **Auto / Light / Dark** themes, in-app **Language** selector, configurable **Start Screen**, and an overlay Quick Channel Strip.
 
 ## Server Setup (Tvheadend)
 

@@ -40,7 +40,7 @@ Navigation stays minimal and consistent across both form factors:
 1. **Live** — Channel cards/rows with Now/Next program, live progress bar, and one-tap/click playback.
 2. **Guide** — Electronic Program Guide (EPG) for browsing upcoming broadcasts and scheduling recordings.
 3. **Recordings** — Active (`Recording Now`), Completed (grouped cleanly by series/title), and Scheduled timers.
-4. **Settings** — Responsive full-width / two-column layout with Server card (connection status, error details, quick Retry & Edit), General (**Start Screen**, **Theme** `Auto` / `Light` / `Dark`), Decoder/Deinterlace preset, Timeshift cache limit, unified mobile **Background Playback** selector (`Off` / `Audio` / `PiP`), and **App Info** (version, build ABI/Git SHA, **Licenses & Notices** with offline GPLv3 / Apache-2.0 texts, copyable debug report).
+4. **Settings** — Responsive full-width / two-column layout with Server card (connection status, error details, quick Retry & Edit, **Server Diagnostics**), General (**Start Screen**, **Theme** `Auto` / `Light` / `Dark`, **Language** `System Default` / `English` / `Magyar`), **Radio Ambient Glow** toggle, Decoder/Deinterlace preset, Timeshift cache limit, unified mobile **Background Playback** selector (`Off` / `Audio` / `PiP`), and **App Info** (version, build ABI/Git SHA, **Licenses & Notices** with offline GPLv3 / Apache-2.0 texts, copyable debug report).
 
 ---
 
@@ -55,7 +55,7 @@ Navigation stays minimal and consistent across both form factors:
 
 ### Screen Layouts
 - **Live Screen:**
-  - Top horizontal underline filter tabs (`All`, `TV`, `Radio`, `Favorites`, plus Tvheadend server tags).
+  - Top horizontal underline filter tabs (`All`, `TV`, `Radio`, `Favorites`, plus Tvheadend server tags) paired with a synchronized swipeable `HorizontalPager`.
   - Channel rows/cards: picon badge, tabular channel number, channel name, **Now** title + thin progress bar + remaining minutes, subtle **Next** preview.
   - Long-press a channel to open the channel details & actions sheet (**Watch Live**, **Watch from Start** or **Resume Chase Play** + **Start Over** when actively recording, **Record Now** / **Stop & Save** / **Abort Recording** / **Cancel Timer**, **Add to / Remove from Favorites**, **View in Guide**).
 - **Guide (EPG) Screen:**
@@ -63,10 +63,10 @@ Navigation stays minimal and consistent across both form factors:
   - **Portrait Phone:** Hides the `"CHANNELS"` header label and smoothly collapses the channel column from `124dp` down to `46dp` (icon + padding) as you scroll forward into the future, expanding back when returning to **Now**.
   - Tap any program in either layout to open a modal bottom sheet with full description, time, channel, live progress bar (when currently airing), and unified DVR actions (**Watch Live** / **Watch Channel**, **Watch from Start** or **Resume Chase Play** + **Start Over**, **Record** / **Record Now**, **Stop & Save**, **Abort Recording**, **Cancel Timer**, or **Play Recording** / **Resume Recording** + **Start Over**).
 - **Recordings Screen:**
-  - Underline filter tabs (`All`, `Completed`, `Scheduled`) and stacked sections for **Recording Now** (coral badge, live elapsed duration, **Watch from Start** / **Resume Chase Play** + **Start Over**, **Stop & Save**, and detail sheet), **Completed** (grouped by series/title with episode count, resume progress bar, watched badge, **Play Recording** / **Resume Recording** + **Start Over**, **Mark as Watched** / **Mark as Unwatched**, **Delete Recording**), and **Scheduled** (tapping opens the unified program detail sheet with **Watch Channel** and **Cancel Timer**).
+  - Underline filter tabs (`All`, `Completed`, `Scheduled`) paired with a synchronized swipeable `HorizontalPager` and stacked sections for **Recording Now** (coral badge, live elapsed duration, **Watch from Start** / **Resume Chase Play** + **Start Over**, **Stop & Save**, and detail sheet), **Completed** (grouped by series/title with episode count, resume progress bar, watched badge, **Play Recording** / **Resume Recording** + **Start Over**, **Mark as Watched** / **Mark as Unwatched**, **Delete Recording**), and **Scheduled** (tapping opens the unified program detail sheet with **Watch Channel** and **Cancel Timer**).
 
 ### Mobile Fullscreen Player
-- Edge-to-edge immersive video.
+- Edge-to-edge immersive video (or centered radio stage with audio-reactive **Ambient Radio Glow** when playing radio channels).
 - **Tap** video: toggles top & bottom dark scrim HUD (auto-hides while playing).
 - **Top bar:** Back button, Channel picon + Title + Current Show, minimize/background action (**PiP** or **Background Audio** depending on mode), **Playback Info**, and **Display Options** (Audio / Subtitles / Aspect / Decoder preset).
 - **Bottom bar:**
@@ -97,6 +97,7 @@ Designed strictly for **10-foot viewing** and a standard TV remote (`D-pad`, `OK
 - **Recordings Screen:** Horizontal shelves (`Recording Now`, `Continue Watching`, `All Recordings`, `Scheduled`). Selecting any card opens the unified details & actions modal matching the Guide modal.
 
 ### TV Fullscreen Player (Zero-Friction Remote Controls)
+- Renders edge-to-edge video or the 10-ft `TvAudioStage` with audio-reactive **Ambient Radio Glow** for radio channels.
 - **Channel Zapping (`Ch+`/`Ch-` or `D-pad Up` while HUD hidden):** Stops the previous stream cleanly, tunes the next/previous channel, and displays a minimal bottom-left OSD pill fading after 3 seconds.
 - **HUD Open (`OK`/`Select` or `D-pad Down` while HUD hidden):** Reveals the translucent dark scrim bottom HUD with focusable seek bar, `|<` (**Watch from Start** / **Resume Chase Play** / **Start Over**), `-30s`, `Play/Pause`, `+30s`, `>|` (**Watch Live** when behind the live edge or watching an in-progress recording), `Stop`, `Ch-`/`Ch+`, **Display Options**, **Playback Info**, and horizontal **Quick Channel Strip**.
 - **Progressive Seeking (`D-pad Left`/`Right` while HUD hidden or on focused seek bar):** Quick taps follow an exact-target ladder (`10s → 30s → 1m → 5m → 10m`, then `+5m` per tap, stepping back down on opposite taps), while holding scrubs continuously at the active tap's step size (capped at `30s` per throttled tick) with instant preview timestamp and settle/release commit.
