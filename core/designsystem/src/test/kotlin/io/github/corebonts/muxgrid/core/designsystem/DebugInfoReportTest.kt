@@ -39,7 +39,7 @@ class DebugInfoReportTest {
             totalStorageBytes = 8L * 1024L * 1024L * 1024L,
             decoderPreset = HwDecPreset.MEDIACODEC_ZERO_COPY,
             timeshiftWindow = TimeshiftWindow.MB_512,
-            themeMode = ThemeMode.DARK,
+            themeMode = ThemeMode.AMBER,
             backgroundPlaybackMode = null,
             pipStatus = "N/A (TV)",
             serverSoftwareSummary = "Tvheadend 4.3-2375 (HTSP v34)",

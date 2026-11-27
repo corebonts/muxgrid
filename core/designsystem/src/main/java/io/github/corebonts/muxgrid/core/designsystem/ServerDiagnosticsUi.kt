@@ -271,7 +271,7 @@ fun ServerDiagnosticsDetailContent(
                     .fillMaxWidth()
                     .clip(MuxGridShapes.Card)
                     .background(MuxGridColors.CardSurface)
-                    .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
+                    .border(MuxGridBorders.Hairline, MuxGridColors.CardBorder, MuxGridShapes.Card)
                     .padding(14.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -370,7 +370,7 @@ fun ServerDiagnosticsDetailContent(
                 .fillMaxWidth()
                 .clip(MuxGridShapes.Card)
                 .background(MuxGridColors.CardSurface)
-                .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card),
+                .border(MuxGridBorders.Hairline, MuxGridColors.CardBorder, MuxGridShapes.Card),
         ) {
             report.items.forEachIndexed { idx, item ->
                 if (idx > 0) {

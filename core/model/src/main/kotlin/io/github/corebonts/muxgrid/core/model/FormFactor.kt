@@ -60,20 +60,20 @@ enum class ThemeMode(
     val label: String,
     val description: String,
 ) {
-    AUTO("Auto", "Follows system appearance"),
-    LIGHT("Light", "Daylight monitor light theme"),
-    DARK("Dark", "Broadcast monitor dark theme"),
+    CARBON("Carbon", "Pure broadcast obsidian carbon with Signal Amber cues"),
+    AMBER("Amber", "Warm espresso Mica surfaces with rich amber highlights"),
+    AURORA("Aurora", "Teal, rose & sapphire ambient aurora with frosted glass cards"),
+    INDIGO("Indigo", "Nocturnal twilight slate with cyan-violet accents"),
     ;
 
     companion object {
-        fun defaultFor(formFactor: FormFactor): ThemeMode = when (formFactor) {
-            FormFactor.PHONE -> AUTO
-            FormFactor.TV -> DARK
-        }
+        val DEFAULT: ThemeMode = AMBER
 
-        fun fromPersisted(raw: String?, formFactor: FormFactor): ThemeMode =
+        fun defaultFor(formFactor: FormFactor): ThemeMode = DEFAULT
+
+        fun fromPersisted(raw: String?, formFactor: FormFactor = FormFactor.PHONE): ThemeMode =
             raw?.let { entries.firstOrNull { mode -> mode.name == it } }
-                ?: defaultFor(formFactor)
+                ?: DEFAULT
     }
 }
 

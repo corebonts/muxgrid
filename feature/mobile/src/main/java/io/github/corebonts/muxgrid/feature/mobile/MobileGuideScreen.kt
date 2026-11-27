@@ -36,11 +36,8 @@ import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -59,9 +56,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
@@ -100,6 +100,8 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridDetailModalLayout
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridDivider
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridModalSheet
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridPrimaryActionButton
+import io.github.corebonts.muxgrid.core.designsystem.MuxGridSecondaryButton
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridSyncingState
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
@@ -657,152 +659,113 @@ internal fun MobileGuideScreen(
                 },
                 actionsContent = {
                     if (detailChannel != null) {
-                        Button(
+                        MuxGridPrimaryActionButton(
+                            text = stringResource(if (isLiveNow) DesignR.string.live_watch_live else DesignR.string.live_watch_channel),
+                            leadingIcon = MuxGridIcons.Play,
                             enabled = !actionBusy,
                             onClick = {
                                 selectedEventKey = null
                                 onWatchChannel(detailChannel)
                             },
-                            shape = MuxGridShapes.Sm,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MuxGridColors.Accent,
-                                contentColor = MuxGridColors.OnAccent,
-                            ),
                             modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                stringResource(if (isLiveNow) DesignR.string.live_watch_live else DesignR.string.live_watch_channel),
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                            )
-                        }
+                        )
                     }
 
                     when (linkedDvr?.state) {
                         DvrState.RECORDING -> {
-                            OutlinedButton(
+                            MuxGridSecondaryButton(
+                                text = stringResource(
+                                    if (linkedDvr.hasResumePosition) DesignR.string.recordings_resume_chase_play else DesignR.string.recordings_watch_from_start,
+                                ),
+                                leadingIcon = if (linkedDvr.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
+                                contentColor = MuxGridColors.AccentSoft,
                                 enabled = !actionBusy,
-                                shape = MuxGridShapes.Sm,
                                 onClick = {
                                     selectedEventKey = null
                                     onPlayRecording(linkedDvr, detailChannel, linkedDvr.effectiveStartSec)
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Icon(
-                                    imageVector = if (linkedDvr.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
-                                    contentDescription = null,
-                                    tint = MuxGridColors.AccentSoft,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = stringResource(
-                                        if (linkedDvr.hasResumePosition) DesignR.string.recordings_resume_chase_play else DesignR.string.recordings_watch_from_start,
-                                    ),
-                                    color = MuxGridColors.AccentSoft,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                )
-                            }
+                            )
                             if (linkedDvr.hasResumePosition) {
-                                OutlinedButton(
+                                MuxGridSecondaryButton(
+                                    text = stringResource(DesignR.string.recordings_start_over),
+                                    leadingIcon = MuxGridIcons.Replay,
                                     enabled = !actionBusy,
-                                    shape = MuxGridShapes.Sm,
                                     onClick = {
                                         selectedEventKey = null
                                         onPlayRecording(linkedDvr, detailChannel, 0L)
                                     },
                                     modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(stringResource(DesignR.string.recordings_start_over), color = MuxGridColors.TextPrimary, maxLines = 1)
-                                }
+                                )
                             }
-                            OutlinedButton(
+                            MuxGridSecondaryButton(
+                                text = stringResource(DesignR.string.recordings_stop_and_save),
+                                leadingIcon = MuxGridIcons.Stop,
                                 enabled = !actionBusy,
-                                shape = MuxGridShapes.Sm,
                                 onClick = {
                                     pendingConfirm = DvrConfirmKind.STOP_AND_SAVE to linkedDvr
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Icon(MuxGridIcons.Stop, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(stringResource(DesignR.string.recordings_stop_and_save), color = MuxGridColors.TextPrimary, maxLines = 1)
-                            }
-                            OutlinedButton(
+                            )
+                            MuxGridSecondaryButton(
+                                text = stringResource(DesignR.string.recordings_abort_recording),
+                                leadingIcon = MuxGridIcons.Cancel,
+                                contentColor = MuxGridColors.CoralLive,
                                 enabled = !actionBusy,
-                                shape = MuxGridShapes.Sm,
                                 onClick = {
                                     pendingConfirm = DvrConfirmKind.ABORT_RECORDING to linkedDvr
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(stringResource(DesignR.string.recordings_abort_recording), color = MuxGridColors.CoralLive, maxLines = 1)
-                            }
+                            )
                         }
                         DvrState.COMPLETED -> if (!linkedDvr.isFileMissing) {
-                            OutlinedButton(
+                            MuxGridSecondaryButton(
+                                text = stringResource(
+                                    if (linkedDvr.hasResumePosition) DesignR.string.recordings_resume_recording else DesignR.string.recordings_play_recording,
+                                ),
+                                leadingIcon = MuxGridIcons.Play,
+                                contentColor = MuxGridColors.AccentSoft,
                                 enabled = !actionBusy,
-                                shape = MuxGridShapes.Sm,
                                 onClick = {
                                     selectedEventKey = null
                                     onPlayRecording(linkedDvr, detailChannel, linkedDvr.effectiveStartSec)
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Icon(MuxGridIcons.Play, contentDescription = null, tint = MuxGridColors.AccentSoft, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = stringResource(
-                                        if (linkedDvr.hasResumePosition) DesignR.string.recordings_resume_recording else DesignR.string.recordings_play_recording,
-                                    ),
-                                    color = MuxGridColors.AccentSoft,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                )
-                            }
+                            )
                             if (linkedDvr.hasResumePosition) {
-                                OutlinedButton(
+                                MuxGridSecondaryButton(
+                                    text = stringResource(DesignR.string.recordings_start_over),
+                                    leadingIcon = MuxGridIcons.Replay,
                                     enabled = !actionBusy,
-                                    shape = MuxGridShapes.Sm,
                                     onClick = {
                                         selectedEventKey = null
                                         onPlayRecording(linkedDvr, detailChannel, 0L)
                                     },
                                     modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(stringResource(DesignR.string.recordings_start_over), color = MuxGridColors.TextPrimary, maxLines = 1)
-                                }
+                                )
                             }
                         }
                         DvrState.SCHEDULED -> {
-                            OutlinedButton(
+                            MuxGridSecondaryButton(
+                                text = stringResource(DesignR.string.recordings_cancel_timer),
+                                leadingIcon = MuxGridIcons.Cancel,
+                                contentColor = MuxGridColors.CoralLive,
                                 enabled = !actionBusy,
-                                shape = MuxGridShapes.Sm,
                                 onClick = {
                                     pendingConfirm = DvrConfirmKind.CANCEL_TIMER to linkedDvr
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(stringResource(DesignR.string.recordings_cancel_timer), color = MuxGridColors.CoralLive, maxLines = 1)
-                            }
+                            )
                         }
                         else -> if (!isPast) {
                             val scheduleFailedMsg = stringResource(DesignR.string.recordings_error_schedule_failed)
-                            OutlinedButton(
+                            MuxGridSecondaryButton(
+                                text = stringResource(
+                                    if (isLiveNow) DesignR.string.recordings_record_now else DesignR.string.recordings_record,
+                                ),
+                                leadingIcon = MuxGridIcons.Record,
+                                contentColor = MuxGridColors.CoralLive,
                                 enabled = !actionBusy,
-                                shape = MuxGridShapes.Sm,
                                 onClick = {
                                     scope.launch {
                                         actionBusy = true
@@ -817,17 +780,7 @@ internal fun MobileGuideScreen(
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Icon(MuxGridIcons.Record, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = stringResource(
-                                        if (isLiveNow) DesignR.string.recordings_record_now else DesignR.string.recordings_record,
-                                    ),
-                                    color = MuxGridColors.CoralLive,
-                                    maxLines = 1,
-                                )
-                            }
+                            )
                         }
                     }
                 },
@@ -879,12 +832,12 @@ private fun TimelineNowChip(
     Box(
         modifier = Modifier
             .height(30.dp)
-            .clip(MuxGridShapes.Sm)
+            .clip(MuxGridShapes.Control)
             .background(bg)
             .border(
-                width = MuxGridBorders.Divider,
-                color = if (highlighted) MuxGridColors.Accent else MuxGridColors.HairlineBorder,
-                shape = MuxGridShapes.Sm,
+                width = MuxGridBorders.Hairline,
+                color = if (highlighted) MuxGridColors.Accent else MuxGridColors.CardBorder,
+                shape = MuxGridShapes.Control,
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp),
@@ -1077,14 +1030,12 @@ private fun MobileTimelineGrid(
                                 .width(currentChannelColWidth)
                                 .fillMaxHeight()
                                 .padding(end = 4.dp)
-                                .clip(MuxGridShapes.Sm)
+                                .clip(MuxGridShapes.EpgCell)
                                 .background(if (chFocused) MuxGridColors.CardSurfaceElevated else baseCellBg)
-                                .then(
-                                    if (chFocused) {
-                                        Modifier.border(MuxGridBorders.Focused, MuxGridColors.FocusBorder, MuxGridShapes.Sm)
-                                    } else {
-                                        Modifier
-                                    },
+                                .border(
+                                    width = if (chFocused) MuxGridBorders.Focused else MuxGridBorders.Hairline,
+                                    color = if (chFocused) MuxGridColors.FocusBorder else MuxGridColors.CardBorder,
+                                    shape = MuxGridShapes.EpgCell,
                                 )
                                 .onFocusChanged { if (chFocused != it.isFocused) chFocused = it.isFocused }
                                 .clickable { onWatchChannel(channel) }
@@ -1141,7 +1092,7 @@ private fun MobileTimelineGrid(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .clip(MuxGridShapes.Xs)
+                                        .clip(MuxGridShapes.EpgCell)
                                         .background(baseCellBg.copy(alpha = 0.55f))
                                         .padding(horizontal = 8.dp),
                                     contentAlignment = Alignment.CenterStart,
@@ -1158,6 +1109,7 @@ private fun MobileTimelineGrid(
                                 val isLiveNow = nowEpochSec in ev.startEpochSec until ev.stopEpochSec
                                 val isPast = ev.stopEpochSec <= nowEpochSec
                                 val linkedDvr = dvrIndex.findMatch(ev)
+                                val isRecording = linkedDvr?.state == DvrState.RECORDING
                                 val evFocusKey = "ev_${channel.id}_${ev.id}"
                                 val evFocusRequester = remember(evFocusKey) { FocusRequester() }
                                 DisposableEffect(evFocusKey) {
@@ -1173,30 +1125,40 @@ private fun MobileTimelineGrid(
                                     "${formatEpochHm(ev.startEpochSec)}–${formatEpochHm(ev.stopEpochSec)}"
                                 }
                                 val cellBg = when {
-                                    evFocused -> MuxGridColors.Accent.copy(alpha = 0.20f)
-                                    isLiveNow -> MuxGridColors.CardSurfaceElevated
+                                    evFocused -> MuxGridColors.Accent.copy(alpha = 0.22f)
+                                    isLiveNow -> MuxGridColors.EpgLiveSurface
                                     else -> baseCellBg
+                                }
+                                val liveStripColor = when {
+                                    isRecording -> MuxGridColors.CoralLive
+                                    isLiveNow -> MuxGridColors.Accent
+                                    else -> null
                                 }
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .clip(MuxGridShapes.Xs)
+                                        .clip(MuxGridShapes.EpgCell)
                                         .background(cellBg)
-                                        .then(
-                                            when {
-                                                evFocused -> Modifier.border(
-                                                    MuxGridBorders.Focused,
-                                                    MuxGridColors.FocusBorder,
-                                                    MuxGridShapes.Xs,
-                                                )
-                                                linkedDvr?.state == DvrState.RECORDING -> Modifier.border(
-                                                    MuxGridBorders.Hairline,
-                                                    MuxGridColors.CoralLive.copy(alpha = 0.65f),
-                                                    MuxGridShapes.Xs,
-                                                )
-                                                else -> Modifier
+                                        .border(
+                                            width = if (evFocused) MuxGridBorders.Focused else MuxGridBorders.Hairline,
+                                            color = when {
+                                                evFocused -> MuxGridColors.FocusBorder
+                                                isRecording -> MuxGridColors.CoralLive.copy(alpha = 0.65f)
+                                                isLiveNow -> MuxGridColors.EpgLiveBorder
+                                                else -> MuxGridColors.CardBorder
                                             },
+                                            shape = MuxGridShapes.EpgCell,
                                         )
+                                        .drawWithContent {
+                                            drawContent()
+                                            if (liveStripColor != null) {
+                                                drawRect(
+                                                    color = liveStripColor,
+                                                    topLeft = Offset.Zero,
+                                                    size = Size(3.dp.toPx(), size.height),
+                                                )
+                                            }
+                                        }
                                         .focusRequester(evFocusRequester)
                                         .onPreviewKeyEvent { keyEvent ->
                                             if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false

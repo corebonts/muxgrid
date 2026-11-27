@@ -62,6 +62,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
@@ -99,6 +100,7 @@ import io.github.corebonts.muxgrid.core.designsystem.MuxGridIcons
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridSeekBar
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridType
+import io.github.corebonts.muxgrid.core.designsystem.muxGridAccentBrush
 import io.github.corebonts.muxgrid.core.designsystem.PlaybackInfoPanel
 import io.github.corebonts.muxgrid.core.designsystem.TimeshiftNoticeBanner
 import io.github.corebonts.muxgrid.core.designsystem.TrackAndPresetPanel
@@ -418,6 +420,10 @@ internal fun MobilePlayerScreen(
                         audioLevelsProvider = { playbackEngine.audioLevels.value },
                         playbackStatus = playbackState.status,
                         isPaused = playbackState.isPaused,
+                        backgroundColor = lerp(Color.Black, MuxGridColors.CanvasTv, 0.70f),
+                        glowColor1 = MuxGridColors.RadioGlow1,
+                        glowColor2 = MuxGridColors.RadioGlow2,
+                        glowColor3 = MuxGridColors.RadioGlow3,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -1417,7 +1423,10 @@ private fun TopHudIconButton(
 ) {
     Box(
         modifier = Modifier
-            .size(34.dp)
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(MuxGridColors.ScrimSurface.copy(alpha = 0.65f))
+            .border(MuxGridBorders.Hairline, MuxGridColors.ScrimControlBorder, CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -1452,9 +1461,9 @@ private fun CompactHudButton(
         Box(
             modifier = Modifier
                 .size(32.dp)
-                .clip(MuxGridShapes.Sm)
+                .clip(MuxGridShapes.Control)
                 .background(MuxGridColors.ScrimSurface)
-                .border(MuxGridBorders.Hairline, borderColor, MuxGridShapes.Sm)
+                .border(MuxGridBorders.Hairline, borderColor, MuxGridShapes.Control)
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
@@ -1479,11 +1488,6 @@ private fun CenterTransportButton(
     highlighted: Boolean = false,
     borderColor: Color? = null,
 ) {
-    val bgColor = when {
-        highlighted && enabled -> MuxGridColors.Accent
-        enabled -> Color.Black.copy(alpha = 0.48f)
-        else -> Color.Black.copy(alpha = 0.28f)
-    }
     val tintColor = when {
         highlighted && enabled -> MuxGridColors.OnAccent
         enabled -> Color.White
@@ -1493,7 +1497,14 @@ private fun CenterTransportButton(
         modifier = Modifier
             .size(size)
             .clip(CircleShape)
-            .background(bgColor)
+            .then(
+                if (highlighted && enabled) {
+                    Modifier.background(muxGridAccentBrush())
+                } else {
+                    val bgColor = if (enabled) Color.Black.copy(alpha = 0.48f) else Color.Black.copy(alpha = 0.28f)
+                    Modifier.background(bgColor)
+                },
+            )
             .then(
                 if (borderColor != null && enabled && !highlighted) {
                     Modifier.border(MuxGridBorders.Hairline, borderColor, CircleShape)

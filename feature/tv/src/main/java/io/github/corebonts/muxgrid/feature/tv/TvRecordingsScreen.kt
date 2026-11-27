@@ -763,6 +763,9 @@ private fun TvRecordingShelf(
                             focusedContainerColor = MuxGridColors.CardSurfaceElevated,
                             focusBorderColor = MuxGridColors.FocusBorder,
                             focusBorderWidth = MuxGridBorders.FocusedCard,
+                            unfocusedBorderColor = MuxGridColors.CardBorder,
+                            unfocusedBorderWidth = MuxGridBorders.Hairline,
+                            topHighlightColor = MuxGridColors.CardTopHighlight,
                             focusedScale = 1.015f,
                         )
                         .focusRequester(cardFocusRequester)

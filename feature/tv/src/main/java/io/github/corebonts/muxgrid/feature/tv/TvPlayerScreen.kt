@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -51,6 +52,7 @@ import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -72,6 +74,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.tv.material3.Button
+import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.Icon
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
@@ -547,7 +550,7 @@ internal fun TvPlayerScreen(
                         .widthIn(min = 360.dp, max = 520.dp)
                         .fillMaxWidth()
                         .clip(MuxGridShapes.Dialog)
-                        .background(MuxGridColors.CardSurfaceElevated)
+                        .background(MuxGridColors.ModalSurface)
                         .border(MuxGridBorders.Hairline, MuxGridColors.CoralLive.copy(alpha = MuxGridAlphas.BorderEmphasis), MuxGridShapes.Dialog)
                         .focusProperties { this.onExit = { cancelFocusChange() } }
                         .focusGroup()
@@ -604,7 +607,7 @@ internal fun TvPlayerScreen(
                     .widthIn(max = 500.dp)
                     .clip(MuxGridShapes.Card)
                     .background(MuxGridColors.ScrimSurface)
-                    .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
+                    .border(MuxGridBorders.Hairline, MuxGridColors.CardBorder, MuxGridShapes.Card)
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -698,7 +701,7 @@ internal fun TvPlayerScreen(
                     .fillMaxWidth()
                     .clip(MuxGridShapes.Card)
                     .background(MuxGridColors.ScrimSurface)
-                    .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Card)
+                    .border(MuxGridBorders.Hairline, MuxGridColors.CardBorder, MuxGridShapes.Card)
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -1205,8 +1208,15 @@ private fun TvHudControlsRow(
                 onClick = onSeekToLiveEdge,
                 modifier = Modifier.onFocusChanged { onBackToLiveFocusChanged(it.isFocused) },
                 shape = buttonShape,
-                colors = primaryColors,
+                colors = ButtonDefaults.colors(
+                    containerColor = MuxGridColors.AccentContainer,
+                    contentColor = MuxGridColors.AccentSoft,
+                    focusedContainerColor = MuxGridColors.FocusBorder,
+                    focusedContentColor = MuxGridColors.OnFocusBorder,
+                ),
             ) {
+                Box(Modifier.size(7.dp).background(MuxGridColors.CoralLive, CircleShape))
+                Spacer(Modifier.width(6.dp))
                 Text(stringResource(DesignR.string.live_watch_live), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                 Spacer(Modifier.width(6.dp))
                 Icon(
@@ -1219,8 +1229,15 @@ private fun TvHudControlsRow(
             Button(
                 onClick = onSwitchToLive,
                 shape = buttonShape,
-                colors = primaryColors,
+                colors = ButtonDefaults.colors(
+                    containerColor = MuxGridColors.AccentContainer,
+                    contentColor = MuxGridColors.AccentSoft,
+                    focusedContainerColor = MuxGridColors.FocusBorder,
+                    focusedContentColor = MuxGridColors.OnFocusBorder,
+                ),
             ) {
+                Box(Modifier.size(7.dp).background(MuxGridColors.CoralLive, CircleShape))
+                Spacer(Modifier.width(6.dp))
                 Text(stringResource(DesignR.string.live_watch_live), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                 Spacer(Modifier.width(6.dp))
                 Icon(
@@ -1337,13 +1354,13 @@ private fun TvQuickChannelStrip(
                             Modifier
                         },
                     )
-                    .clip(MuxGridShapes.Sm)
+                    .clip(MuxGridShapes.Control)
                     .background(containerColor)
                     .then(
                         when {
-                            isFocused -> Modifier.border(MuxGridBorders.Focused, MuxGridColors.FocusBorder, MuxGridShapes.Sm)
-                            isCurrent -> Modifier.border(MuxGridBorders.Hairline, MuxGridColors.Accent, MuxGridShapes.Sm)
-                            else -> Modifier
+                            isFocused -> Modifier.border(MuxGridBorders.Focused, MuxGridColors.FocusBorder, MuxGridShapes.Control)
+                            isCurrent -> Modifier.border(MuxGridBorders.Hairline, MuxGridColors.Accent, MuxGridShapes.Control)
+                            else -> Modifier.border(MuxGridBorders.Hairline, MuxGridColors.CardBorder, MuxGridShapes.Control)
                         },
                     )
                     .onFocusChanged { state ->
@@ -1410,7 +1427,7 @@ private fun TvAudioStage(
             .fillMaxSize()
             .then(
                 if (radioAmbientGlowEnabled) {
-                    Modifier.background(Color(0xFF040405))
+                    Modifier.background(lerp(Color.Black, MuxGridColors.CanvasTv, 0.70f))
                 } else {
                     Modifier.background(
                         Brush.verticalGradient(
@@ -1426,6 +1443,9 @@ private fun TvAudioStage(
                 audioLevelsProvider = audioLevelsProvider,
                 playbackStatus = playbackState.status,
                 isPaused = playbackState.isPaused,
+                glowColor1 = MuxGridColors.RadioGlow1,
+                glowColor2 = MuxGridColors.RadioGlow2,
+                glowColor3 = MuxGridColors.RadioGlow3,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -1589,12 +1609,12 @@ private fun TvSeekProgressBar(
             .onFocusChanged { onFocusChanged(it.isFocused) }
             .focusRequester(focusRequester)
             .focusable()
-            .clip(MuxGridShapes.Sm)
+            .clip(MuxGridShapes.Control)
             .then(
                 if (focused) {
                     Modifier
                         .background(MuxGridColors.CardSurfaceElevated)
-                        .border(MuxGridBorders.Focused, MuxGridColors.FocusBorder, MuxGridShapes.Sm)
+                        .border(MuxGridBorders.Focused, MuxGridColors.FocusBorder, MuxGridShapes.Control)
                 } else {
                     Modifier
                 },
@@ -1605,6 +1625,7 @@ private fun TvSeekProgressBar(
         LiveProgressBar(
             progress = progress,
             fillColor = fillColor,
+            fillEndColor = if (fillColor == MuxGridColors.Accent) MuxGridColors.AccentGradientEnd else fillColor,
             height = if (focused) 6.dp else 4.dp,
             bufferedFraction = bufferedFraction,
             seekTargetFraction = seekTargetFraction,

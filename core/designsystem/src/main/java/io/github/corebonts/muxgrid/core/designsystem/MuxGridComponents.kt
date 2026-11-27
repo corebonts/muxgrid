@@ -11,6 +11,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,8 +25,10 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -37,14 +40,19 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -64,18 +72,25 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import io.github.corebonts.muxgrid.core.model.ThemeMode
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -136,6 +151,420 @@ fun MuxGridDivider(
             .fillMaxWidth()
             .height(MuxGridBorders.Divider)
             .background(color),
+    )
+}
+
+/**
+ * Draws the shared 1dp top specular rim highlight inside rounded surfaces (prominent on Aurora
+ * frosted glass, subtle on Carbon/Amber/Indigo).
+ */
+fun Modifier.muxGridTopSpecularHighlight(
+    cornerRadius: Dp,
+    highlightColor: Color,
+): Modifier = if (highlightColor.alpha <= 0.005f) {
+    this
+} else {
+    drawWithContent {
+        drawContent()
+        val inset = cornerRadius.toPx().coerceAtMost(size.width * 0.25f)
+        val stroke = 1.dp.toPx()
+        drawLine(
+            color = highlightColor,
+            start = Offset(inset, stroke * 0.5f),
+            end = Offset((size.width - inset).coerceAtLeast(inset), stroke * 0.5f),
+            strokeWidth = stroke,
+        )
+    }
+}
+
+/**
+ * Applies the unified card container chrome (12dp shape, surface fill, 1dp outer border, and
+ * top specular highlight).
+ */
+@Composable
+fun Modifier.muxGridCardSurface(
+    shape: Shape = MuxGridShapes.Card,
+    cornerRadius: Dp = MuxGridRadii.Card,
+    containerColor: Color = MuxGridColors.CardSurface,
+    borderColor: Color = MuxGridColors.CardBorder,
+    topHighlightColor: Color = MuxGridColors.CardTopHighlight,
+): Modifier = this
+    .clip(shape)
+    .background(containerColor)
+    .border(MuxGridBorders.Hairline, borderColor, shape)
+    .muxGridTopSpecularHighlight(cornerRadius, topHighlightColor)
+
+@Composable
+@ReadOnlyComposable
+fun muxGridAccentBrush(
+    startColor: Color = MuxGridColors.Accent,
+    endColor: Color = MuxGridColors.AccentGradientEnd,
+): Brush = if (startColor == endColor) {
+    SolidColor(startColor)
+} else {
+    Brush.horizontalGradient(listOf(startColor, endColor))
+}
+
+@Composable
+fun MuxGridPrimaryActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    leadingIcon: ImageVector? = null,
+    enabled: Boolean = true,
+) {
+    val start = MuxGridColors.Accent
+    val end = MuxGridColors.AccentGradientEnd
+    val alpha = if (enabled) 1f else MuxGridAlphas.Disabled
+    val shape = MuxGridShapes.Control
+    Row(
+        modifier = modifier
+            .heightIn(min = 42.dp)
+            .clip(shape)
+            .background(
+                brush = if (start == end) {
+                    SolidColor(start.copy(alpha = start.alpha * alpha))
+                } else {
+                    Brush.horizontalGradient(
+                        listOf(
+                            start.copy(alpha = start.alpha * alpha),
+                            end.copy(alpha = end.alpha * alpha),
+                        ),
+                    )
+                },
+            )
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (leadingIcon != null) {
+            Icon(
+                imageVector = leadingIcon,
+                contentDescription = null,
+                tint = MuxGridColors.OnAccent.copy(alpha = alpha),
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(
+            text = text,
+            color = MuxGridColors.OnAccent.copy(alpha = alpha),
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+fun MuxGridSecondaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    leadingIcon: ImageVector? = null,
+    contentColor: Color = MuxGridColors.TextPrimary,
+    containerColor: Color = MuxGridColors.ButtonSecondaryContainer,
+    borderColor: Color = MuxGridColors.ButtonSecondaryBorder,
+    enabled: Boolean = true,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        shape = MuxGridShapes.Control,
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = containerColor,
+            contentColor = contentColor,
+            disabledContainerColor = containerColor.copy(alpha = MuxGridAlphas.Disabled),
+            disabledContentColor = contentColor.copy(alpha = MuxGridAlphas.Disabled),
+        ),
+        border = BorderStroke(
+            width = MuxGridBorders.Hairline,
+            color = if (enabled) borderColor else borderColor.copy(alpha = MuxGridAlphas.Disabled),
+        ),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+        modifier = modifier.heightIn(min = 42.dp),
+    ) {
+        if (leadingIcon != null) {
+            Icon(
+                imageVector = leadingIcon,
+                contentDescription = null,
+                tint = if (enabled) contentColor else contentColor.copy(alpha = MuxGridAlphas.Disabled),
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(
+            text = text,
+            color = if (enabled) contentColor else contentColor.copy(alpha = MuxGridAlphas.Disabled),
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * Shared segmented pill control for 2-5 short options across Mobile and Android TV Settings & HUD panels.
+ * Measures options symmetrically so items fill the bar cleanly when they fit, and gracefully
+ * enables horizontal scrolling if localized labels exceed equal column widths.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+fun <T> MuxGridSegmentedControl(
+    options: List<T>,
+    selectedOption: T,
+    labelFor: @Composable (T) -> String,
+    onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier,
+    isTv: Boolean = false,
+) {
+    val activeBg = MuxGridColors.SegmentedActiveBg
+    val activeFg = MuxGridColors.SegmentedActiveFg
+    val activeBorder = MuxGridColors.SegmentedActiveBorder
+    val focusBg = MuxGridColors.FocusBorder
+    val focusFg = MuxGridColors.OnFocusBorder
+    val inactiveFg = MuxGridColors.TextSecondary
+    val scrollState = rememberScrollState()
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(MuxGridShapes.Control)
+            .background(MuxGridColors.SegmentedTrack)
+            .border(MuxGridBorders.Hairline, MuxGridColors.CardBorder, MuxGridShapes.Control)
+            .then(
+                if (isTv) {
+                    Modifier
+                        .focusGroup()
+                        .focusRestorer()
+                } else {
+                    Modifier
+                },
+            )
+            .padding(3.dp),
+    ) {
+        val count = options.size.coerceAtLeast(1)
+        val gap = 3.dp
+        val slotMinWidth = ((maxWidth - gap * (count - 1)) / count).coerceAtLeast(48.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(scrollState),
+            horizontalArrangement = Arrangement.spacedBy(gap),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            options.forEach { option ->
+                val selected = option == selectedOption
+                val label = labelFor(option)
+                var focused by remember(option) { mutableStateOf(false) }
+                val bg = when {
+                    isTv && focused -> focusBg
+                    selected -> activeBg
+                    else -> Color.Transparent
+                }
+                val fg = when {
+                    isTv && focused -> focusFg
+                    selected -> activeFg
+                    else -> inactiveFg
+                }
+                val segmentShape = RoundedCornerShape(6.dp)
+                Box(
+                    modifier = Modifier
+                        .widthIn(min = slotMinWidth)
+                        .clip(segmentShape)
+                        .background(bg)
+                        .then(
+                            if (selected && !(isTv && focused)) {
+                                Modifier.border(MuxGridBorders.Hairline, activeBorder, segmentShape)
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .then(
+                            if (isTv) {
+                                Modifier
+                                    .onFocusChanged { if (focused != it.isFocused) focused = it.isFocused }
+                                    .clickable(
+                                        interactionSource = null,
+                                        indication = null,
+                                        onClick = { onSelect(option) },
+                                    )
+                            } else {
+                                Modifier.clickable(onClick = { onSelect(option) })
+                            },
+                        )
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = label,
+                        color = fg,
+                        fontSize = 12.sp,
+                        fontWeight = if (selected || (isTv && focused)) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Shared 4-theme visual swatch picker (`Carbon`, `Amber`, `Aurora`, `Indigo`) for Mobile & TV Settings.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+fun MuxGridThemeSwatchPicker(
+    selectedTheme: ThemeMode,
+    onSelectTheme: (ThemeMode) -> Unit,
+    modifier: Modifier = Modifier,
+    isTv: Boolean = false,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (isTv) {
+                    Modifier
+                        .focusGroup()
+                        .focusRestorer()
+                } else {
+                    Modifier
+                },
+            ),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ThemeMode.entries.forEach { mode ->
+            val palette = paletteFor(mode)
+            val selected = mode == selectedTheme
+            var focused by remember(mode) { mutableStateOf(false) }
+            val label = stringResource(mode.labelRes())
+            val borderColor = when {
+                isTv && focused -> MuxGridColors.FocusBorder
+                selected -> palette.accent
+                else -> MuxGridColors.CardBorder
+            }
+            val borderWidth = if ((isTv && focused) || selected) 1.5.dp else MuxGridBorders.Hairline
+            val tileShape = MuxGridShapes.Control
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(tileShape)
+                    .background(if (selected) MuxGridColors.CardSurfaceElevated else MuxGridColors.SegmentedTrack)
+                    .border(borderWidth, borderColor, tileShape)
+                    .then(
+                        if (isTv) {
+                            Modifier
+                                .onFocusChanged { if (focused != it.isFocused) focused = it.isFocused }
+                                .clickable(
+                                    interactionSource = null,
+                                    indication = null,
+                                    onClick = { onSelectTheme(mode) },
+                                )
+                        } else {
+                            Modifier.clickable { onSelectTheme(mode) }
+                        },
+                    )
+                    .padding(6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                // Miniature theme canvas + card + accent bar preview
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(32.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(
+                            if (palette.backdropStyle == CanvasBackdropStyle.SOLID) {
+                                SolidColor(palette.canvasPhone)
+                            } else {
+                                Brush.linearGradient(
+                                    listOf(
+                                        palette.canvasPhone,
+                                        palette.backdropWash1.copy(alpha = 0.30f),
+                                        palette.backdropWash2.copy(alpha = 0.28f),
+                                    ),
+                                )
+                            },
+                        )
+                        .border(0.5.dp, palette.cardBorder, RoundedCornerShape(5.dp))
+                        .padding(4.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .fillMaxWidth()
+                            .height(18.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(palette.cardSurface)
+                            .border(0.5.dp, palette.cardBorder, RoundedCornerShape(3.dp))
+                            .padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(
+                                    if (palette.accent == palette.accentGradientEnd) {
+                                        SolidColor(palette.accent)
+                                    } else {
+                                        Brush.horizontalGradient(listOf(palette.accent, palette.accentGradientEnd))
+                                    },
+                                ),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(palette.accentSoft),
+                        )
+                    }
+                }
+
+                Text(
+                    text = label,
+                    color = when {
+                        isTv && focused -> MuxGridColors.FocusBorder
+                        selected -> MuxGridColors.TextPrimary
+                        else -> MuxGridColors.TextSecondary
+                    },
+                    fontSize = 11.5.sp,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun MuxGridRadioOptionRow(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    isTv: Boolean = false,
+) {
+    SelectableOptionRow(
+        label = label,
+        selected = selected,
+        onClick = onClick,
+        modifier = modifier,
+        isTv = isTv,
     )
 }
 
@@ -425,6 +854,7 @@ fun LiveProgressBar(
     progress: Float,
     modifier: Modifier = Modifier,
     fillColor: Color = MuxGridColors.ProgressFill,
+    fillEndColor: Color = fillColor,
     height: Dp = 2.dp,
     animate: Boolean = false,
     bufferedFraction: Float? = null,
@@ -445,6 +875,9 @@ fun LiveProgressBar(
     val trackBackground = MuxGridColors.TrackBackground
     val bufferedColor = fillColor.copy(alpha = 0.34f)
     val targetMarkerColor = Color.White
+    val fillBrush = remember(fillColor, fillEndColor) {
+        if (fillColor == fillEndColor) null else Brush.horizontalGradient(listOf(fillColor, fillEndColor))
+    }
     Spacer(
         modifier = modifier
             .height(height)
@@ -462,11 +895,19 @@ fun LiveProgressBar(
                     )
                 }
                 if (displayProgress > 0f) {
-                    drawRoundRect(
-                        color = fillColor,
-                        size = Size(size.width * displayProgress, size.height),
-                        cornerRadius = radius,
-                    )
+                    if (fillBrush != null) {
+                        drawRoundRect(
+                            brush = fillBrush,
+                            size = Size(size.width * displayProgress, size.height),
+                            cornerRadius = radius,
+                        )
+                    } else {
+                        drawRoundRect(
+                            color = fillColor,
+                            size = Size(size.width * displayProgress, size.height),
+                            cornerRadius = radius,
+                        )
+                    }
                 }
                 if (clampedTarget != null) {
                     val markerWidth = 3.dp.toPx().coerceAtLeast(2f)
@@ -623,6 +1064,7 @@ fun MuxGridSeekBar(
     onValueChangeFinished: () -> Unit,
     modifier: Modifier = Modifier,
     activeTrackColor: Color = MuxGridColors.Accent,
+    activeTrackEndColor: Color = if (activeTrackColor == MuxGridColors.Accent) MuxGridColors.AccentGradientEnd else activeTrackColor,
     inactiveTrackColor: Color = MuxGridColors.TrackBackground,
     thumbColor: Color = MuxGridColors.SeekThumb,
     bufferedFraction: Float? = null,
@@ -699,7 +1141,7 @@ fun MuxGridSeekBar(
                         .fillMaxWidth(clamped)
                         .fillMaxHeight()
                         .clip(MuxGridShapes.SeekTrack)
-                        .background(activeTrackColor),
+                        .background(muxGridAccentBrush(activeTrackColor, activeTrackEndColor)),
                 )
             }
         }
@@ -888,8 +1330,9 @@ fun TrackAndPresetPanel(
         modifier = modifier
             .heightIn(max = 500.dp)
             .clip(MuxGridShapes.Dialog)
-            .background(MuxGridColors.CardSurface)
-            .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
+            .background(MuxGridColors.ModalSurface)
+            .border(MuxGridBorders.Hairline, MuxGridColors.CardBorder, MuxGridShapes.Dialog)
+            .muxGridTopSpecularHighlight(MuxGridRadii.Dialog, MuxGridColors.CardTopHighlight)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -939,7 +1382,8 @@ fun TrackAndPresetPanel(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(MuxGridShapes.Card)
-                        .background(MuxGridColors.CanvasPhone),
+                        .background(MuxGridColors.CardBorder)
+                        .border(MuxGridBorders.Hairline, MuxGridColors.CardBorder, MuxGridShapes.Card),
                     verticalArrangement = Arrangement.spacedBy(1.dp),
                 ) {
                     val effectiveAudioId = selectedAudioId ?: audioTracks.firstOrNull { it.isSelected }?.id
@@ -962,7 +1406,8 @@ fun TrackAndPresetPanel(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(MuxGridShapes.Card)
-                    .background(MuxGridColors.CanvasPhone),
+                    .background(MuxGridColors.CardBorder)
+                    .border(MuxGridBorders.Hairline, MuxGridColors.CardBorder, MuxGridShapes.Card),
                 verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 SelectableOptionRow(
@@ -988,7 +1433,8 @@ fun TrackAndPresetPanel(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(MuxGridShapes.Card)
-                    .background(MuxGridColors.CanvasPhone),
+                    .background(MuxGridColors.CardBorder)
+                    .border(MuxGridBorders.Hairline, MuxGridColors.CardBorder, MuxGridShapes.Card),
                 verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 SelectableOptionRow(
@@ -1007,50 +1453,13 @@ fun TrackAndPresetPanel(
         if (aspectMode != null && onSelectAspectMode != null) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(stringResource(R.string.player_section_aspect_zoom), style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MuxGridShapes.Card)
-                        .background(MuxGridColors.CardSurfaceElevated)
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    VideoAspectMode.entries.forEach { mode ->
-                        val selected = mode == aspectMode
-                        var modeFocused by remember { mutableStateOf(false) }
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .onFocusChanged { modeFocused = it.isFocused }
-                                .clip(MuxGridShapes.Sm)
-                                .background(if (modeFocused) MuxGridColors.FocusBorder else Color.Transparent)
-                                .clickable { onSelectAspectMode(mode) }
-                                .padding(vertical = 6.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Text(
-                                text = mode.localizedLabel(),
-                                color = when {
-                                    modeFocused -> MuxGridColors.OnFocusBorder
-                                    selected -> MuxGridColors.TextPrimary
-                                    else -> MuxGridColors.TextMuted
-                                },
-                                fontSize = 12.sp,
-                                fontWeight = if (selected || modeFocused) FontWeight.SemiBold else FontWeight.Medium,
-                                maxLines = 1,
-                                softWrap = false,
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Box(
-                                modifier = Modifier
-                                    .padding(horizontal = 6.dp)
-                                    .fillMaxWidth()
-                                    .height(2.dp)
-                                    .background(if (selected && !modeFocused) MuxGridColors.Accent else Color.Transparent),
-                            )
-                        }
-                    }
-                }
+                MuxGridSegmentedControl(
+                    options = VideoAspectMode.entries,
+                    selectedOption = aspectMode,
+                    labelFor = { it.localizedLabel() },
+                    onSelect = onSelectAspectMode,
+                    isTv = true,
+                )
             }
         }
     }
@@ -1062,9 +1471,14 @@ private fun SelectableOptionRow(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isTv: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val bg = if (focused) MuxGridColors.FocusBorder else MuxGridColors.CardSurfaceElevated
+    val bg = when {
+        focused -> MuxGridColors.FocusBorder
+        selected -> MuxGridColors.CardSurfaceElevated
+        else -> MuxGridColors.CardSurface
+    }
     val textColor = when {
         focused -> MuxGridColors.OnFocusBorder
         selected -> MuxGridColors.TextPrimary
@@ -1073,9 +1487,19 @@ private fun SelectableOptionRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged { if (focused != it.isFocused) focused = it.isFocused }
             .background(bg)
-            .clickable(onClick = onClick)
+            .then(
+                if (isTv) {
+                    Modifier.clickable(
+                        interactionSource = null,
+                        indication = null,
+                        onClick = onClick,
+                    )
+                } else {
+                    Modifier.clickable(onClick = onClick)
+                },
+            )
             .padding(horizontal = 12.dp, vertical = 11.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
@@ -1320,7 +1744,7 @@ fun MuxGridConfirmDialog(
     AlertDialog(
         onDismissRequest = { if (enabled) onDismiss() },
         shape = MuxGridShapes.Dialog,
-        containerColor = MuxGridColors.CardSurfaceElevated,
+        containerColor = MuxGridColors.ModalSurface,
         titleContentColor = MuxGridColors.TextPrimary,
         textContentColor = MuxGridColors.TextSecondary,
         title = { Text(title) },
@@ -1373,7 +1797,7 @@ fun MuxGridModalSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         sheetMaxWidth = 760.dp,
         shape = MuxGridShapes.SheetTop,
-        containerColor = MuxGridColors.CardSurfaceElevated,
+        containerColor = MuxGridColors.ModalSurface,
         contentColor = MuxGridColors.TextPrimary,
         dragHandle = null,
     ) {

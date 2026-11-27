@@ -4,31 +4,33 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 
 object MuxGridRadii {
-    val SeekTrack = 2.dp
-    val Xs = 3.dp
-    val Sm = 5.dp
-    val Control = 5.dp
-    val Badge = 3.dp
-    val Row = 8.dp
-    val Card = 8.dp
-    val CardLg = 8.dp
-    val Dialog = 12.dp
-    val Sheet = 12.dp
+    val SeekTrack = 3.dp
+    val Xs = 4.dp
+    val Badge = 4.dp
+    val EpgCell = 6.dp
+    val Sm = 8.dp
+    val Control = 8.dp
+    val Row = 12.dp
+    val Card = 12.dp
+    val CardLg = 12.dp
+    val Dialog = 16.dp
+    val Sheet = 16.dp
 }
 
 object MuxGridShapes {
     val SeekTrack = RoundedCornerShape(MuxGridRadii.SeekTrack)
     val Xs = RoundedCornerShape(MuxGridRadii.Xs)
+    val Badge = RoundedCornerShape(MuxGridRadii.Badge)
+    val EpgCell = RoundedCornerShape(MuxGridRadii.EpgCell)
     val Sm = RoundedCornerShape(MuxGridRadii.Sm)
     val Control = RoundedCornerShape(MuxGridRadii.Control)
-    val Badge = RoundedCornerShape(MuxGridRadii.Badge)
     val Row = RoundedCornerShape(MuxGridRadii.Row)
     val Card = RoundedCornerShape(MuxGridRadii.Card)
     val CardLg = RoundedCornerShape(MuxGridRadii.CardLg)
     val Dialog = RoundedCornerShape(MuxGridRadii.Dialog)
     val Sheet = RoundedCornerShape(MuxGridRadii.Sheet)
     val SheetTop = RoundedCornerShape(topStart = MuxGridRadii.Sheet, topEnd = MuxGridRadii.Sheet)
-    val Progress = RoundedCornerShape(1.dp)
+    val Progress = RoundedCornerShape(1.5.dp)
     val Pill = RoundedCornerShape(50)
 }
 

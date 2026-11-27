@@ -86,8 +86,9 @@ fun PlaybackInfoPanel(
         modifier = modifier
             .heightIn(max = 540.dp)
             .clip(MuxGridShapes.Dialog)
-            .background(MuxGridColors.CardSurface)
-            .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog)
+            .background(MuxGridColors.ModalSurface)
+            .border(MuxGridBorders.Hairline, MuxGridColors.CardBorder, MuxGridShapes.Dialog)
+            .muxGridTopSpecularHighlight(MuxGridRadii.Dialog, MuxGridColors.CardTopHighlight)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

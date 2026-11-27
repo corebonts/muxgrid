@@ -1,10 +1,10 @@
 package io.github.corebonts.muxgrid.core.designsystem
 
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
@@ -13,39 +13,23 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import io.github.corebonts.muxgrid.core.model.ThemeMode
 
-private val MuxGridDarkScheme = darkColorScheme(
-    primary = MuxGridDarkPalette.accent,
-    onPrimary = MuxGridDarkPalette.onAccent,
-    secondary = MuxGridDarkPalette.accentSoft,
-    onSecondary = MuxGridDarkPalette.onAccent,
-    background = MuxGridDarkPalette.canvasPhone,
-    onBackground = MuxGridDarkPalette.textPrimary,
-    surface = MuxGridDarkPalette.cardSurface,
-    onSurface = MuxGridDarkPalette.textPrimary,
-    surfaceVariant = MuxGridDarkPalette.cardSurfaceElevated,
-    onSurfaceVariant = MuxGridDarkPalette.textSecondary,
-    error = MuxGridDarkPalette.coralLive,
-    onError = MuxGridDarkPalette.onCoralLive,
-    outline = MuxGridDarkPalette.hairlineBorder,
-    outlineVariant = MuxGridDarkPalette.divider,
-)
-
-private val MuxGridLightScheme = lightColorScheme(
-    primary = MuxGridLightPalette.accent,
-    onPrimary = MuxGridLightPalette.onAccent,
-    secondary = MuxGridLightPalette.accentSoft,
-    onSecondary = MuxGridLightPalette.onAccent,
-    background = MuxGridLightPalette.canvasPhone,
-    onBackground = MuxGridLightPalette.textPrimary,
-    surface = MuxGridLightPalette.cardSurface,
-    onSurface = MuxGridLightPalette.textPrimary,
-    surfaceVariant = MuxGridLightPalette.cardSurfaceElevated,
-    onSurfaceVariant = MuxGridLightPalette.textSecondary,
-    error = MuxGridLightPalette.coralLive,
-    onError = MuxGridLightPalette.onCoralLive,
-    outline = MuxGridLightPalette.hairlineBorder,
-    outlineVariant = MuxGridLightPalette.divider,
+private fun materialDarkSchemeFor(palette: MuxGridPalette): ColorScheme = darkColorScheme(
+    primary = palette.accent,
+    onPrimary = palette.onAccent,
+    secondary = palette.accentSoft,
+    onSecondary = palette.onAccent,
+    background = palette.canvasPhone,
+    onBackground = palette.textPrimary,
+    surface = palette.cardSurface,
+    onSurface = palette.textPrimary,
+    surfaceVariant = palette.cardSurfaceElevated,
+    onSurfaceVariant = palette.textSecondary,
+    error = palette.coralLive,
+    onError = palette.onCoralLive,
+    outline = palette.hairlineBorder,
+    outlineVariant = palette.divider,
 )
 
 private val MuxGridMaterialShapes = Shapes(
@@ -115,10 +99,17 @@ internal class MuxGridTypographyTokens(palette: MuxGridPalette) {
     )
 }
 
-private val DarkMuxGridType = MuxGridTypographyTokens(MuxGridDarkPalette)
-private val LightMuxGridType = MuxGridTypographyTokens(MuxGridLightPalette)
+private val ThemeSchemes: Map<ThemeMode, ColorScheme> = ThemeMode.entries.associateWith { mode ->
+    materialDarkSchemeFor(paletteFor(mode))
+}
 
-internal val LocalMuxGridType = staticCompositionLocalOf { DarkMuxGridType }
+private val ThemeTypographies: Map<ThemeMode, MuxGridTypographyTokens> = ThemeMode.entries.associateWith { mode ->
+    MuxGridTypographyTokens(paletteFor(mode))
+}
+
+internal val LocalMuxGridType = staticCompositionLocalOf {
+    ThemeTypographies.getValue(ThemeMode.DEFAULT)
+}
 
 object MuxGridType {
     val ScreenTitle: TextStyle @Composable @ReadOnlyComposable get() = LocalMuxGridType.current.screenTitle
@@ -133,12 +124,12 @@ object MuxGridType {
 @Composable
 fun MuxGridTheme(
     isTv: Boolean = false,
-    darkTheme: Boolean = true,
+    themeMode: ThemeMode = ThemeMode.DEFAULT,
     content: @Composable () -> Unit,
 ) {
-    val palette = if (darkTheme) MuxGridDarkPalette else MuxGridLightPalette
-    val typographyTokens = if (darkTheme) DarkMuxGridType else LightMuxGridType
-    val baseScheme = if (darkTheme) MuxGridDarkScheme else MuxGridLightScheme
+    val palette = paletteFor(themeMode)
+    val typographyTokens = ThemeTypographies.getValue(themeMode)
+    val baseScheme = ThemeSchemes.getValue(themeMode)
     val scheme = if (isTv) {
         baseScheme.copy(background = palette.canvasTv)
     } else {

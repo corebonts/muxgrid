@@ -26,7 +26,10 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -38,7 +41,8 @@ private const val ACTIVE_FRAME_INTERVAL_NS = 33_333_333L // ~30 fps
 private const val CALM_FRAME_INTERVAL_NS = 66_666_666L   // ~15 fps once paused & settled
 
 /**
- * Low-overhead, bottom-anchored ambient audio glow in deep charcoal and warm amber tones.
+ * Low-overhead, bottom-anchored ambient audio glow inheriting the active theme's `radioGlow1..3`
+ * palette tokens.
  *
  * Uses a single-pass AGSL [RuntimeShader] on API 33+ and a pre-allocated 160x90 bilinear-upscaled
  * offscreen buffer on API 28–32, running strictly in Compose's draw phase with zero recompositions
@@ -55,6 +59,9 @@ fun AmbientRadioGlow(
     amberWarmth: Float = 0.75f,
     smoothness: Float = 0.94f,
     backgroundColor: Color = DefaultBackdropColor,
+    glowColor1: Color = MuxGridColors.RadioGlow1,
+    glowColor2: Color = MuxGridColors.RadioGlow2,
+    glowColor3: Color = MuxGridColors.RadioGlow3,
 ) {
     val engine = remember(reactivity, glowHeight, amberWarmth, smoothness) {
         AmbientRadioGlowEngine(
@@ -67,8 +74,17 @@ fun AmbientRadioGlow(
         }
     }
 
-    val renderer = remember(backgroundColor) {
-        createGlowRenderer(backgroundColor)
+    val lobeColors = remember(glowColor1, glowColor2, glowColor3) {
+        buildThemedLobeColors(glowColor1, glowColor2, glowColor3)
+    }
+
+    val renderer = remember(backgroundColor, lobeColors) {
+        createGlowRenderer(
+            backgroundColor = backgroundColor,
+            lobeColors = lobeColors,
+            rimBottomColor = glowColor1,
+            rimTopColor = glowColor2,
+        )
     }
 
     DisposableEffect(renderer) {
@@ -130,22 +146,59 @@ fun AmbientRadioGlow(
 
 private val DefaultBackdropColor = Color(0xFF040405)
 
+private fun buildThemedLobeColors(
+    glow1: Color,
+    glow2: Color,
+    glow3: Color,
+): List<Color> {
+    val deepBase0 = lerp(Color(0xFF1D1D22), glow3, 0.25f)
+    val deepBase1 = lerp(Color(0xFF282628), glow2, 0.18f)
+    val deepBase2 = lerp(Color(0xFF333030), glow1, 0.14f)
+
+    // When glow3 is luminous (Aurora sapphire #2C62E0, Indigo #4C1D95), let it drive lobe 3 directly;
+    // when glow3 is near-neutral charcoal (Carbon #26262E), keep lobe 3 warm via glow2.
+    val lowLobe = if (glow3.luminance() > 0.04f) glow3 else lerp(glow2, glow3, 0.30f)
+    val midLobe = glow2
+    val highLobe = glow1
+    val coreLobe = lerp(glow1, Color.White, 0.22f)
+
+    return listOf(
+        deepBase0,
+        deepBase1,
+        deepBase2,
+        lowLobe,
+        midLobe,
+        highLobe,
+        coreLobe,
+    )
+}
+
 private interface GlowRenderer {
     fun draw(nativeCanvas: Canvas, width: Float, height: Float, engine: AmbientRadioGlowEngine)
     fun dispose()
 }
 
-private fun createGlowRenderer(backgroundColor: Color): GlowRenderer {
+private fun createGlowRenderer(
+    backgroundColor: Color,
+    lobeColors: List<Color>,
+    rimBottomColor: Color,
+    rimTopColor: Color,
+): GlowRenderer {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        val agsl = runCatching { AgslGlowRenderer(backgroundColor) }.getOrNull()
+        val agsl = runCatching {
+            AgslGlowRenderer(backgroundColor, lobeColors, rimBottomColor, rimTopColor)
+        }.getOrNull()
         if (agsl != null) return agsl
     }
-    return LowResBitmapGlowRenderer(backgroundColor)
+    return LowResBitmapGlowRenderer(backgroundColor, lobeColors, rimBottomColor, rimTopColor)
 }
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 private class AgslGlowRenderer(
     backgroundColor: Color,
+    lobeColors: List<Color>,
+    private val rimBottomColor: Color,
+    private val rimTopColor: Color,
 ) : GlowRenderer {
 
     private val shader = RuntimeShader(AGSL_SOURCE)
@@ -161,11 +214,11 @@ private class AgslGlowRenderer(
 
     init {
         for (i in 0 until AmbientRadioGlowEngine.LOBE_COUNT) {
-            val lobe = AmbientRadioGlowEngine.LOBES[i]
+            val c = lobeColors[i]
             val base = i * 4
-            lobeColor[base] = lobe.r
-            lobeColor[base + 1] = lobe.g
-            lobeColor[base + 2] = lobe.b
+            lobeColor[base] = c.red
+            lobeColor[base + 1] = c.green
+            lobeColor[base + 2] = c.blue
             lobeColor[base + 3] = 0f
         }
     }
@@ -192,6 +245,8 @@ private class AgslGlowRenderer(
 
         shader.setFloatUniform("uResolution", width, height)
         shader.setFloatUniform("uBgColor", bgR, bgG, bgB, 1f)
+        shader.setFloatUniform("uRimColorBottom", rimBottomColor.red, rimBottomColor.green, rimBottomColor.blue, 1f)
+        shader.setFloatUniform("uRimColorMid", rimTopColor.red, rimTopColor.green, rimTopColor.blue, 1f)
         shader.setFloatUniform("uLobeGeom", lobeGeom)
         shader.setFloatUniform("uLobeColor", lobeColor)
         shader.setFloatUniform("uRimParams", rimHeightPx, engine.rimAlpha, topFadePx, DITHER_AMP)
@@ -208,6 +263,8 @@ private class AgslGlowRenderer(
         private const val AGSL_SOURCE = """
             uniform float2 uResolution;
             uniform float4 uBgColor;
+            uniform float4 uRimColorBottom;
+            uniform float4 uRimColorMid;
             uniform float4 uLobeGeom[7];
             uniform float4 uLobeColor[7];
             uniform float4 uRimParams;
@@ -225,7 +282,7 @@ private class AgslGlowRenderer(
             half4 main(float2 fragCoord) {
                 float3 col = uBgColor.rgb;
 
-                // 3 charcoal smoke lobes (normal alpha blend)
+                // 3 smoky base layers (normal alpha blend)
                 for (int i = 0; i < 3; i++) {
                     float alphaScale = uLobeColor[i].a;
                     if (alphaScale > 0.004) {
@@ -238,7 +295,7 @@ private class AgslGlowRenderer(
                     }
                 }
 
-                // 4 amber/copper glow lobes (screen blend)
+                // 4 reactive theme-tinted glow lobes (screen blend)
                 for (int i = 3; i < 7; i++) {
                     float alphaScale = uLobeColor[i].a;
                     if (alphaScale > 0.004) {
@@ -252,7 +309,7 @@ private class AgslGlowRenderer(
                     }
                 }
 
-                // Soft warm horizon rim along bottom edge
+                // Soft themed horizon rim along bottom edge
                 float rimHeight = max(uRimParams.x, 1.0);
                 float fromBottom = (uResolution.y - fragCoord.y) / rimHeight;
                 if (fromBottom >= 0.0 && fromBottom < 1.0 && uRimParams.y > 0.002) {
@@ -260,11 +317,11 @@ private class AgslGlowRenderer(
                     float rimA;
                     if (fromBottom < 0.45) {
                         float k = fromBottom / 0.45;
-                        rimRgb = mix(float3(0.851, 0.467, 0.024), float3(0.573, 0.251, 0.055), k);
+                        rimRgb = mix(uRimColorBottom.rgb, uRimColorMid.rgb, k);
                         rimA = uRimParams.y * mix(1.0, 0.38, k);
                     } else {
                         float k = (fromBottom - 0.45) / 0.55;
-                        rimRgb = float3(0.573, 0.251, 0.055);
+                        rimRgb = uRimColorMid.rgb;
                         rimA = uRimParams.y * mix(0.38, 0.0, k);
                     }
                     float3 rimSrc = rimRgb * rimA;
@@ -289,23 +346,22 @@ private class AgslGlowRenderer(
 
 private class LowResBitmapGlowRenderer(
     backgroundColor: Color,
+    lobeColors: List<Color>,
+    rimBottomColor: Color,
+    rimTopColor: Color,
 ) : GlowRenderer {
 
-    private val bgInt = android.graphics.Color.rgb(
-        (backgroundColor.red * 255f).roundToInt(),
-        (backgroundColor.green * 255f).roundToInt(),
-        (backgroundColor.blue * 255f).roundToInt(),
-    )
+    private val bgInt = backgroundColor.toArgb()
     private val bgTransparentInt = bgInt and 0x00FFFFFF
 
     private val offscreenBitmap = Bitmap.createBitmap(BUF_W, BUF_H, Bitmap.Config.ARGB_8888)
     private val offscreenCanvas = Canvas(offscreenBitmap)
     private val lobeSprites: Array<Bitmap> = Array(AmbientRadioGlowEngine.LOBE_COUNT) { idx ->
-        createLobeSprite(AmbientRadioGlowEngine.LOBES[idx])
+        createLobeSprite(lobeColors[idx])
     }
 
     private val smokePaint = Paint(Paint.FILTER_BITMAP_FLAG)
-    private val amberPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+    private val glowPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
         xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
     }
 
@@ -315,9 +371,9 @@ private class LowResBitmapGlowRenderer(
         0f,
         0f,
         intArrayOf(
-            android.graphics.Color.argb(255, 217, 119, 6),
-            android.graphics.Color.argb(97, 146, 64, 14),
-            android.graphics.Color.argb(0, 146, 64, 14),
+            rimBottomColor.copy(alpha = 1f).toArgb(),
+            rimTopColor.copy(alpha = 0.38f).toArgb(),
+            rimTopColor.copy(alpha = 0f).toArgb(),
         ),
         floatArrayOf(0f, 0.45f, 1f),
         Shader.TileMode.CLAMP,
@@ -368,12 +424,12 @@ private class LowResBitmapGlowRenderer(
             val ry = engine.lobeRyNorm[i] * bh
             lobeDstRectF.set(cx - rx, cy - ry, cx + rx, cy + ry)
 
-            val paint = if (AmbientRadioGlowEngine.LOBES[i].isAmber) amberPaint else smokePaint
+            val paint = if (AmbientRadioGlowEngine.LOBES[i].isAmber) glowPaint else smokePaint
             paint.alpha = (alpha * 255f).roundToInt().coerceIn(0, 255)
             offscreenCanvas.drawBitmap(lobeSprites[i], null, lobeDstRectF, paint)
         }
 
-        // 3. Soft warm bottom rim
+        // 3. Soft themed bottom rim
         val rimA = engine.rimAlpha
         if (rimA > 0.004f) {
             val rimH = (engine.rimHeightFrac * bh).coerceAtLeast(3f)
@@ -408,12 +464,12 @@ private class LowResBitmapGlowRenderer(
         private const val BUF_H = 90
         private const val SPRITE_SIZE = 96
 
-        private fun createLobeSprite(lobe: AmbientRadioGlowEngine.LobeSpec): Bitmap {
+        private fun createLobeSprite(color: Color): Bitmap {
             val bmp = Bitmap.createBitmap(SPRITE_SIZE, SPRITE_SIZE, Bitmap.Config.ARGB_8888)
             val c = Canvas(bmp)
-            val r = (lobe.r * 255f).roundToInt().coerceIn(0, 255)
-            val g = (lobe.g * 255f).roundToInt().coerceIn(0, 255)
-            val b = (lobe.b * 255f).roundToInt().coerceIn(0, 255)
+            val r = (color.red * 255f).roundToInt().coerceIn(0, 255)
+            val g = (color.green * 255f).roundToInt().coerceIn(0, 255)
+            val b = (color.blue * 255f).roundToInt().coerceIn(0, 255)
             val half = SPRITE_SIZE / 2f
             val grad = RadialGradient(
                 half,

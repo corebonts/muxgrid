@@ -17,7 +17,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -98,27 +97,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             val backgroundPlaybackMode by container.repository.backgroundPlaybackMode.collectAsState()
             val themeMode by container.repository.themeMode.collectAsState()
-            val systemDark = isSystemInDarkTheme()
-            val isDarkTheme = when (themeMode) {
-                ThemeMode.AUTO -> systemDark
-                ThemeMode.LIGHT -> false
-                ThemeMode.DARK -> true
-            }
-            val useDarkSystemBars = isDarkTheme || isMobilePlayerRouteActive
-            LaunchedEffect(useDarkSystemBars) {
-                val barStyle = if (useDarkSystemBars) {
-                    SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-                } else {
-                    SystemBarStyle.light(
-                        android.graphics.Color.TRANSPARENT,
-                        android.graphics.Color.TRANSPARENT,
-                    )
-                }
-                enableEdgeToEdge(
-                    statusBarStyle = barStyle,
-                    navigationBarStyle = barStyle,
-                )
-            }
             val rootView = LocalView.current
             val keepScreenOn by remember(container.playbackEngine) {
                 container.playbackEngine.state
@@ -196,7 +174,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            MuxGridTheme(isTv = isTv, darkTheme = isDarkTheme) {
+            MuxGridTheme(isTv = isTv, themeMode = themeMode) {
                 val context = LocalContext.current
                 val isDebuggable = context.isDebuggableBuild()
                 val ioScope = rememberCoroutineScope()

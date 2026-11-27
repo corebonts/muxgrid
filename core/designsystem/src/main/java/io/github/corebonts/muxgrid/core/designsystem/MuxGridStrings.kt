@@ -60,16 +60,10 @@ fun StartScreen.descriptionRes(): Int = when (this) {
 
 @StringRes
 fun ThemeMode.labelRes(): Int = when (this) {
-    ThemeMode.AUTO -> R.string.settings_theme_auto
-    ThemeMode.LIGHT -> R.string.settings_theme_light
-    ThemeMode.DARK -> R.string.settings_theme_dark
-}
-
-@StringRes
-fun ThemeMode.descriptionRes(): Int = when (this) {
-    ThemeMode.AUTO -> R.string.settings_theme_auto_desc
-    ThemeMode.LIGHT -> R.string.settings_theme_light_desc
-    ThemeMode.DARK -> R.string.settings_theme_dark_desc
+    ThemeMode.CARBON -> R.string.settings_theme_carbon
+    ThemeMode.AMBER -> R.string.settings_theme_amber
+    ThemeMode.AURORA -> R.string.settings_theme_aurora
+    ThemeMode.INDIGO -> R.string.settings_theme_indigo
 }
 
 @StringRes

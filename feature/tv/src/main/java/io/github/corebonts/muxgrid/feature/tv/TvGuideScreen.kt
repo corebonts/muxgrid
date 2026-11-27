@@ -55,10 +55,13 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -436,6 +439,11 @@ internal fun TvGuideScreen(
         } else {
             // Now button (pinned) + Day jump bar (auto-scrolled to keep selected in viewport)
             val dateLabels = rememberLocalizedDateLabels()
+            val isAtNow by remember(timelineScrollState) {
+                derivedStateOf {
+                    timelineScrollState.visibleStartEpochSec - timelineScrollState.originEpochSec < HALF_HOUR_SEC
+                }
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -450,7 +458,7 @@ internal fun TvGuideScreen(
                     },
                     modifier = Modifier.focusRequester(nowButtonFocusRequester),
                     shape = tvButtonShape(),
-                    colors = tvPrimaryButtonColors(),
+                    colors = if (isAtNow) tvSecondaryButtonColors() else tvPrimaryButtonColors(),
                 ) {
                     Icon(MuxGridIcons.Schedule, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(4.dp))
@@ -475,6 +483,8 @@ internal fun TvGuideScreen(
                         TvFilterChip(
                             label = formatDayLabel(dayDate, nowEpochSec, activeZone, dateLabels),
                             selected = selected,
+                            selectedContainerColor = MuxGridColors.AccentContainer,
+                            selectedContentColor = MuxGridColors.AccentSoft,
                             unselectedContainerColor = MuxGridColors.CardSurface,
                             unselectedContentColor = MuxGridColors.TextSecondary,
                             onClick = {
@@ -638,7 +648,32 @@ internal fun TvGuideScreen(
                 val bufferStartSec = bufferRange.first
                 val bufferEndSec = bufferRange.second
 
-                Column(modifier = Modifier.fillMaxSize()) {
+                val accentHairlineColor = MuxGridColors.Accent
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .drawWithContent {
+                            drawContent()
+                            val trackStartPx = channelColWidth.toPx()
+                            val lineX = trackStartPx +
+                                (nowEpochSec - timelineScrollState.originEpochSec) * timelineScrollState.pxPerSec -
+                                timelineScrollState.scrollOffsetPx
+                            if (lineX >= trackStartPx && lineX <= size.width) {
+                                val lineW = 2.dp.toPx()
+                                val rulerMidY = 14.dp.toPx()
+                                drawCircle(
+                                    color = accentHairlineColor,
+                                    radius = 3.dp.toPx(),
+                                    center = Offset(lineX, rulerMidY),
+                                )
+                                drawRect(
+                                    color = accentHairlineColor,
+                                    topLeft = Offset(lineX - lineW / 2f, rulerMidY),
+                                    size = Size(lineW, (size.height - rulerMidY).coerceAtLeast(0f)),
+                                )
+                            }
+                        },
+                ) {
                     // Synchronized time ruler header
                     Row(
                         modifier = Modifier
@@ -725,11 +760,13 @@ internal fun TvGuideScreen(
                                         .padding(end = 4.dp)
                                         .tvFocusableSurface(
                                             focusedState = chFocusedState,
-                                            cornerRadius = MuxGridRadii.Sm,
+                                            cornerRadius = MuxGridRadii.EpgCell,
                                             containerColor = baseCellBg,
                                             focusedContainerColor = MuxGridColors.CardSurfaceElevated,
                                             focusBorderColor = MuxGridColors.FocusBorder,
                                             focusBorderWidth = MuxGridBorders.Focused,
+                                            unfocusedBorderColor = MuxGridColors.CardBorder,
+                                            unfocusedBorderWidth = MuxGridBorders.Hairline,
                                         )
                                         .focusRequester(chFocusRequester)
                                         .onFocusChanged { state ->
@@ -827,24 +864,38 @@ internal fun TvGuideScreen(
                                             }
                                         }
                                         val evFocusedState = remember(evFocusKey) { mutableStateOf(false) }
+                                        val liveAccentColor = MuxGridColors.Accent
+                                        val recAccentColor = MuxGridColors.CoralLive
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxSize()
                                                 .clipToBounds()
                                                 .tvFocusableSurface(
                                                     focusedState = evFocusedState,
-                                                    cornerRadius = MuxGridRadii.Xs,
-                                                    containerColor = if (isLiveNow) MuxGridColors.CardSurfaceElevated else baseCellBg,
-                                                    focusedContainerColor = MuxGridColors.Accent.copy(alpha = 0.22f),
+                                                    cornerRadius = MuxGridRadii.EpgCell,
+                                                    containerColor = if (isLiveNow) MuxGridColors.EpgLiveSurface else baseCellBg,
+                                                    focusedContainerColor = MuxGridColors.AccentContainer,
                                                     focusBorderColor = MuxGridColors.FocusBorder,
                                                     focusBorderWidth = MuxGridBorders.Focused,
-                                                    unfocusedBorderColor = if (isRecording) {
-                                                        MuxGridColors.CoralLive.copy(alpha = 0.65f)
-                                                    } else {
-                                                        Color.Transparent
+                                                    unfocusedBorderColor = when {
+                                                        isRecording -> recAccentColor.copy(alpha = 0.65f)
+                                                        isLiveNow -> MuxGridColors.EpgLiveBorder
+                                                        else -> MuxGridColors.CardBorder
                                                     },
-                                                    unfocusedBorderWidth = if (isRecording) MuxGridBorders.Hairline else 0.dp,
+                                                    unfocusedBorderWidth = MuxGridBorders.Hairline,
                                                 )
+                                                .drawWithContent {
+                                                    drawContent()
+                                                    if (isLiveNow || isRecording) {
+                                                        val barColor = if (isRecording) recAccentColor else liveAccentColor
+                                                        val insetY = 3.dp.toPx()
+                                                        drawRect(
+                                                            color = barColor,
+                                                            topLeft = Offset(0f, insetY),
+                                                            size = Size(3.dp.toPx(), (size.height - insetY * 2f).coerceAtLeast(0f)),
+                                                        )
+                                                    }
+                                                }
                                                 .focusRequester(evFocusRequester)
                                                 .onPreviewKeyEvent { keyEvent ->
                                                     if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
@@ -1295,7 +1346,8 @@ private fun TvGuidePreviewBar(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MuxGridColors.CardSurface, MuxGridShapes.Sm),
+            .background(MuxGridColors.CardSurface, MuxGridShapes.Card)
+            .border(MuxGridBorders.Hairline, MuxGridColors.CardBorder, MuxGridShapes.Card),
     ) {
         // Fixed 3.dp slot keeps the bottom bar height invariant when moving between live & upcoming shows
         Box(

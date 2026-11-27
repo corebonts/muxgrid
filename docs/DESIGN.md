@@ -1,32 +1,33 @@
 # Design & UX Specification
 
-MuxGrid uses a low-glare **Broadcast Monitor** dark visual language (`Carbon & Signal Amber`) tuned for OLED phones, tablets, and 10-foot living-room TVs.
+MuxGrid uses a dark OLED-safe **Broadcast Monitor** visual language across 4 selectable themes (**Carbon**, **Amber** [default], **Aurora**, **Indigo**) tuned for phones, tablets, and 10-foot living-room TVs.
 
 ## 1. Visual Philosophy — Broadcast Monitor
 
-- **Content-forward, zero noise:** No busy chrome, heavy drop shadows, or decorative clutter. Video and channel artwork remain the focus.
-- **Carbon surface hierarchy (`MuxGridColors.kt`):**
-  - Deep carbon canvas: `#09090B` (`CanvasTv`) on Android TV, `#0C0C0E` (`CanvasPhone`) on mobile/tablet.
-  - Elevated cards: `#141417` (`CardSurface`), `#1D1D22` (`CardSurfaceElevated`) on focus/hover, `#111114` (`CardSurfaceAlt`) for secondary rows, and `1dp` / `0.5dp` subtle hairline borders (`rgba(255,255,255,0.09)` / `0.07`).
+- **Content-forward, zero noise:** No heavy drop shadows or decorative clutter. Video and channel artwork remain the focus, framed by unified `1dp` card borders (`CardBorder`) and top specular highlights (`CardTopHighlight`) on glass/frosted themes.
+- **4 Dark Theme Palettes & Root Backdrops (`MuxGridColors.kt` & `CanvasBackdrop.kt`):**
+  - **Amber (`Studio Mica` — default & legacy fallback):** `AMBIENT_WASH` backdrop (`#13100E` TV / `#161210` phone), warm studio mica cards (`#211C19`), Amber accent (`#F08A14`), `CardBorder` `rgba(255,234,214,0.09)`, `RadioGlow` (`#F08A14, #C45B0E, #3B2614`).
+  - **Carbon (`Broadcast Carbon`):** `SOLID` flat OLED canvas (`#09090B` TV / `#0C0C0E` phone), `#141418` cards, Signal Amber accent (`#E5A00D`), `CardBorder` `rgba(255,255,255,0.08)`, `RadioGlow` (`#E5A00D, #B86214, #26262E`).
+  - **Aurora (`Aurora Frosted`):** `MESH_GRADIENT` backdrop over `#08090D` / `#090A0E` with translucent mobile Haze card blur (`rgba(24,26,36,0.56)`), `#FF6B35` accent, `CardBorder` `rgba(255,255,255,0.14)`, specular top highlight `rgba(255,255,255,0.22)`, `RadioGlow` (`#109C8A, #D0307E, #2C62E0`).
+  - **Indigo (`Electric Indigo`):** `AMBIENT_WASH` backdrop (`#111022` TV / `#141329` phone), `#1E1C38` cards, Indigo-to-Sky gradient accent (`#8B5CF6` → `#38BDF8`), `CardBorder` `rgba(196,181,253,0.12)`, `RadioGlow` (`#8B5CF6, #38BDF8, #4C1D95`).
+  - **`MuxGridCanvasBackdrop` Performance & Smoothness Rule:** Renders `AMBIENT_WASH` and `MESH_GRADIENT` once in the draw phase using aspect-aware diagonal/wide lobes, cubic smoothstep falloff, and `1.6/255` dithering (AGSL `RuntimeShader` on API 33+, bilinear-upscaled low-res blurred bitmap cached in memory on API 28–32) so portrait and 16:9 stay silky-smooth with zero banding. TV cards draw translucent fills + `1dp` borders inside `tvFocusableSurface` with zero per-item blur or rounded-rect clips.
   - **Surface Blur vs. Video Scrims (Platform Rule):**
-    - Over **non-video Compose chrome** (floating bottom nav bar, mini-player, bottom sheets): use **Haze (`2.1.0`)** backdrop blur on mobile/tablet, falling back cleanly to translucent carbon scrims (`#D6121216` / `#DB09090B`) on TV or over video.
-    - Over **live/recorded video (`SurfaceView`)**: Compose/Haze/`RenderEffect` cannot sample a `SurfaceView` plane. Always use **translucent dark gradient scrims + hairline pill surfaces** (`ScrimSurface` / `ScrimLight`) for player HUDs and OSDs.
-- **Signal Amber & Broadcast Status Palette:**
-  - Primary interactive accent: Signal Amber `#E5A00D` (`Accent`), highlighted variant `#F5B82E` (`AccentSoft`), dark `#09090B` (`OnAccent`) foreground on primary actions.
-  - TV D-pad focus border: crisp `#F4F4F5` (`FocusBorder`, `2dp`), paired with contrasting `OnFocusBorder` (`#09090B` dark / `#F4F4F5` light) whenever `FocusBorder` acts as a focused container background, and `SeekThumb` (`#FFFFFF` dark / `#18181B` light) for interactive seekbar thumbs.
+    - Over **non-video Compose chrome** (mobile bottom nav bar, mini-player, landscape rail, and **Aurora** mobile cards): use **Haze (`2.1.0`)** backdrop blur over `MuxGridCanvasBackdrop` on mobile/tablet, falling back to translucent scrims on TV or over video.
+    - Over **live/recorded video (`SurfaceView`)**: Compose/Haze/`RenderEffect` cannot sample a `SurfaceView` plane. Always use **translucent dark gradient scrims + hairline pill surfaces** (`ScrimSurface` / `ScrimLight`) inheriting the active theme's accent and `RadioGlow1..3` palette.
+- **Accents, Focus & Status Tokens:**
+  - Theme accent colors drive primary buttons, seek bars (`Accent` → `AccentGradientEnd`), nav active bars (`NavActiveContainer`, `NavActiveIndicator`, `NavActiveContent`), and `EpgLiveSurface` / `EpgLiveBorder` cues.
+  - TV D-pad focus border: high-contrast `FocusBorder` (`2dp`) paired with `OnFocusBorder` whenever focus acts as a container fill, and `SeekThumb` for interactive seekbar thumbs.
   - Live / Recording indicator: `#E53935` (`CoralLive`).
   - Success / Watched indicator: `#3E9B63` (`EmeraldOk`).
-  - Progress bars: crisp `#D4D4D8` (`ProgressFill`) on `TrackBackground` (`rgba(255,255,255,0.17)`), with Signal Amber reserved for live/interactive scrub cues.
-- **Theme Modes (`Auto` / `Light` / `Dark`):**
-  - Users can switch between `Auto` (system appearance), `Light` (Daylight Monitor palette: `#F4F4F7` / `#F2F2F5` canvas, `#FFFFFF` cards, `#18181B` focus border, Signal Amber accents), and `Dark` (Carbon & Signal Amber) under **Settings → General → Theme** (defaults: `Auto` on Mobile, `Dark` on TV).
-  - Fullscreen video/audio players (`MobilePlayerScreen`, `TvPlayerScreen`) and their over-video HUDs always remain locked to the dark palette to prevent glare and preserve contrast over video.
+  - Legacy persisted `AUTO` / `LIGHT` / `DARK` values (as well as unknown values) migrate cleanly to `AMBER`.
 - **Typography, Radii & Tokens (`MuxGridTheme.kt` & `MuxGridTokens.kt`):**
   - System sans-serif with tight display tracking (`-0.5sp` screen titles, `-0.35sp` section titles) and **tabular numerals (`fontFeatureSettings = "tnum"`)** on all clocks, channel numbers, durations, and seekbar readouts.
-  - Compact crisp corners (`MuxGridRadii` / `MuxGridShapes`): `2dp` seek tracks, `3dp` badges, `5dp` controls/buttons, `8dp` rows/cards, `12dp` dialogs/sheets, with centralized border widths (`MuxGridBorders`), animation/OSD durations (`MuxGridDurations`), and surface/text opacities (`MuxGridAlphas`).
+  - Unified corner scale (`MuxGridRadii` / `MuxGridShapes`): `3dp` seek tracks (`SeekTrack`), `4dp` badges (`Badge`), `6dp` EPG cells (`EpgCell`), `8dp` controls/buttons (`Control`/`Sm`), `12dp` rows/cards (`Row`/`Card`), `16dp` dialogs/sheets (`Dialog`/`SheetTop`), with `1dp` `CardBorder` outlines (`MuxGridBorders.Hairline`), `2dp` D-pad focus rings, centralized animation/OSD durations (`MuxGridDurations`), and surface/text opacities (`MuxGridAlphas`).
 - **Motion:**
   - Snappy transitions (~180–250ms) and subtle `2dp` focus borders + mild scale on TV cards without jumpy layouts.
-- **Dialogs, Sheets & Confirmations:**
-  - Modal sheets and action/confirmation dialogs use `CardSurfaceElevated` (`#1D1D22`), `12dp` corners (`MuxGridShapes.Dialog` / `MuxGridShapes.SheetTop`), and `1dp` `HairlineBorder` (or `CoralLive` at 55% alpha for playback errors); settings/options panels (**Server Setup**, **Display Options**) use `CardSurface` (`#141417`) with `CardSurfaceElevated` (`#1D1D22`) inner controls and `0.5dp` `HairlineBorder`.
+- **Dialogs, Sheets & Unified Settings Controls:**
+  - Modal sheets and confirmation dialogs use `ModalSurface`, `16dp` corners (`MuxGridShapes.Dialog` / `MuxGridShapes.SheetTop`), `1dp` `CardBorder` (or `CoralLive` at 55% alpha for playback errors), secondary actions styled with `ButtonSecondaryContainer` + `ButtonSecondaryBorder`, and top specular highlights.
+  - Settings pickers share consistent cross-platform controls (`MuxGridSegmentedControl` pill selector for 2–5 short choices like Start Screen, Timeshift, Background Playback, Aspect Ratio; `MuxGridThemeSwatchPicker` 4-theme preview swatch selector; `MuxGridRadioOptionRow` for descriptive presets like Hardware Decoder and scalable pop-up dialogs like Language selection).
   - Player overlays (**Display Options**, **Playback Info**, **Playback Error**, **Quick Zap**) render in-window over `OverlayBackdrop` (`#99000000`) rather than separate `Dialog` windows over `SurfaceView`, trap D-pad focus inside modal panels (**Display Options** focuses the first content option on open and uses `selectedAudioId`/`selectedSubtitleId` as the single source of truth), and always intercept `Back` to close the overlay first.
   - **Server Setup & Preflight Diagnostics** uses an adaptive 3-step wizard (`Host` → `Ports` [auto-skipped when `9982`/`9981` respond] → `Account & Preflight`) rendered as a two-pane step rail on Android TV and landscape/tablet, and a vertical accordion on portrait mobile. It validates hostnames, IPv4, and IPv6 literals (rejecting schemes, paths, spaces, and port suffixes), preserves unsaved form input across configuration changes, runs silent preflight capability checks (`HTSP Streaming`, `HTTP Media`, `HTSP DVR`, `pass` stream profile, HTSP version, clock drift, and DVR disk space), lets healthy servers connect immediately, surfaces non-blocking degraded capabilities (e.g., read-only DVR) with **Continue Anyway**, and keeps full diagnostic checklists accessible in **Settings → Server Diagnostics** without raising Settings tab status dots for advisories or optional features.
   - Disruptive or irreversible DVR actions (**Stop & Save**, **Abort Recording**, **Cancel Timer**, **Delete Recording**) always require confirmation on both Mobile and TV, with TV destructive confirmations defaulting initial focus to **Cancel**.
@@ -40,7 +41,7 @@ Navigation stays minimal and consistent across both form factors:
 1. **Live** — Channel cards/rows with Now/Next program, live progress bar, and one-tap/click playback.
 2. **Guide** — Electronic Program Guide (EPG) for browsing upcoming broadcasts and scheduling recordings.
 3. **Recordings** — Active (`Recording Now`), Completed (grouped cleanly by series/title), and Scheduled timers.
-4. **Settings** — Responsive full-width / two-column layout with Server card (connection status, error details, quick Retry & Edit, **Server Diagnostics**), General (**Start Screen**, **Theme** `Auto` / `Light` / `Dark`, **Language** `System Default` / `English` / `Magyar`), **Radio Ambient Glow** toggle, Decoder/Deinterlace preset, Timeshift cache limit, unified mobile **Background Playback** selector (`Off` / `Audio` / `PiP`), and **App Info** (version, build ABI/Git SHA, **Licenses & Notices** with offline GPLv3 / Apache-2.0 texts, copyable debug report).
+4. **Settings** — Responsive full-width / two-column layout with Server card (connection status, error details, quick Retry & Edit, **Server Diagnostics**), General (**Start Screen**, **Theme** `Carbon` / `Amber` / `Aurora` / `Indigo`, **Language** `System Default` / `English` / `Magyar`), **Radio Ambient Glow** toggle, Decoder/Deinterlace preset, Timeshift cache limit, unified mobile **Background Playback** selector (`Off` / `Audio` / `PiP`), and **App Info** (version, build ABI/Git SHA, **Licenses & Notices** with offline GPLv3 / Apache-2.0 texts, copyable debug report).
 
 ---
 

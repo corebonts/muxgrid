@@ -568,7 +568,6 @@ fun OnboardingServerScreen(
         }
     }
 
-    val canvas = if (isTv) MuxGridColors.CanvasTv else MuxGridColors.CanvasPhone
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = MuxGridColors.Accent,
         unfocusedBorderColor = MuxGridColors.HairlineBorder,
@@ -587,13 +586,20 @@ fun OnboardingServerScreen(
         }
     }
 
-    BoxWithConstraints(
-        modifier = modifier
-            .fillMaxSize()
-            .background(canvas)
-            .safeDrawingPadding(),
+    Box(
+        modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
+        MuxGridCanvasBackdrop(
+            isTv = isTv,
+            modifier = Modifier.matchParentSize(),
+        )
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .safeDrawingPadding(),
+            contentAlignment = Alignment.Center,
+        ) {
         val useTwoPane = isTv || maxWidth >= 620.dp
         val cardMaxWidth = if (useTwoPane) 780.dp else 520.dp
         val outerHorizontalPad = when {
@@ -608,8 +614,9 @@ fun OnboardingServerScreen(
                 .widthIn(max = cardMaxWidth)
                 .fillMaxWidth()
                 .clip(MuxGridShapes.Dialog)
-                .background(MuxGridColors.CardSurface)
-                .border(MuxGridBorders.Divider, MuxGridColors.HairlineBorder, MuxGridShapes.Dialog),
+                .background(MuxGridColors.ModalSurface)
+                .border(MuxGridBorders.Hairline, MuxGridColors.CardBorder, MuxGridShapes.Dialog)
+                .muxGridTopSpecularHighlight(MuxGridRadii.Dialog, MuxGridColors.CardTopHighlight),
         ) {
             // Top Wizard Header
             Row(
@@ -848,6 +855,7 @@ fun OnboardingServerScreen(
                     }
                 }
             }
+        }
         }
     }
 }
@@ -1597,15 +1605,15 @@ private fun WizardButton(
         OutlinedButton(
             onClick = onClick,
             enabled = enabled,
-            shape = MuxGridShapes.Sm,
+            shape = MuxGridShapes.Control,
             contentPadding = padding,
             colors = ButtonDefaults.outlinedButtonColors(
-                containerColor = if (isTv && focused) MuxGridColors.FocusBorder else MuxGridColors.CardSurfaceElevated,
+                containerColor = if (isTv && focused) MuxGridColors.FocusBorder else MuxGridColors.ButtonSecondaryContainer,
                 contentColor = fg,
             ),
             border = BorderStroke(
                 if (isTv && focused) MuxGridBorders.Focused else MuxGridBorders.Hairline,
-                if (isTv && focused) MuxGridColors.FocusBorder else MuxGridColors.HairlineBorder,
+                if (isTv && focused) MuxGridColors.FocusBorder else MuxGridColors.ButtonSecondaryBorder,
             ),
             modifier = sizedModifier.then(
                 if (isTv) Modifier.onFocusChanged { focused = it.isFocused } else Modifier,
