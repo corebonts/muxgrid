@@ -19,6 +19,38 @@ enum class DiagnosticCheckId {
     DVR_DISK_SPACE,
 }
 
+enum class DiagnosticMessageCode {
+    HTSP_UNREACHABLE,
+    HTSP_CONNECTED,
+    AUTH_FAILED,
+    AUTH_ANONYMOUS_NO_DVR,
+    AUTH_ANONYMOUS_OK,
+    AUTH_SIGNED_IN,
+    HTSP_VERSION_TOO_OLD,
+    HTSP_VERSION_LEGACY_NO_STOP,
+    HTSP_VERSION_LEGACY_NO_RESUME,
+    HTSP_VERSION_OK,
+    HTSP_STREAMING_OK,
+    HTSP_STREAMING_NO_ACCESS,
+    HTSP_STREAMING_FAILED,
+    HTSP_DVR_OK,
+    HTSP_DVR_NO_ACCESS,
+    HTSP_DVR_UNVERIFIED,
+    STREAM_PROFILE_PASS_OK,
+    STREAM_PROFILE_PASS_MISSING,
+    SERVER_CLOCK_OFFSET,
+    SERVER_CLOCK_OK,
+    DVR_DISK_LOW,
+    DVR_DISK_OK,
+    DVR_DISK_UNAVAILABLE,
+    HTTP_UNREACHABLE,
+    HTTP_OK,
+    HTTP_AUTH_UNAUTHENTICATED,
+    HTTP_AUTH_OK_WITH_DVR,
+    HTTP_AUTH_LIMITED,
+    HTTP_UNEXPECTED_STATUS,
+}
+
 data class DiagnosticItem(
     val id: DiagnosticCheckId,
     val title: String,
@@ -26,6 +58,8 @@ data class DiagnosticItem(
     val summary: String,
     val detail: String? = null,
     val suggestion: String? = null,
+    val messageCode: DiagnosticMessageCode? = null,
+    val messageArgs: List<String> = emptyList(),
 )
 
 data class PortProbeResult(

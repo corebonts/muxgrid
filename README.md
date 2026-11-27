@@ -148,6 +148,7 @@ Alternatively, provide `MUXGRID_KEYSTORE_PATH`, `MUXGRID_KEYSTORE_PASSWORD`, `MU
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Multi-module architecture, hybrid HTSP/HTTP proxy design, and verified platform/protocol notes |
 | [docs/DESIGN.md](./docs/DESIGN.md) | Broadcast Monitor visual tokens, mobile/TV layouts, player HUD, gestures & D-pad rules |
 | [docs/PROTOCOL.md](./docs/PROTOCOL.md) | Tvheadend HTSP binary wire format, RPC subset, and `LocalMediaProxy` contract |
+| [docs/TRANSLATIONS.md](./docs/TRANSLATIONS.md) | Community translation guide, string resource conventions, and validation steps |
 | [CHANGELOG.md](./CHANGELOG.md) | Release and implementation history |
 | [ROADMAP.md](./ROADMAP.md) | Planned features and upcoming platform work |
 

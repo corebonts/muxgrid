@@ -72,6 +72,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import io.github.corebonts.muxgrid.core.designsystem.AppLocaleManager
+import io.github.corebonts.muxgrid.core.designsystem.R as DesignR
+import io.github.corebonts.muxgrid.core.designsystem.descriptionRes
+import io.github.corebonts.muxgrid.core.designsystem.labelRes
+import io.github.corebonts.muxgrid.core.designsystem.localizedCapabilitySummary
+import io.github.corebonts.muxgrid.core.designsystem.localizedConnectionStatusText
+import io.github.corebonts.muxgrid.core.designsystem.localizedLabel
+import io.github.corebonts.muxgrid.core.designsystem.localizedShortLabel
+import io.github.corebonts.muxgrid.core.designsystem.localizedSummary
+import io.github.corebonts.muxgrid.core.designsystem.rememberLocalizedDateLabels
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
@@ -543,8 +554,8 @@ fun MobileRoot(
                 ),
         ) {
             val splashStatus = when (connectionState) {
-                ConnectionState.Connecting, is ConnectionState.Syncing -> "Synchronizing…"
-                else -> "Connecting…"
+                ConnectionState.Connecting, is ConnectionState.Syncing -> stringResource(DesignR.string.common_synchronizing)
+                else -> stringResource(DesignR.string.common_connecting)
             }
             MuxGridSplashScreen(
                 backgroundColor = MuxGridColors.CanvasPhone,
@@ -897,8 +908,10 @@ private fun MobileMiniPlayerBar(
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val title = playbackState.channelName ?: channel?.name ?: playbackState.programTitle ?: "Playing"
-    val subtitle = playbackState.programTitle ?: nowNext?.now?.title ?: if (playbackState.isRadio) "Live Radio" else "Live TV"
+    val title = playbackState.channelName ?: channel?.name ?: playbackState.programTitle ?: stringResource(DesignR.string.common_playing)
+    val subtitle = playbackState.programTitle ?: nowNext?.now?.title ?: stringResource(
+        if (playbackState.isRadio) DesignR.string.live_radio else DesignR.string.live_tv,
+    )
     val statusDotColor = if (playbackState.isPaused) MuxGridColors.AmberWarn else MuxGridColors.CoralLive
     val progressFraction: Float? = when {
         playbackState.isRecordingPlayback && playbackState.durationMs > 0L -> {
@@ -976,7 +989,7 @@ private fun MobileMiniPlayerBar(
             ) {
                 Icon(
                     imageVector = if (playbackState.isPaused) MuxGridIcons.Play else MuxGridIcons.Pause,
-                    contentDescription = if (playbackState.isPaused) "Play" else "Pause",
+                    contentDescription = stringResource(if (playbackState.isPaused) DesignR.string.common_play else DesignR.string.common_pause),
                     tint = MuxGridColors.OnAccent,
                     modifier = Modifier.size(18.dp),
                 )
@@ -990,7 +1003,7 @@ private fun MobileMiniPlayerBar(
             ) {
                 Icon(
                     imageVector = MuxGridIcons.Stop,
-                    contentDescription = "Stop",
+                    contentDescription = stringResource(DesignR.string.common_stop),
                     tint = MuxGridColors.TextSecondary,
                     modifier = Modifier.size(18.dp),
                 )
@@ -1111,12 +1124,14 @@ private fun MobileLiveChannelsTab(
         val isFav = ch.id in favorites
         val isLiveNow = nowEvent != null && nowEpochSec in nowEvent.startEpochSec until nowEvent.stopEpochSec
         val headlineText = if (ch.number > 0) "${ch.formattedNumber} · ${ch.name}" else ch.name
+        val dateLabels = rememberLocalizedDateLabels()
         val metaText = when {
             nowEvent != null -> formatProgramModalMeta(
                 channelName = nowEvent.title,
                 startEpochSec = nowEvent.startEpochSec,
                 stopEpochSec = nowEvent.stopEpochSec,
                 nowEpochSec = nowEpochSec,
+                labels = dateLabels,
             )
             activeRecording != null -> formatProgramModalMeta(
                 channelName = activeRecording.title,
@@ -1124,9 +1139,10 @@ private fun MobileLiveChannelsTab(
                 stopEpochSec = activeRecording.stopEpochSec,
                 nowEpochSec = nowEpochSec,
                 dataSizeBytes = activeRecording.dataSize,
+                labels = dateLabels,
             )
-            ch.isRadio -> "Live Radio"
-            else -> "Live TV"
+            ch.isRadio -> stringResource(DesignR.string.live_radio)
+            else -> stringResource(DesignR.string.live_tv)
         }
         val (subtitleText, bodyText) = resolveModalSubtitleAndDescription(
             subtitle = nowEvent?.subtitle ?: activeRecording?.subtitle,
@@ -1185,7 +1201,7 @@ private fun MobileLiveChannelsTab(
 
                     chNowNext?.next?.let { nextEv ->
                         Text(
-                            text = "Next ${formatEpochHm(nextEv.startEpochSec)} · ${nextEv.title}",
+                            text = stringResource(DesignR.string.live_next_program, formatEpochHm(nextEv.startEpochSec), nextEv.title),
                             style = MuxGridType.TabularSmall,
                             color = MuxGridColors.TextMuted,
                             maxLines = 1,
@@ -1211,7 +1227,7 @@ private fun MobileLiveChannelsTab(
                     ) {
                         Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Watch Live", fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Text(stringResource(DesignR.string.live_watch_live), fontWeight = FontWeight.SemiBold, maxLines = 1)
                     }
                     if (activeRecording != null) {
                         OutlinedButton(
@@ -1231,7 +1247,9 @@ private fun MobileLiveChannelsTab(
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = if (activeRecording.hasResumePosition) "Resume Chase Play" else "Watch from Start",
+                                text = stringResource(
+                                    if (activeRecording.hasResumePosition) DesignR.string.recordings_resume_chase_play else DesignR.string.recordings_watch_from_start,
+                                ),
                                 color = MuxGridColors.AccentSoft,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
@@ -1249,7 +1267,7 @@ private fun MobileLiveChannelsTab(
                             ) {
                                 Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Start Over", color = MuxGridColors.TextPrimary, maxLines = 1)
+                                Text(stringResource(DesignR.string.recordings_start_over), color = MuxGridColors.TextPrimary, maxLines = 1)
                             }
                         }
                         OutlinedButton(
@@ -1262,7 +1280,7 @@ private fun MobileLiveChannelsTab(
                         ) {
                             Icon(MuxGridIcons.Stop, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Stop & Save", color = MuxGridColors.TextPrimary, maxLines = 1)
+                            Text(stringResource(DesignR.string.recordings_stop_and_save), color = MuxGridColors.TextPrimary, maxLines = 1)
                         }
                         OutlinedButton(
                             enabled = !actionBusy,
@@ -1274,7 +1292,7 @@ private fun MobileLiveChannelsTab(
                         ) {
                             Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Abort Recording", color = MuxGridColors.CoralLive, maxLines = 1)
+                            Text(stringResource(DesignR.string.recordings_abort_recording), color = MuxGridColors.CoralLive, maxLines = 1)
                         }
                     } else if (linkedNowDvr?.state == DvrState.SCHEDULED) {
                         OutlinedButton(
@@ -1287,9 +1305,10 @@ private fun MobileLiveChannelsTab(
                         ) {
                             Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Cancel Timer", color = MuxGridColors.CoralLive, maxLines = 1)
+                            Text(stringResource(DesignR.string.recordings_cancel_timer), color = MuxGridColors.CoralLive, maxLines = 1)
                         }
                     } else if (nowEvent != null) {
+                        val scheduleFailedMsg = stringResource(DesignR.string.recordings_error_schedule_failed)
                         OutlinedButton(
                             enabled = !actionBusy,
                             onClick = {
@@ -1299,7 +1318,7 @@ private fun MobileLiveChannelsTab(
                                     try {
                                         onRecordEvent(nowEvent.id)
                                             .onSuccess { actionChannelId = null }
-                                            .onFailure { actionMessage = it.message ?: "Failed to schedule recording" }
+                                            .onFailure { actionMessage = it.message ?: scheduleFailedMsg }
                                     } finally {
                                         actionBusy = false
                                     }
@@ -1310,7 +1329,7 @@ private fun MobileLiveChannelsTab(
                         ) {
                             Icon(MuxGridIcons.Record, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Record Now", color = MuxGridColors.CoralLive, maxLines = 1)
+                            Text(stringResource(DesignR.string.recordings_record_now), color = MuxGridColors.CoralLive, maxLines = 1)
                         }
                     }
                     OutlinedButton(
@@ -1329,7 +1348,11 @@ private fun MobileLiveChannelsTab(
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(Modifier.width(6.dp))
-                        Text(if (isFav) "Remove from Favorites" else "Add to Favorites", color = MuxGridColors.TextPrimary, maxLines = 1)
+                        Text(
+                            stringResource(if (isFav) DesignR.string.live_remove_from_favorites else DesignR.string.live_add_to_favorites),
+                            color = MuxGridColors.TextPrimary,
+                            maxLines = 1,
+                        )
                     }
                     OutlinedButton(
                         enabled = !actionBusy,
@@ -1342,7 +1365,7 @@ private fun MobileLiveChannelsTab(
                     ) {
                         Icon(MuxGridIcons.Guide, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("View in Guide", color = MuxGridColors.TextPrimary, maxLines = 1)
+                        Text(stringResource(DesignR.string.live_view_in_guide), color = MuxGridColors.TextPrimary, maxLines = 1)
                     }
                 },
             )
@@ -1404,11 +1427,11 @@ private fun MobileLiveChannelList(
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             item {
                 val (emptyText, showSpinner) = if (hasAnyChannels) {
-                    "No channels match this filter" to false
+                    stringResource(DesignR.string.live_no_channels_match_filter) to false
                 } else {
                     syncStatusMessage(
                         connectionState = connectionState,
-                        emptyLabel = "No channels available",
+                        emptyLabel = stringResource(DesignR.string.live_no_channels_available),
                     )
                 }
                 MuxGridSyncingState(
@@ -1548,7 +1571,7 @@ private fun MobileChannelCard(
                     nowNext.remainingMinutes(nowEpochSec)?.let { mins ->
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = "${mins}m",
+                            text = stringResource(DesignR.string.time_minutes_short, mins),
                             style = MuxGridType.TabularSmall,
                             color = MuxGridColors.TextMuted,
                         )
@@ -1562,7 +1585,7 @@ private fun MobileChannelCard(
                 nowNext.next?.let { next ->
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "Next ${formatEpochHm(next.startEpochSec)} · ${next.title}",
+                        text = stringResource(DesignR.string.live_next_program, formatEpochHm(next.startEpochSec), next.title),
                         style = MuxGridType.TabularSmall,
                         color = MuxGridColors.TextMuted,
                         maxLines = 1,
@@ -1571,7 +1594,7 @@ private fun MobileChannelCard(
                 }
             } else {
                 Text(
-                    text = if (channel.isRadio) "Live Radio" else "No program info",
+                    text = stringResource(if (channel.isRadio) DesignR.string.live_radio else DesignR.string.live_no_program_info),
                     style = MuxGridType.CardSubtitle,
                     color = MuxGridColors.TextMuted,
                 )
@@ -1587,7 +1610,9 @@ private fun MobileChannelCard(
         ) {
             Icon(
                 imageVector = if (isFavorite) MuxGridIcons.StarFilled else MuxGridIcons.Star,
-                contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                contentDescription = stringResource(
+                    if (isFavorite) DesignR.string.live_remove_from_favorites else DesignR.string.live_add_to_favorites,
+                ),
                 tint = if (isFavorite) MuxGridColors.AmberWarn else MuxGridColors.TextMuted,
                 modifier = Modifier.size(20.dp),
             )
@@ -1780,16 +1805,17 @@ private fun MobileSettingsTab(
     }
 
     debugReport?.let { report ->
+        val debugCopiedToast = stringResource(DesignR.string.settings_debug_info_copied)
         MuxGridModalSheet(
             onDismissRequest = { debugReport = null },
         ) {
             Text(
-                text = "Debug Info",
+                text = stringResource(DesignR.string.settings_debug_info_title),
                 style = MuxGridType.Title,
                 fontSize = 18.sp,
             )
             Text(
-                text = "Non-personal hardware and software environment for issue reports.",
+                text = stringResource(DesignR.string.settings_debug_info_desc),
                 style = MuxGridType.CardSubtitle,
             )
             Box(
@@ -1821,7 +1847,7 @@ private fun MobileSettingsTab(
                     shape = MuxGridShapes.Sm,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Close", color = MuxGridColors.TextPrimary)
+                    Text(stringResource(DesignR.string.common_close), color = MuxGridColors.TextPrimary)
                 }
                 Button(
                     onClick = {
@@ -1829,7 +1855,7 @@ private fun MobileSettingsTab(
                             context = context,
                             label = "MuxGrid Debug Info",
                             text = report,
-                            toastMessage = "Debug info copied",
+                            toastMessage = debugCopiedToast,
                         )
                     },
                     shape = MuxGridShapes.Sm,
@@ -1839,7 +1865,7 @@ private fun MobileSettingsTab(
                     ),
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Copy", fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(DesignR.string.common_copy), fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -1868,12 +1894,12 @@ private fun MobileSettingsTab(
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
-                        text = "Server Diagnostics",
+                        text = stringResource(DesignR.string.settings_server_diagnostics_title),
                         style = MuxGridType.Title,
                         fontSize = 18.sp,
                     )
                     Text(
-                        text = "Tvheadend permissions, protocol capabilities, and HTTP media port status.",
+                        text = stringResource(DesignR.string.settings_server_diagnostics_desc),
                         style = MuxGridType.CardSubtitle,
                     )
                 }
@@ -1895,7 +1921,7 @@ private fun MobileSettingsTab(
                     } else {
                         Icon(
                             imageVector = MuxGridIcons.Refresh,
-                            contentDescription = "Re-run diagnostics",
+                            contentDescription = stringResource(DesignR.string.a11y_rerun_diagnostics),
                             tint = MuxGridColors.AccentSoft,
                             modifier = Modifier.size(20.dp),
                         )
@@ -1916,7 +1942,7 @@ private fun MobileSettingsTab(
                     shape = MuxGridShapes.Sm,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Close", color = MuxGridColors.TextPrimary, maxLines = 1)
+                    Text(stringResource(DesignR.string.common_close), color = MuxGridColors.TextPrimary, maxLines = 1)
                 }
                 if (showEditServer) {
                     Button(
@@ -1931,7 +1957,7 @@ private fun MobileSettingsTab(
                         ),
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("Edit Server", fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Text(stringResource(DesignR.string.settings_edit_server), fontWeight = FontWeight.SemiBold, maxLines = 1)
                     }
                 }
             }
@@ -1955,7 +1981,7 @@ private fun MobileServerSettingsSection(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("TVHEADEND SERVER", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+        Text(stringResource(DesignR.string.settings_section_server), style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1993,7 +2019,7 @@ private fun MobileServerSettingsSection(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = connectionStatusText(profile, connectionState),
+                        text = localizedConnectionStatusText(profile, connectionState),
                         style = MuxGridType.TabularSmall,
                         color = connectionStatusColor(connectionState),
                         maxLines = if (isServerError) 3 else 1,
@@ -2015,7 +2041,7 @@ private fun MobileServerSettingsSection(
                         ) {
                             Icon(
                                 imageVector = MuxGridIcons.Refresh,
-                                contentDescription = "Reconnect",
+                                contentDescription = stringResource(DesignR.string.settings_reconnect),
                                 tint = MuxGridColors.AccentSoft,
                                 modifier = Modifier.size(20.dp),
                             )
@@ -2031,7 +2057,7 @@ private fun MobileServerSettingsSection(
                     ) {
                         Icon(
                             imageVector = MuxGridIcons.Edit,
-                            contentDescription = "Edit Server",
+                            contentDescription = stringResource(DesignR.string.settings_edit_server),
                             tint = MuxGridColors.TextPrimary,
                             modifier = Modifier.size(20.dp),
                         )
@@ -2041,11 +2067,15 @@ private fun MobileServerSettingsSection(
             if (profile.isConfigured) {
                 MuxGridDivider()
                 val healthSubtitle = when {
-                    isRunningDiagnostics -> "Checking capabilities and media ports…"
-                    serverDiagnostics == null -> "Tap to run server capability check"
-                    serverDiagnostics.hasBlockers -> serverDiagnostics.blockerItems.firstOrNull()?.summary ?: "Issue detected"
-                    serverDiagnostics.hasDegraded -> "${serverDiagnostics.capabilitySummary} · Tap for details"
-                    else -> serverDiagnostics.capabilitySummary
+                    isRunningDiagnostics -> stringResource(DesignR.string.diagnostics_checking_short)
+                    serverDiagnostics == null -> stringResource(DesignR.string.settings_server_diagnostics_tap_to_run)
+                    serverDiagnostics.hasBlockers -> serverDiagnostics.blockerItems.firstOrNull()?.localizedSummary()
+                        ?: stringResource(DesignR.string.settings_server_diagnostics_issue_detected)
+                    serverDiagnostics.hasDegraded -> stringResource(
+                        DesignR.string.settings_server_diagnostics_tap_details,
+                        serverDiagnostics.localizedCapabilitySummary(),
+                    )
+                    else -> serverDiagnostics.localizedCapabilitySummary()
                 }
                 val healthColor = when {
                     isRunningDiagnostics || serverDiagnostics == null -> MuxGridColors.TextSecondary
@@ -2054,10 +2084,10 @@ private fun MobileServerSettingsSection(
                     else -> MuxGridColors.EmeraldOk
                 }
                 MobileSettingsActionRow(
-                    title = "Server Diagnostics",
+                    title = stringResource(DesignR.string.settings_server_diagnostics_title),
                     subtitle = healthSubtitle,
                     subtitleColor = healthColor,
-                    contentDescription = "View server diagnostics",
+                    contentDescription = stringResource(DesignR.string.a11y_view_server_diagnostics),
                     onClick = onOpenDiagnostics,
                 )
             }
@@ -2074,11 +2104,13 @@ private fun MobileGeneralSettingsSection(
     onSelectThemeMode: (ThemeMode) -> Unit,
     onSetRadioAmbientGlowEnabled: (Boolean) -> Unit,
 ) {
+    val context = LocalContext.current
+    var selectedLanguageTag by remember { mutableStateOf(AppLocaleManager.currentLanguageTag(context)) }
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("GENERAL", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+        Text(stringResource(DesignR.string.settings_section_general), style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2094,7 +2126,7 @@ private fun MobileGeneralSettingsSection(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = "Start Screen",
+                    text = stringResource(DesignR.string.settings_start_screen),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MuxGridColors.TextPrimary,
@@ -2107,14 +2139,14 @@ private fun MobileGeneralSettingsSection(
                 ) {
                     StartScreen.entries.forEach { option ->
                         BroadcastUnderlineTab(
-                            label = option.label,
+                            label = stringResource(option.labelRes()),
                             selected = option == startScreen,
                             onClick = { onSelectStartScreen(option) },
                         )
                     }
                 }
                 Text(
-                    text = startScreen.description,
+                    text = stringResource(startScreen.descriptionRes()),
                     style = MuxGridType.TabularSmall,
                     color = MuxGridColors.TextSecondary,
                 )
@@ -2127,7 +2159,7 @@ private fun MobileGeneralSettingsSection(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = "Theme",
+                    text = stringResource(DesignR.string.settings_theme),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MuxGridColors.TextPrimary,
@@ -2140,14 +2172,50 @@ private fun MobileGeneralSettingsSection(
                 ) {
                     ThemeMode.entries.forEach { option ->
                         BroadcastUnderlineTab(
-                            label = option.label,
+                            label = stringResource(option.labelRes()),
                             selected = option == themeMode,
                             onClick = { onSelectThemeMode(option) },
                         )
                     }
                 }
                 Text(
-                    text = themeMode.description,
+                    text = stringResource(themeMode.descriptionRes()),
+                    style = MuxGridType.TabularSmall,
+                    color = MuxGridColors.TextSecondary,
+                )
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MuxGridColors.CardSurface)
+                    .padding(horizontal = 12.dp, vertical = 11.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = stringResource(DesignR.string.settings_language),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MuxGridColors.TextPrimary,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    AppLocaleManager.supportedLanguages.forEach { option ->
+                        BroadcastUnderlineTab(
+                            label = option.localizedLabel(),
+                            selected = option.tag == selectedLanguageTag,
+                            onClick = {
+                                selectedLanguageTag = option.tag
+                                AppLocaleManager.setLanguageTag(context, option.tag)
+                            },
+                        )
+                    }
+                }
+                Text(
+                    text = stringResource(DesignR.string.settings_language_desc),
                     style = MuxGridType.TabularSmall,
                     color = MuxGridColors.TextSecondary,
                 )
@@ -2168,7 +2236,7 @@ private fun MobileGeneralSettingsSection(
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
-                        text = "Radio Ambient Glow",
+                        text = stringResource(DesignR.string.settings_radio_ambient_glow),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MuxGridColors.TextPrimary,
@@ -2193,7 +2261,7 @@ private fun MobileBackgroundPlaybackSection(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("BACKGROUND PLAYBACK", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+        Text(stringResource(DesignR.string.settings_section_background_playback), style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2210,14 +2278,14 @@ private fun MobileBackgroundPlaybackSection(
             ) {
                 options.forEach { option ->
                     BroadcastUnderlineTab(
-                        label = option.label,
+                        label = stringResource(option.labelRes()),
                         selected = option == selectedMode,
                         onClick = { onSelectBackgroundPlaybackMode(option) },
                     )
                 }
             }
             Text(
-                text = selectedMode.description,
+                text = stringResource(selectedMode.descriptionRes()),
                 style = MuxGridType.TabularSmall,
                 color = MuxGridColors.TextSecondary,
             )
@@ -2234,7 +2302,7 @@ private fun MobileDecoderPresetSection(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("DECODER PRESET", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+        Text(stringResource(DesignR.string.settings_section_decoder_preset), style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2243,8 +2311,8 @@ private fun MobileDecoderPresetSection(
             verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             listOf(
-                HwDecPreset.MEDIACODEC_COPY_BWDIF to "HW Copy + bwdif Deinterlace",
-                HwDecPreset.MEDIACODEC_ZERO_COPY to "Hardware Zero-Copy (mediacodec)",
+                HwDecPreset.MEDIACODEC_COPY_BWDIF to stringResource(DesignR.string.settings_decoder_copy_bwdif_mobile),
+                HwDecPreset.MEDIACODEC_ZERO_COPY to stringResource(DesignR.string.settings_decoder_zero_copy_mobile),
             ).forEach { (preset, label) ->
                 val selected = preset == hwDecPreset
                 Row(
@@ -2267,7 +2335,7 @@ private fun MobileDecoderPresetSection(
                         Spacer(Modifier.width(8.dp))
                         Icon(
                             imageVector = MuxGridIcons.Check,
-                            contentDescription = "Active",
+                            contentDescription = stringResource(DesignR.string.common_active),
                             tint = MuxGridColors.Accent,
                             modifier = Modifier.size(16.dp),
                         )
@@ -2287,7 +2355,7 @@ private fun MobileTimeshiftSection(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("LIVE TIMESHIFT CACHE LIMIT", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+        Text(stringResource(DesignR.string.settings_section_timeshift), style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2304,14 +2372,14 @@ private fun MobileTimeshiftSection(
             ) {
                 TimeshiftWindow.entries.forEach { option ->
                     BroadcastUnderlineTab(
-                        label = option.shortLabel,
+                        label = option.localizedShortLabel(),
                         selected = option == timeshiftWindow,
                         onClick = { onSelectTimeshiftWindow(option) },
                     )
                 }
             }
             Text(
-                text = "${timeshiftWindow.description} · split pause/rewind · applies on next tune",
+                text = stringResource(DesignR.string.settings_timeshift_footer, stringResource(timeshiftWindow.descriptionRes())),
                 style = MuxGridType.TabularSmall,
                 color = MuxGridColors.TextSecondary,
             )
@@ -2330,7 +2398,7 @@ private fun MobileAppInfoSection(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("APP INFO", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+        Text(stringResource(DesignR.string.settings_section_app_info), style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2339,30 +2407,30 @@ private fun MobileAppInfoSection(
             verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             SettingInfoRow(
-                label = "Version",
+                label = stringResource(DesignR.string.settings_version),
                 value = appInfo.versionDisplay,
             )
             SettingInfoRow(
-                label = "Build SHA",
+                label = stringResource(DesignR.string.settings_build_sha),
                 value = appInfo.shortSha,
             )
             MobileSettingsActionRow(
-                title = "GitHub",
+                title = stringResource(DesignR.string.settings_github),
                 subtitle = appInfo.githubDisplayUrl,
                 subtitleColor = MuxGridColors.AccentSoft,
-                contentDescription = "Open GitHub",
+                contentDescription = stringResource(DesignR.string.a11y_open_github),
                 onClick = onOpenGithub,
             )
             MobileSettingsActionRow(
-                title = "Licenses & Notices",
-                subtitle = "Open-source attributions · GPL-3.0-or-later",
-                contentDescription = "Show Licenses and Notices",
+                title = stringResource(DesignR.string.settings_licenses_title),
+                subtitle = stringResource(DesignR.string.settings_licenses_subtitle),
+                contentDescription = stringResource(DesignR.string.a11y_show_licenses),
                 onClick = onOpenLicenses,
             )
             MobileSettingsActionRow(
-                title = "Debug Info",
-                subtitle = "Device, OS, and playback environment",
-                contentDescription = "Show Debug Info",
+                title = stringResource(DesignR.string.settings_debug_info_title),
+                subtitle = stringResource(DesignR.string.settings_debug_info_subtitle),
+                contentDescription = stringResource(DesignR.string.a11y_show_debug_info),
                 onClick = onOpenDebugInfo,
             )
         }
@@ -2393,12 +2461,12 @@ private fun MobileLicensesSheet(
         val current = selectedAttribution
         if (current == null) {
             Text(
-                text = "Licenses & Notices",
+                text = stringResource(DesignR.string.settings_licenses_title),
                 style = MuxGridType.Title,
                 fontSize = 18.sp,
             )
             Text(
-                text = AppNotices.DISTRIBUTION_NOTE,
+                text = stringResource(DesignR.string.settings_licenses_distribution_note),
                 style = MuxGridType.CardSubtitle,
             )
             Column(
@@ -2414,7 +2482,7 @@ private fun MobileLicensesSheet(
                     MobileSettingsActionRow(
                         title = entry.name,
                         subtitle = "${entry.license} · ${entry.displayUrl}",
-                        contentDescription = "Show ${entry.name} license",
+                        contentDescription = stringResource(DesignR.string.a11y_show_entry_license, entry.name),
                         onClick = { selectedAttribution = entry },
                     )
                 }
@@ -2424,7 +2492,7 @@ private fun MobileLicensesSheet(
                 shape = MuxGridShapes.Sm,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Close", color = MuxGridColors.TextPrimary)
+                Text(stringResource(DesignR.string.common_close), color = MuxGridColors.TextPrimary)
             }
         } else {
             Row(
@@ -2451,7 +2519,7 @@ private fun MobileLicensesSheet(
                 IconButton(onClick = { onOpenUrl(current.url) }) {
                     Icon(
                         imageVector = MuxGridIcons.OpenInNew,
-                        contentDescription = "Open ${current.name} website",
+                        contentDescription = stringResource(DesignR.string.a11y_open_entry_website, current.name),
                         tint = MuxGridColors.TextSecondary,
                     )
                 }
@@ -2468,7 +2536,7 @@ private fun MobileLicensesSheet(
             ) {
                 SelectionContainer {
                     Text(
-                        text = documentText.ifBlank { "Loading..." },
+                        text = documentText.ifBlank { stringResource(DesignR.string.common_loading) },
                         fontSize = 12.sp,
                         lineHeight = 17.sp,
                         fontFamily = FontFamily.Monospace,
@@ -2481,7 +2549,7 @@ private fun MobileLicensesSheet(
                 shape = MuxGridShapes.Sm,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Back", color = MuxGridColors.TextPrimary)
+                Text(stringResource(DesignR.string.common_back), color = MuxGridColors.TextPrimary)
             }
         }
     }

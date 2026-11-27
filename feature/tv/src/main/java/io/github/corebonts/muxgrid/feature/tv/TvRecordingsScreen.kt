@@ -49,6 +49,9 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
+import io.github.corebonts.muxgrid.core.designsystem.R as DesignR
+import io.github.corebonts.muxgrid.core.designsystem.rememberLocalizedDateLabels
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -120,12 +123,16 @@ internal fun TvRecordingsScreen(
         allEntries.filter { it.state == DvrState.SCHEDULED }.sortedBy { it.startEpochSec }
     }
 
-    val shelves = remember(recordingNow, continueWatching, completed, scheduled) {
+    val recNowHeader = stringResource(DesignR.string.recordings_section_recording_now)
+    val continueHeader = stringResource(DesignR.string.recordings_shelf_continue_watching)
+    val allRecsHeader = stringResource(DesignR.string.recordings_shelf_all_recordings)
+    val scheduledHeader = stringResource(DesignR.string.recordings_shelf_scheduled_timers)
+    val shelves = remember(recordingNow, continueWatching, completed, scheduled, recNowHeader, continueHeader, allRecsHeader, scheduledHeader) {
         buildList {
-            if (recordingNow.isNotEmpty()) add(Triple("tv_rec_now", "RECORDING NOW", recordingNow))
-            if (continueWatching.isNotEmpty()) add(Triple("tv_continue", "CONTINUE WATCHING", continueWatching))
-            if (completed.isNotEmpty()) add(Triple("tv_completed", "ALL RECORDINGS", completed))
-            if (scheduled.isNotEmpty()) add(Triple("tv_scheduled", "SCHEDULED TIMERS", scheduled))
+            if (recordingNow.isNotEmpty()) add(Triple("tv_rec_now", recNowHeader, recordingNow))
+            if (continueWatching.isNotEmpty()) add(Triple("tv_continue", continueHeader, continueWatching))
+            if (completed.isNotEmpty()) add(Triple("tv_completed", allRecsHeader, completed))
+            if (scheduled.isNotEmpty()) add(Triple("tv_scheduled", scheduledHeader, scheduled))
         }
     }
 
@@ -205,7 +212,7 @@ internal fun TvRecordingsScreen(
     if (shelves.isEmpty()) {
         val (emptyText, showSpinner) = syncStatusMessage(
             connectionState = connectionState,
-            emptyLabel = "No recordings or scheduled timers",
+            emptyLabel = stringResource(DesignR.string.recordings_empty),
         )
         MuxGridSyncingState(
             message = emptyText,
@@ -312,13 +319,13 @@ internal fun TvRecordingsScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    text = "RECORDING NOW · ${formatDurationMs(elapsed * 1000L)}",
+                                    text = stringResource(DesignR.string.recordings_recording_now_elapsed, formatDurationMs(elapsed * 1000L)),
                                     color = MuxGridColors.CoralLive,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                 )
                                 Text(
-                                    text = "${remMins}m left",
+                                    text = stringResource(DesignR.string.time_minutes_left, remMins.toInt()),
                                     style = MuxGridType.TabularSmall,
                                     color = MuxGridColors.TextSecondary,
                                 )
@@ -342,12 +349,12 @@ internal fun TvRecordingsScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    text = "Resume at ${formatDurationMs(entry.playPositionSec * 1000L)}",
+                                    text = stringResource(DesignR.string.recordings_resume_at, formatDurationMs(entry.playPositionSec * 1000L)),
                                     style = MuxGridType.TabularSmall,
                                     color = MuxGridColors.AccentSoft,
                                 )
                                 Text(
-                                    text = "${remMins}m left",
+                                    text = stringResource(DesignR.string.time_minutes_left, remMins.toInt()),
                                     style = MuxGridType.TabularSmall,
                                     color = MuxGridColors.TextSecondary,
                                 )
@@ -409,7 +416,9 @@ internal fun TvRecordingsScreen(
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    text = if (entry.hasResumePosition) "Resume Chase Play" else "Watch from Start",
+                                    text = stringResource(
+                                        if (entry.hasResumePosition) DesignR.string.recordings_resume_chase_play else DesignR.string.recordings_watch_from_start,
+                                    ),
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
                                     softWrap = false,
@@ -428,7 +437,7 @@ internal fun TvRecordingsScreen(
                                 ) {
                                     Icon(MuxGridIcons.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Start Over", maxLines = 1, softWrap = false)
+                                    Text(stringResource(DesignR.string.recordings_start_over), maxLines = 1, softWrap = false)
                                 }
                             }
                             if (ch != null) {
@@ -444,7 +453,7 @@ internal fun TvRecordingsScreen(
                                 ) {
                                     Icon(MuxGridIcons.Live, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Watch Live", maxLines = 1, softWrap = false)
+                                    Text(stringResource(DesignR.string.live_watch_live), maxLines = 1, softWrap = false)
                                 }
                             }
                             Button(
@@ -456,7 +465,7 @@ internal fun TvRecordingsScreen(
                             ) {
                                 Icon(MuxGridIcons.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Stop & Save", maxLines = 1, softWrap = false)
+                                Text(stringResource(DesignR.string.recordings_stop_and_save), maxLines = 1, softWrap = false)
                             }
                             Button(
                                 enabled = !actionBusy,
@@ -467,7 +476,7 @@ internal fun TvRecordingsScreen(
                             ) {
                                 Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Abort Recording", maxLines = 1, softWrap = false)
+                                Text(stringResource(DesignR.string.recordings_abort_recording), maxLines = 1, softWrap = false)
                             }
                         }
                         DvrState.COMPLETED -> {
@@ -487,7 +496,9 @@ internal fun TvRecordingsScreen(
                                     Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        text = if (entry.hasResumePosition) "Resume Recording" else "Play Recording",
+                                        text = stringResource(
+                                            if (entry.hasResumePosition) DesignR.string.recordings_resume_recording else DesignR.string.recordings_play_recording,
+                                        ),
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         softWrap = false,
@@ -506,9 +517,10 @@ internal fun TvRecordingsScreen(
                                     ) {
                                         Icon(MuxGridIcons.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(6.dp))
-                                        Text("Start Over", maxLines = 1, softWrap = false)
+                                        Text(stringResource(DesignR.string.recordings_start_over), maxLines = 1, softWrap = false)
                                     }
                                 }
+                                val watchedErrorMsg = stringResource(DesignR.string.recordings_error_watched_failed)
                                 Button(
                                     enabled = !actionBusy,
                                     onClick = {
@@ -518,7 +530,7 @@ internal fun TvRecordingsScreen(
                                             try {
                                                 onToggleWatched(entry.id, !entry.isWatched)
                                                     .onSuccess { selectedEntryId = null }
-                                                    .onFailure { actionError = it.message ?: "Failed to update watched state" }
+                                                    .onFailure { actionError = it.message ?: watchedErrorMsg }
                                             } finally {
                                                 actionBusy = false
                                             }
@@ -531,7 +543,9 @@ internal fun TvRecordingsScreen(
                                     Icon(MuxGridIcons.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        text = if (entry.isWatched) "Mark as Unwatched" else "Mark as Watched",
+                                        text = stringResource(
+                                            if (entry.isWatched) DesignR.string.recordings_mark_unwatched else DesignR.string.recordings_mark_watched,
+                                        ),
                                         maxLines = 1,
                                         softWrap = false,
                                     )
@@ -552,7 +566,7 @@ internal fun TvRecordingsScreen(
                             ) {
                                 Icon(MuxGridIcons.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Delete Recording", maxLines = 1, softWrap = false)
+                                Text(stringResource(DesignR.string.recordings_delete_recording), maxLines = 1, softWrap = false)
                             }
                         }
                         DvrState.SCHEDULED -> {
@@ -572,7 +586,7 @@ internal fun TvRecordingsScreen(
                                     Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        text = if (isLiveWindow) "Watch Live" else "Watch Channel",
+                                        text = stringResource(if (isLiveWindow) DesignR.string.live_watch_live else DesignR.string.live_watch_channel),
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         softWrap = false,
@@ -594,7 +608,7 @@ internal fun TvRecordingsScreen(
                             ) {
                                 Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Cancel Timer", maxLines = 1, softWrap = false)
+                                Text(stringResource(DesignR.string.recordings_cancel_timer), maxLines = 1, softWrap = false)
                             }
                         }
                         DvrState.MISSED, DvrState.INVALID -> {
@@ -613,7 +627,7 @@ internal fun TvRecordingsScreen(
                                 ) {
                                     Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Watch Channel", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                                    Text(stringResource(DesignR.string.live_watch_channel), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                                 }
                             }
                             Button(
@@ -631,7 +645,7 @@ internal fun TvRecordingsScreen(
                             ) {
                                 Icon(MuxGridIcons.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Delete Recording", maxLines = 1, softWrap = false)
+                                Text(stringResource(DesignR.string.recordings_delete_recording), maxLines = 1, softWrap = false)
                             }
                         }
                     }
@@ -644,7 +658,7 @@ internal fun TvRecordingsScreen(
                     ) {
                         Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Close", maxLines = 1, softWrap = false)
+                        Text(stringResource(DesignR.string.common_close), maxLines = 1, softWrap = false)
                     }
                 },
             )
@@ -814,7 +828,7 @@ private fun TvRecordingShelf(
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Text(
-                            text = "Resume at ${formatDurationMs(entry.playPositionSec * 1000L)}",
+                            text = stringResource(DesignR.string.recordings_resume_at, formatDurationMs(entry.playPositionSec * 1000L)),
                             style = MuxGridType.TabularSmall,
                             color = MuxGridColors.AccentSoft,
                         )

@@ -72,6 +72,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
+import io.github.corebonts.muxgrid.core.designsystem.R as DesignR
+import io.github.corebonts.muxgrid.core.designsystem.rememberLocalizedDateLabels
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -295,7 +298,7 @@ internal fun MobileGuideScreen(
                         ) {
                             Icon(
                                 imageVector = MuxGridIcons.ArrowBack,
-                                contentDescription = "Close search",
+                                contentDescription = stringResource(DesignR.string.guide_close_search),
                                 tint = MuxGridColors.TextSecondary,
                                 modifier = Modifier.size(18.dp),
                             )
@@ -316,7 +319,7 @@ internal fun MobileGuideScreen(
                                 ) {
                                     if (searchQuery.isEmpty()) {
                                         Text(
-                                            text = "Search programs…",
+                                            text = stringResource(DesignR.string.guide_search_placeholder),
                                             style = searchTextStyle.copy(color = MuxGridColors.TextMuted),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
@@ -337,7 +340,7 @@ internal fun MobileGuideScreen(
                             ) {
                                 Icon(
                                     imageVector = MuxGridIcons.Close,
-                                    contentDescription = "Clear search",
+                                    contentDescription = stringResource(DesignR.string.guide_clear_search),
                                     tint = MuxGridColors.AccentSoft,
                                     modifier = Modifier.size(16.dp),
                                 )
@@ -348,6 +351,7 @@ internal fun MobileGuideScreen(
                 MuxGridDivider()
             } else {
                 // Day underline tabs + optional timeline step controls + icon-only search trigger
+                val dateLabels = rememberLocalizedDateLabels()
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -368,7 +372,7 @@ internal fun MobileGuideScreen(
                             key = { _, day -> day.toEpochDay() },
                         ) { idx, day ->
                             BroadcastUnderlineTab(
-                                label = formatDayLabel(day, nowEpochSec),
+                                label = formatDayLabel(day, nowEpochSec, activeZone, dateLabels),
                                 selected = idx == selectedDayIndex,
                                 onClick = {
                                     val target = computeDayJumpWindowStart(
@@ -408,7 +412,7 @@ internal fun MobileGuideScreen(
                     ) {
                         Icon(
                             imageVector = MuxGridIcons.Search,
-                            contentDescription = "Search programs",
+                            contentDescription = stringResource(DesignR.string.guide_search_programs),
                             tint = MuxGridColors.TextSecondary,
                             modifier = Modifier.size(18.dp),
                         )
@@ -448,11 +452,13 @@ internal fun MobileGuideScreen(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            text = "No programs match \"$trimmedQuery\"",
+                            text = stringResource(DesignR.string.guide_no_programs_match, trimmedQuery),
                             style = MuxGridType.CardSubtitle,
                         )
                     }
                 } else {
+                    val searchDateLabels = rememberLocalizedDateLabels()
+                    val onNowLabel = stringResource(DesignR.string.live_on_now)
                     LazyColumn(
                         state = agendaListState,
                         modifier = Modifier.fillMaxSize(),
@@ -532,7 +538,7 @@ internal fun MobileGuideScreen(
                                                 } else if (isLiveNow) {
                                                     Spacer(Modifier.width(8.dp))
                                                     Text(
-                                                        text = "ON NOW",
+                                                        text = onNowLabel,
                                                         color = MuxGridColors.CoralLive,
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.Bold,
@@ -540,7 +546,7 @@ internal fun MobileGuideScreen(
                                                 }
                                             }
                                             Text(
-                                                text = "${channel.name} · ${formatEpochDayHm(event.startEpochSec, nowEpochSec)}",
+                                                text = "${channel.name} · ${formatEpochDayHm(event.startEpochSec, nowEpochSec, activeZone, searchDateLabels)}",
                                                 style = MuxGridType.TabularSmall,
                                                 color = if (isPast) MuxGridColors.TextMuted else MuxGridColors.AccentSoft,
                                             )
@@ -666,7 +672,11 @@ internal fun MobileGuideScreen(
                         ) {
                             Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text(if (isLiveNow) "Watch Live" else "Watch Channel", fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            Text(
+                                stringResource(if (isLiveNow) DesignR.string.live_watch_live else DesignR.string.live_watch_channel),
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                            )
                         }
                     }
 
@@ -689,7 +699,9 @@ internal fun MobileGuideScreen(
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    text = if (linkedDvr.hasResumePosition) "Resume Chase Play" else "Watch from Start",
+                                    text = stringResource(
+                                        if (linkedDvr.hasResumePosition) DesignR.string.recordings_resume_chase_play else DesignR.string.recordings_watch_from_start,
+                                    ),
                                     color = MuxGridColors.AccentSoft,
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
@@ -707,7 +719,7 @@ internal fun MobileGuideScreen(
                                 ) {
                                     Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Start Over", color = MuxGridColors.TextPrimary, maxLines = 1)
+                                    Text(stringResource(DesignR.string.recordings_start_over), color = MuxGridColors.TextPrimary, maxLines = 1)
                                 }
                             }
                             OutlinedButton(
@@ -720,7 +732,7 @@ internal fun MobileGuideScreen(
                             ) {
                                 Icon(MuxGridIcons.Stop, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Stop & Save", color = MuxGridColors.TextPrimary, maxLines = 1)
+                                Text(stringResource(DesignR.string.recordings_stop_and_save), color = MuxGridColors.TextPrimary, maxLines = 1)
                             }
                             OutlinedButton(
                                 enabled = !actionBusy,
@@ -732,7 +744,7 @@ internal fun MobileGuideScreen(
                             ) {
                                 Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Abort Recording", color = MuxGridColors.CoralLive, maxLines = 1)
+                                Text(stringResource(DesignR.string.recordings_abort_recording), color = MuxGridColors.CoralLive, maxLines = 1)
                             }
                         }
                         DvrState.COMPLETED -> if (!linkedDvr.isFileMissing) {
@@ -748,7 +760,9 @@ internal fun MobileGuideScreen(
                                 Icon(MuxGridIcons.Play, contentDescription = null, tint = MuxGridColors.AccentSoft, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    text = if (linkedDvr.hasResumePosition) "Resume Recording" else "Play Recording",
+                                    text = stringResource(
+                                        if (linkedDvr.hasResumePosition) DesignR.string.recordings_resume_recording else DesignR.string.recordings_play_recording,
+                                    ),
                                     color = MuxGridColors.AccentSoft,
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
@@ -766,7 +780,7 @@ internal fun MobileGuideScreen(
                                 ) {
                                     Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Start Over", color = MuxGridColors.TextPrimary, maxLines = 1)
+                                    Text(stringResource(DesignR.string.recordings_start_over), color = MuxGridColors.TextPrimary, maxLines = 1)
                                 }
                             }
                         }
@@ -781,10 +795,11 @@ internal fun MobileGuideScreen(
                             ) {
                                 Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Cancel Timer", color = MuxGridColors.CoralLive, maxLines = 1)
+                                Text(stringResource(DesignR.string.recordings_cancel_timer), color = MuxGridColors.CoralLive, maxLines = 1)
                             }
                         }
                         else -> if (!isPast) {
+                            val scheduleFailedMsg = stringResource(DesignR.string.recordings_error_schedule_failed)
                             OutlinedButton(
                                 enabled = !actionBusy,
                                 shape = MuxGridShapes.Sm,
@@ -795,7 +810,7 @@ internal fun MobileGuideScreen(
                                         try {
                                             onScheduleRecording(detailEvent.id)
                                                 .onSuccess { selectedEventKey = null }
-                                                .onFailure { actionError = it.message ?: "Failed to schedule recording" }
+                                                .onFailure { actionError = it.message ?: scheduleFailedMsg }
                                         } finally {
                                             actionBusy = false
                                         }
@@ -806,7 +821,9 @@ internal fun MobileGuideScreen(
                                 Icon(MuxGridIcons.Record, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(14.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    text = if (isLiveNow) "Record Now" else "Record",
+                                    text = stringResource(
+                                        if (isLiveNow) DesignR.string.recordings_record_now else DesignR.string.recordings_record,
+                                    ),
                                     color = MuxGridColors.CoralLive,
                                     maxLines = 1,
                                 )
@@ -874,7 +891,7 @@ private fun TimelineNowChip(
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "Now",
+            text = stringResource(DesignR.string.guide_now),
             color = fg,
             fontSize = 11.5.sp,
             fontWeight = if (highlighted) FontWeight.SemiBold else FontWeight.Medium,
@@ -907,7 +924,7 @@ private fun MobileTimelineGrid(
     if (channels.isEmpty()) {
         val (emptyText, showSpinner) = syncStatusMessage(
             connectionState = connectionState,
-            emptyLabel = "No channels available",
+            emptyLabel = stringResource(DesignR.string.live_no_channels_available),
         )
         MuxGridSyncingState(
             message = emptyText,
@@ -997,7 +1014,7 @@ private fun MobileTimelineGrid(
                 ) {
                     if (!isPortrait) {
                         Text(
-                            text = "CHANNELS",
+                            text = stringResource(DesignR.string.guide_channels_header),
                             style = MuxGridType.Eyebrow,
                         )
                     }
@@ -1012,6 +1029,7 @@ private fun MobileTimelineGrid(
                 )
             }
 
+            val noProgramDataLabel = stringResource(DesignR.string.guide_no_program_data)
             // Channel rows
             LazyColumn(
                 state = listState,
@@ -1129,7 +1147,7 @@ private fun MobileTimelineGrid(
                                     contentAlignment = Alignment.CenterStart,
                                 ) {
                                     Text(
-                                        text = "No program data",
+                                        text = noProgramDataLabel,
                                         fontSize = 11.sp,
                                         color = MuxGridColors.TextMuted,
                                         maxLines = 1,

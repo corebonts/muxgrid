@@ -16,7 +16,6 @@ Planned improvements and upcoming milestones for **MuxGrid**:
 - **Expanded Automated Test Coverage:** Add JVM unit tests for `TvheadendRepository` and Compose UI smoke tests to complement the existing protocol, store, picon, proxy, and formatter test suites.
 
 ## Future Ideas (Community & Ecosystem Growth)
-- **String Resources & Localization:** Extract hardcoded UI strings into `strings.xml` to enable community translations.
 - **LAN Server Auto-Discovery:** Discover Tvheadend instances on the local network (`_htsp._tcp` / NSD) during onboarding.
 - **Manual Time-Window Timers & EPG Genre Filtering:** Support Tvheadend repeating time-window timers (`timerec`) and optional DVB genre filtering/colors in the EPG Guide.
 - **Optional HTSP `subscribe` Timeshift Strategy:** Implement an alternate `HtspSubscribeStrategy` behind the `LiveStreamStrategy` seam for users who prefer Tvheadend server-side timeshift over local device ring buffers (and HTSP-only `9982/tcp` networking).

@@ -1,6 +1,7 @@
 package io.github.corebonts.muxgrid.core.designsystem
 
 import androidx.activity.compose.BackHandler
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -61,6 +62,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -79,12 +82,12 @@ import kotlinx.coroutines.launch
 
 internal enum class OnboardingStep(
     val number: Int,
-    val label: String,
-    val subtitle: String,
+    @StringRes val labelRes: Int,
+    @StringRes val subtitleRes: Int,
 ) {
-    HOST(1, "Server", "Host or IP address"),
-    PORTS(2, "Ports", "HTSP & HTTP ports"),
-    CREDENTIALS(3, "Account", "Login & verification"),
+    HOST(1, R.string.onboarding_step_server, R.string.onboarding_step_server_subtitle),
+    PORTS(2, R.string.onboarding_step_ports, R.string.onboarding_step_ports_subtitle),
+    CREDENTIALS(3, R.string.onboarding_step_account, R.string.onboarding_step_account_subtitle),
 }
 
 private enum class StepBadgeState {
@@ -107,6 +110,7 @@ fun OnboardingServerScreen(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
 
@@ -209,7 +213,7 @@ fun OnboardingServerScreen(
     fun validateHostOnly(): String? {
         val hostCheck = validateServerHost(host)
         if (hostCheck.error != null) {
-            validationError = hostCheck.error
+            validationError = if (hostCheck.errorRes != 0) resources.getString(hostCheck.errorRes) else hostCheck.error
             return null
         }
         validationError = null
@@ -231,7 +235,7 @@ fun OnboardingServerScreen(
                 result.profile
             }
             is ServerValidationResult.Invalid -> {
-                validationError = result.message
+                validationError = if (result.messageRes != 0) resources.getString(result.messageRes) else result.message
                 null
             }
         }
@@ -391,9 +395,9 @@ fun OnboardingServerScreen(
                 if (htsp == null || http == null) {
                     portsAutoDetected = false
                     validationError = if (htsp == null) {
-                        "Enter a valid HTSP port (default 9982)"
+                        resources.getString(R.string.onboarding_validation_htsp_port)
                     } else {
-                        "Enter a valid HTTP port (default 9981)"
+                        resources.getString(R.string.onboarding_validation_http_port)
                     }
                     activeStepName = OnboardingStep.PORTS.name
                 } else {
@@ -543,23 +547,24 @@ fun OnboardingServerScreen(
         }
     }
 
+    @Composable
     fun stepSummaryText(step: OnboardingStep): String = when (step) {
-        OnboardingStep.HOST -> host.trim().ifEmpty { step.subtitle }
+        OnboardingStep.HOST -> host.trim().ifEmpty { stringResource(step.subtitleRes) }
         OnboardingStep.PORTS -> {
             val h = htspPortText.trim().ifEmpty { ServerProfile.DEFAULT_HTSP_PORT.toString() }
             val p = httpPortText.trim().ifEmpty { ServerProfile.DEFAULT_HTTP_PORT.toString() }
             when {
-                portsAutoDetected -> "$h / $p · Detected"
-                activePortProbe?.bothReachable == true -> "$h / $p · Reachable"
-                activePortProbe != null -> "$h / $p · Check ports"
+                portsAutoDetected -> stringResource(R.string.onboarding_ports_detected, h, p)
+                activePortProbe?.bothReachable == true -> stringResource(R.string.onboarding_ports_reachable, h, p)
+                activePortProbe != null -> stringResource(R.string.onboarding_ports_check, h, p)
                 else -> "$h / $p"
             }
         }
         OnboardingStep.CREDENTIALS -> when {
-            activeDiagnostics != null -> activeDiagnostics.capabilitySummary
+            activeDiagnostics != null -> activeDiagnostics.localizedCapabilitySummary()
             username.isNotBlank() -> username.trim()
-            credentialsUnlocked -> "Anonymous LAN"
-            else -> step.subtitle
+            credentialsUnlocked -> stringResource(R.string.onboarding_anonymous_lan)
+            else -> stringResource(step.subtitleRes)
         }
     }
 
@@ -630,14 +635,14 @@ fun OnboardingServerScreen(
                     )
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            text = if (canCancel) "Tvheadend Server" else "Connect to Tvheadend",
+                            text = stringResource(if (canCancel) R.string.onboarding_title_edit else R.string.onboarding_title_connect),
                             style = MuxGridType.Title,
                             fontSize = if (isTv) 20.sp else 19.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = "HTSP control & EPG paired with HTTP broadcast playback",
+                            text = stringResource(R.string.onboarding_tagline),
                             style = MuxGridType.CardSubtitle,
                             fontSize = 12.sp,
                             maxLines = 1,
@@ -655,7 +660,7 @@ fun OnboardingServerScreen(
                     ) {
                         Icon(
                             imageVector = MuxGridIcons.Close,
-                            contentDescription = "Cancel",
+                            contentDescription = stringResource(R.string.common_cancel),
                             tint = MuxGridColors.TextSecondary,
                             modifier = Modifier.size(20.dp),
                         )
@@ -692,7 +697,7 @@ fun OnboardingServerScreen(
                         if (isTv && canCancel) {
                             Spacer(Modifier.height(6.dp))
                             WizardButton(
-                                label = "Cancel",
+                                label = stringResource(R.string.common_cancel),
                                 icon = MuxGridIcons.Close,
                                 isPrimary = false,
                                 isTv = true,
@@ -900,7 +905,7 @@ private fun WizardStepRailItem(
             verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             Text(
-                text = step.label,
+                text = stringResource(step.labelRes),
                 fontSize = 13.5.sp,
                 fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Medium,
                 color = titleColor,
@@ -941,7 +946,7 @@ private fun WizardAccordionHeader(
             verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             Text(
-                text = step.label,
+                text = stringResource(step.labelRes),
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = if (enabled || isExpanded) MuxGridColors.TextPrimary else MuxGridColors.TextMuted,
@@ -1058,19 +1063,19 @@ private fun WizardStepBody(
     when (step) {
         OnboardingStep.HOST -> {
             Text(
-                text = "Where is Tvheadend running?",
+                text = stringResource(R.string.onboarding_host_heading),
                 style = MuxGridType.CardTitle,
                 fontSize = 15.sp,
             )
             Text(
-                text = "Enter your server IP address or hostname. Standard ports (9982 / 9981) are detected automatically.",
+                text = stringResource(R.string.onboarding_host_body),
                 style = MuxGridType.CardSubtitle,
             )
             OutlinedTextField(
                 value = host,
                 onValueChange = onHostChanged,
-                label = { Text("Server Host / IP") },
-                placeholder = { Text("tvheadend.local or 192.168.1.10") },
+                label = { Text(stringResource(R.string.onboarding_host_label)) },
+                placeholder = { Text(stringResource(R.string.onboarding_host_placeholder)) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 keyboardActions = KeyboardActions(onNext = { onAdvanceFromHost() }),
@@ -1088,7 +1093,7 @@ private fun WizardStepBody(
                 horizontalArrangement = Arrangement.End,
             ) {
                 WizardButton(
-                    label = if (probingPorts) "Detecting Ports…" else "Next",
+                    label = stringResource(if (probingPorts) R.string.onboarding_detecting_ports else R.string.common_next),
                     icon = if (probingPorts) null else MuxGridIcons.ChevronRight,
                     trailingIcon = !probingPorts,
                     isPrimary = true,
@@ -1103,16 +1108,18 @@ private fun WizardStepBody(
 
         OnboardingStep.PORTS -> {
             Text(
-                text = "Server Ports",
+                text = stringResource(R.string.onboarding_ports_heading),
                 style = MuxGridType.CardTitle,
                 fontSize = 15.sp,
             )
             Text(
-                text = if (portProbe != null && !portProbe.bothReachable) {
-                    "One or more default ports did not respond. Verify your Tvheadend HTSP and HTTP ports."
-                } else {
-                    "Standard Tvheadend ports are 9982 (HTSP) and 9981 (HTTP)."
-                },
+                text = stringResource(
+                    if (portProbe != null && !portProbe.bothReachable) {
+                        R.string.onboarding_ports_failed_hint
+                    } else {
+                        R.string.onboarding_ports_default_hint
+                    },
+                ),
                 style = MuxGridType.CardSubtitle,
             )
 
@@ -1123,7 +1130,7 @@ private fun WizardStepBody(
                 OutlinedTextField(
                     value = htspPortText,
                     onValueChange = onHtspPortChanged,
-                    label = { Text("HTSP Port") },
+                    label = { Text(stringResource(R.string.onboarding_htsp_port_label)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Number,
@@ -1138,7 +1145,7 @@ private fun WizardStepBody(
                 OutlinedTextField(
                     value = httpPortText,
                     onValueChange = onHttpPortChanged,
-                    label = { Text("HTTP Port") },
+                    label = { Text(stringResource(R.string.onboarding_http_port_label)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Number,
@@ -1166,7 +1173,7 @@ private fun WizardStepBody(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     WizardButton(
-                        label = "Back",
+                        label = stringResource(R.string.common_back),
                         icon = MuxGridIcons.ChevronLeft,
                         isPrimary = false,
                         isTv = isTv,
@@ -1176,7 +1183,7 @@ private fun WizardStepBody(
                     )
                     Spacer(Modifier.width(8.dp))
                     WizardButton(
-                        label = if (probingPorts) "Probing…" else "Test Ports",
+                        label = stringResource(if (probingPorts) R.string.onboarding_probing else R.string.onboarding_test_ports),
                         icon = if (probingPorts) null else MuxGridIcons.Refresh,
                         isPrimary = false,
                         isTv = isTv,
@@ -1187,7 +1194,7 @@ private fun WizardStepBody(
                     )
                     Spacer(Modifier.width(24.dp))
                     WizardButton(
-                        label = "Next",
+                        label = stringResource(R.string.common_next),
                         icon = MuxGridIcons.ChevronRight,
                         trailingIcon = true,
                         isPrimary = true,
@@ -1207,7 +1214,7 @@ private fun WizardStepBody(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         WizardButton(
-                            label = "Back",
+                            label = stringResource(R.string.common_back),
                             icon = MuxGridIcons.ChevronLeft,
                             isPrimary = false,
                             isTv = false,
@@ -1216,7 +1223,7 @@ private fun WizardStepBody(
                             modifier = Modifier.weight(1f),
                         )
                         WizardButton(
-                            label = if (probingPorts) "Probing…" else "Test Ports",
+                            label = stringResource(if (probingPorts) R.string.onboarding_probing else R.string.onboarding_test_ports),
                             icon = if (probingPorts) null else MuxGridIcons.Refresh,
                             isPrimary = false,
                             isTv = false,
@@ -1227,7 +1234,7 @@ private fun WizardStepBody(
                         )
                     }
                     WizardButton(
-                        label = "Next",
+                        label = stringResource(R.string.common_next),
                         icon = MuxGridIcons.ChevronRight,
                         trailingIcon = true,
                         isPrimary = true,
@@ -1242,17 +1249,22 @@ private fun WizardStepBody(
 
         OnboardingStep.CREDENTIALS -> {
             Text(
-                text = "Credentials & Preflight",
+                text = stringResource(R.string.onboarding_credentials_heading),
                 style = MuxGridType.CardTitle,
                 fontSize = 15.sp,
             )
+            val baseHint = stringResource(R.string.onboarding_credentials_hint)
+            val detectedSuffix = if (portsAutoDetected) {
+                " " + stringResource(
+                    R.string.onboarding_credentials_ports_detected,
+                    htspPortText.trim(),
+                    httpPortText.trim(),
+                )
+            } else {
+                ""
+            }
             Text(
-                text = buildString {
-                    append("Leave blank if Tvheadend allows anonymous LAN access.")
-                    if (portsAutoDetected) {
-                        append(" Ports ${htspPortText.trim()}/${httpPortText.trim()} detected.")
-                    }
-                },
+                text = baseHint + detectedSuffix,
                 style = MuxGridType.CardSubtitle,
             )
 
@@ -1264,7 +1276,7 @@ private fun WizardStepBody(
                     OutlinedTextField(
                         value = username,
                         onValueChange = onUsernameChanged,
-                        label = { Text("Username") },
+                        label = { Text(stringResource(R.string.onboarding_username_label)) },
                         placeholder = { Text("muxgrid") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
@@ -1277,7 +1289,7 @@ private fun WizardStepBody(
                     OutlinedTextField(
                         value = password,
                         onValueChange = onPasswordChanged,
-                        label = { Text("Password") },
+                        label = { Text(stringResource(R.string.onboarding_password_label)) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(
@@ -1295,7 +1307,7 @@ private fun WizardStepBody(
                 OutlinedTextField(
                     value = username,
                     onValueChange = onUsernameChanged,
-                    label = { Text("Username") },
+                    label = { Text(stringResource(R.string.onboarding_username_label)) },
                     placeholder = { Text("muxgrid") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
@@ -1307,14 +1319,16 @@ private fun WizardStepBody(
                 OutlinedTextField(
                     value = password,
                     onValueChange = onPasswordChanged,
-                    label = { Text("Password") },
+                    label = { Text(stringResource(R.string.onboarding_password_label)) },
                     singleLine = true,
                     visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
                         IconButton(onClick = onTogglePasswordVisible) {
                             Icon(
                                 imageVector = if (passwordVisible) MuxGridIcons.VisibilityOff else MuxGridIcons.Visibility,
-                                contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                                contentDescription = stringResource(
+                                    if (passwordVisible) R.string.a11y_hide_password else R.string.a11y_show_password,
+                                ),
                                 tint = MuxGridColors.TextSecondary,
                                 modifier = Modifier.size(18.dp),
                             )
@@ -1341,10 +1355,10 @@ private fun WizardStepBody(
             val hasBlockers = diagnosticsReport?.hasBlockers == true
             val hasDegraded = diagnosticsReport?.hasDegraded == true && !hasBlockers
             val primaryLabel = when {
-                saving -> "Saving…"
-                runningDiagnostics -> "Checking…"
-                hasDegraded -> "Continue Anyway"
-                else -> "Save & Connect"
+                saving -> stringResource(R.string.onboarding_saving)
+                runningDiagnostics -> stringResource(R.string.onboarding_checking)
+                hasDegraded -> stringResource(R.string.onboarding_continue_anyway)
+                else -> stringResource(R.string.onboarding_save_and_connect)
             }
 
             if (useTwoPane) {
@@ -1353,7 +1367,7 @@ private fun WizardStepBody(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     WizardButton(
-                        label = "Back",
+                        label = stringResource(R.string.common_back),
                         icon = MuxGridIcons.ChevronLeft,
                         isPrimary = false,
                         isTv = isTv,
@@ -1363,7 +1377,7 @@ private fun WizardStepBody(
                     )
                     Spacer(Modifier.width(8.dp))
                     WizardButton(
-                        label = if (diagnosticsReport != null) "Retest" else "Test",
+                        label = stringResource(if (diagnosticsReport != null) R.string.onboarding_retest else R.string.onboarding_test),
                         icon = if (runningDiagnostics) null else MuxGridIcons.Refresh,
                         isPrimary = hasBlockers,
                         isTv = isTv,
@@ -1375,7 +1389,7 @@ private fun WizardStepBody(
                     Spacer(Modifier.width(24.dp))
                     if (hasBlockers) {
                         WizardButton(
-                            label = "Save Anyway",
+                            label = stringResource(R.string.onboarding_save_anyway),
                             icon = null,
                             isPrimary = false,
                             isTv = isTv,
@@ -1406,7 +1420,7 @@ private fun WizardStepBody(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         WizardButton(
-                            label = "Back",
+                            label = stringResource(R.string.common_back),
                             icon = MuxGridIcons.ChevronLeft,
                             isPrimary = false,
                             isTv = false,
@@ -1415,7 +1429,7 @@ private fun WizardStepBody(
                             modifier = Modifier.weight(1f),
                         )
                         WizardButton(
-                            label = if (diagnosticsReport != null) "Retest" else "Test",
+                            label = stringResource(if (diagnosticsReport != null) R.string.onboarding_retest else R.string.onboarding_test),
                             icon = if (runningDiagnostics) null else MuxGridIcons.Refresh,
                             isPrimary = hasBlockers,
                             isTv = false,
@@ -1427,7 +1441,7 @@ private fun WizardStepBody(
                     }
                     if (hasBlockers) {
                         WizardButton(
-                            label = "Save Anyway",
+                            label = stringResource(R.string.onboarding_save_anyway),
                             icon = null,
                             isPrimary = false,
                             isTv = false,
@@ -1484,13 +1498,19 @@ private fun PortProbeBadgesRow(probe: PortProbeResult) {
             probe.bothReachable -> listOfNotNull(probe.serverName, probe.serverVersion)
                 .filter { it.isNotBlank() }
                 .joinToString(" ")
-                .let { if (it.isNotEmpty()) "Detected $it" else "Both ports responded" }
+                .let {
+                    if (it.isNotEmpty()) {
+                        stringResource(R.string.onboarding_probe_detected, it)
+                    } else {
+                        stringResource(R.string.onboarding_probe_both_responded)
+                    }
+                }
             !probe.htspReachable && !probe.httpReachable ->
-                probe.htspError ?: "Neither port responded on ${probe.host}"
+                probe.htspError ?: stringResource(R.string.onboarding_probe_neither_responded, probe.host)
             !probe.htspReachable ->
-                probe.htspError ?: "HTSP port ${probe.htspPort} did not respond"
+                probe.htspError ?: stringResource(R.string.onboarding_probe_htsp_no_response, probe.htspPort)
             else ->
-                "HTTP port ${probe.httpPort} did not respond (Live TV playback needs HTTP)"
+                stringResource(R.string.onboarding_probe_http_no_response, probe.httpPort)
         }
         Text(
             text = detail,
@@ -1527,7 +1547,10 @@ private fun PortStatusChip(
             modifier = Modifier.size(14.dp),
         )
         Text(
-            text = if (reachable) "$label · OK" else "$label · Unreachable",
+            text = stringResource(
+                if (reachable) R.string.onboarding_port_chip_ok else R.string.onboarding_port_chip_unreachable,
+                label,
+            ),
             color = color,
             fontSize = 11.5.sp,
             fontWeight = FontWeight.SemiBold,
@@ -1656,7 +1679,10 @@ private fun WizardButtonIcon(
 
 internal sealed interface ServerValidationResult {
     data class Valid(val profile: ServerProfile) : ServerValidationResult
-    data class Invalid(val message: String) : ServerValidationResult
+    data class Invalid(
+        val message: String,
+        @StringRes val messageRes: Int = 0,
+    ) : ServerValidationResult
 }
 
 internal fun validateServerProfileInput(
@@ -1669,16 +1695,22 @@ internal fun validateServerProfileInput(
 ): ServerValidationResult {
     val hostValidation = validateServerHost(rawHost)
     if (hostValidation.error != null) {
-        return ServerValidationResult.Invalid(hostValidation.error)
+        return ServerValidationResult.Invalid(hostValidation.error, hostValidation.errorRes)
     }
     val cleanHost = hostValidation.normalizedHost!!
     val htspPort = rawHtspPort.trim().toIntOrNull()
     if (htspPort == null || htspPort !in 1..65535) {
-        return ServerValidationResult.Invalid("Enter a valid HTSP port (default 9982)")
+        return ServerValidationResult.Invalid(
+            message = "Enter a valid HTSP port (default 9982)",
+            messageRes = R.string.onboarding_validation_htsp_port,
+        )
     }
     val httpPort = rawHttpPort.trim().toIntOrNull()
     if (httpPort == null || httpPort !in 1..65535) {
-        return ServerValidationResult.Invalid("Enter a valid HTTP port (default 9981)")
+        return ServerValidationResult.Invalid(
+            message = "Enter a valid HTTP port (default 9981)",
+            messageRes = R.string.onboarding_validation_http_port,
+        )
     }
     return ServerValidationResult.Valid(
         ServerProfile(
@@ -1696,27 +1728,43 @@ internal fun validateServerProfileInput(
 private data class HostValidation(
     val normalizedHost: String? = null,
     val error: String? = null,
+    @StringRes val errorRes: Int = 0,
 )
 
 private fun validateServerHost(rawHost: String): HostValidation {
     val trimmed = rawHost.trim()
     if (trimmed.isEmpty()) {
-        return HostValidation(error = "Enter your Tvheadend server IP or hostname")
+        return HostValidation(
+            error = "Enter your Tvheadend server IP or hostname",
+            errorRes = R.string.onboarding_validation_host_empty,
+        )
     }
     if (trimmed.any { it.isWhitespace() }) {
-        return HostValidation(error = "Host or IP must not contain spaces")
+        return HostValidation(
+            error = "Host or IP must not contain spaces",
+            errorRes = R.string.onboarding_validation_host_spaces,
+        )
     }
     if ("://" in trimmed || '/' in trimmed || '?' in trimmed || '#' in trimmed || '@' in trimmed) {
-        return HostValidation(error = "Enter a hostname or IP without a URL scheme or path")
+        return HostValidation(
+            error = "Enter a hostname or IP without a URL scheme or path",
+            errorRes = R.string.onboarding_validation_host_scheme,
+        )
     }
 
     if ('[' in trimmed || ']' in trimmed) {
         if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
-            return HostValidation(error = "Invalid bracketed IPv6 address")
+            return HostValidation(
+                error = "Invalid bracketed IPv6 address",
+                errorRes = R.string.onboarding_validation_ipv6_bracket,
+            )
         }
         val inner = trimmed.substring(1, trimmed.length - 1)
         if ('[' in inner || ']' in inner || !isValidIpv6Literal(inner)) {
-            return HostValidation(error = "Enter a valid IPv6 address")
+            return HostValidation(
+                error = "Enter a valid IPv6 address",
+                errorRes = R.string.onboarding_validation_ipv6,
+            )
         }
         return HostValidation(normalizedHost = inner)
     }
@@ -1724,16 +1772,25 @@ private fun validateServerHost(rawHost: String): HostValidation {
     if (':' in trimmed) {
         val colonCount = trimmed.count { it == ':' }
         if (colonCount == 1) {
-            return HostValidation(error = "Enter the host or IP without a port number")
+            return HostValidation(
+                error = "Enter the host or IP without a port number",
+                errorRes = R.string.onboarding_validation_host_port,
+            )
         }
         if (!isValidIpv6Literal(trimmed)) {
-            return HostValidation(error = "Enter a valid IPv6 address")
+            return HostValidation(
+                error = "Enter a valid IPv6 address",
+                errorRes = R.string.onboarding_validation_ipv6,
+            )
         }
         return HostValidation(normalizedHost = trimmed)
     }
 
     if (trimmed.length > 253 || trimmed.startsWith('.') || trimmed.endsWith('.') || ".." in trimmed) {
-        return HostValidation(error = "Enter a valid hostname or IP address")
+        return HostValidation(
+            error = "Enter a valid hostname or IP address",
+            errorRes = R.string.onboarding_validation_host_invalid,
+        )
     }
 
     val labels = trimmed.split('.')
@@ -1744,7 +1801,10 @@ private fun validateServerHost(rawHost: String): HostValidation {
         return if (validIpv4) {
             HostValidation(normalizedHost = trimmed)
         } else {
-            HostValidation(error = "Enter a valid IPv4 address")
+            HostValidation(
+                error = "Enter a valid IPv4 address",
+                errorRes = R.string.onboarding_validation_ipv4,
+            )
         }
     }
 
@@ -1757,7 +1817,10 @@ private fun validateServerHost(rawHost: String): HostValidation {
     return if (validHostname) {
         HostValidation(normalizedHost = trimmed)
     } else {
-        HostValidation(error = "Enter a valid hostname or IP address")
+        HostValidation(
+            error = "Enter a valid hostname or IP address",
+            errorRes = R.string.onboarding_validation_host_invalid,
+        )
     }
 }
 

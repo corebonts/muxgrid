@@ -1,5 +1,6 @@
 package io.github.corebonts.muxgrid.feature.mobile
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -40,6 +41,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import io.github.corebonts.muxgrid.core.designsystem.R as DesignR
+import io.github.corebonts.muxgrid.core.designsystem.rememberLocalizedDateLabels
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -80,10 +85,10 @@ import io.github.corebonts.muxgrid.core.model.DvrEntry
 import io.github.corebonts.muxgrid.core.model.DvrState
 import kotlinx.coroutines.launch
 
-private enum class RecordingsFilter(val label: String) {
-    ALL("All"),
-    COMPLETED("Completed"),
-    SCHEDULED("Scheduled"),
+private enum class RecordingsFilter(@StringRes val labelRes: Int) {
+    ALL(DesignR.string.recordings_tab_all),
+    COMPLETED(DesignR.string.recordings_tab_completed),
+    SCHEDULED(DesignR.string.recordings_tab_scheduled),
 }
 
 @Composable
@@ -122,8 +127,9 @@ internal fun MobileRecordingsScreen(
     val scheduled = remember(allList) {
         allList.filter { it.state == DvrState.SCHEDULED }.sortedBy { it.startEpochSec }
     }
-    val completedGroups = remember(allList) {
-        groupCompletedDvrEntries(allList)
+    val untitledFallback = stringResource(DesignR.string.common_untitled_recording)
+    val completedGroups = remember(allList, untitledFallback) {
+        groupCompletedDvrEntries(allList, untitledFallback = untitledFallback)
     }
     val failed = remember(allList) {
         allList.filter { it.state == DvrState.MISSED || it.state == DvrState.INVALID }
@@ -135,7 +141,7 @@ internal fun MobileRecordingsScreen(
         BroadcastPagerTabRow(
             tabs = RecordingsFilter.entries,
             pagerState = pagerState,
-            labelFor = { it.label },
+            labelFor = { stringResource(it.labelRes) },
         )
         MuxGridDivider()
 
@@ -165,7 +171,7 @@ internal fun MobileRecordingsScreen(
                     item {
                         val (emptyText, showSpinner) = syncStatusMessage(
                             connectionState = connectionState,
-                            emptyLabel = "No recordings or scheduled timers",
+                            emptyLabel = stringResource(DesignR.string.recordings_empty),
                         )
                         MuxGridSyncingState(
                             message = emptyText,
@@ -182,7 +188,7 @@ internal fun MobileRecordingsScreen(
                 ) {
                     if (showRecordingNow) {
                         item(key = "hdr_rec_now") {
-                            SectionHeader("RECORDING NOW")
+                            SectionHeader(stringResource(DesignR.string.recordings_section_recording_now))
                         }
                         items(recordingNow, key = { "rec_${it.id}" }) { entry ->
                             val ch = channelById[entry.channelId]
@@ -210,7 +216,7 @@ internal fun MobileRecordingsScreen(
 
                     if (showCompleted) {
                         item(key = "hdr_completed") {
-                            SectionHeader("COMPLETED")
+                            SectionHeader(stringResource(DesignR.string.recordings_section_completed))
                         }
                         items(completedGroups, key = { "grp_${it.key}" }) { group ->
                             if (group.entries.size == 1) {
@@ -259,7 +265,7 @@ internal fun MobileRecordingsScreen(
 
                     if (showScheduled) {
                         item(key = "hdr_scheduled") {
-                            SectionHeader("SCHEDULED")
+                            SectionHeader(stringResource(DesignR.string.recordings_section_scheduled))
                         }
                         items(scheduled, key = { "sched_${it.id}" }) { entry ->
                             ScheduledTimerRow(
@@ -281,7 +287,7 @@ internal fun MobileRecordingsScreen(
 
                     if (showFailed) {
                         item(key = "hdr_failed") {
-                            SectionHeader("MISSED / FAILED")
+                            SectionHeader(stringResource(DesignR.string.recordings_section_missed_failed))
                         }
                         items(failed, key = { "fail_${it.id}" }) { entry ->
                             FailedRecordingRow(
@@ -337,6 +343,7 @@ internal fun MobileRecordingsScreen(
                                 stopEpochSec = entry.stopEpochSec,
                                 nowEpochSec = nowEpochSec,
                                 dataSizeBytes = entry.dataSize,
+                                labels = rememberLocalizedDateLabels(),
                             )
                             Text(meta, style = MuxGridType.TabularSmall)
                         }
@@ -360,13 +367,13 @@ internal fun MobileRecordingsScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    text = "RECORDING NOW · ${formatDurationMs(elapsed * 1000L)}",
+                                    text = stringResource(DesignR.string.recordings_recording_now_elapsed, formatDurationMs(elapsed * 1000L)),
                                     color = MuxGridColors.CoralLive,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                 )
                                 Text(
-                                    text = "${remMins}m left",
+                                    text = stringResource(DesignR.string.time_minutes_left, remMins.toInt()),
                                     style = MuxGridType.TabularSmall,
                                     color = MuxGridColors.TextSecondary,
                                 )
@@ -390,12 +397,12 @@ internal fun MobileRecordingsScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    text = "Resume at ${formatDurationMs(entry.playPositionSec * 1000L)}",
+                                    text = stringResource(DesignR.string.recordings_resume_at, formatDurationMs(entry.playPositionSec * 1000L)),
                                     style = MuxGridType.TabularSmall,
                                     color = MuxGridColors.AccentSoft,
                                 )
                                 Text(
-                                    text = "${remMins}m left",
+                                    text = stringResource(DesignR.string.time_minutes_left, remMins.toInt()),
                                     style = MuxGridType.TabularSmall,
                                     color = MuxGridColors.TextSecondary,
                                 )
@@ -460,7 +467,9 @@ internal fun MobileRecordingsScreen(
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    text = if (entry.hasResumePosition) "Resume Chase Play" else "Watch from Start",
+                                    text = stringResource(
+                                        if (entry.hasResumePosition) DesignR.string.recordings_resume_chase_play else DesignR.string.recordings_watch_from_start,
+                                    ),
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
                                 )
@@ -477,7 +486,7 @@ internal fun MobileRecordingsScreen(
                                 ) {
                                     Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Start Over", color = MuxGridColors.TextPrimary, maxLines = 1)
+                                    Text(stringResource(DesignR.string.recordings_start_over), color = MuxGridColors.TextPrimary, maxLines = 1)
                                 }
                             }
                             if (ch != null) {
@@ -492,7 +501,7 @@ internal fun MobileRecordingsScreen(
                                 ) {
                                     Icon(MuxGridIcons.Live, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Watch Live", color = MuxGridColors.TextPrimary, maxLines = 1)
+                                    Text(stringResource(DesignR.string.live_watch_live), color = MuxGridColors.TextPrimary, maxLines = 1)
                                 }
                             }
                             OutlinedButton(
@@ -505,7 +514,7 @@ internal fun MobileRecordingsScreen(
                             ) {
                                 Icon(MuxGridIcons.Stop, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Stop & Save", color = MuxGridColors.TextPrimary, maxLines = 1)
+                                Text(stringResource(DesignR.string.recordings_stop_and_save), color = MuxGridColors.TextPrimary, maxLines = 1)
                             }
                             OutlinedButton(
                                 enabled = !sheetBusy,
@@ -517,7 +526,7 @@ internal fun MobileRecordingsScreen(
                             ) {
                                 Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Abort Recording", color = MuxGridColors.CoralLive, maxLines = 1)
+                                Text(stringResource(DesignR.string.recordings_abort_recording), color = MuxGridColors.CoralLive, maxLines = 1)
                             }
                         }
                         DvrState.COMPLETED -> {
@@ -538,7 +547,9 @@ internal fun MobileRecordingsScreen(
                                     Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        text = if (entry.hasResumePosition) "Resume Recording" else "Play Recording",
+                                        text = stringResource(
+                                            if (entry.hasResumePosition) DesignR.string.recordings_resume_recording else DesignR.string.recordings_play_recording,
+                                        ),
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                     )
@@ -555,9 +566,10 @@ internal fun MobileRecordingsScreen(
                                     ) {
                                         Icon(MuxGridIcons.Replay, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(6.dp))
-                                        Text("Start Over", color = MuxGridColors.TextPrimary, maxLines = 1)
+                                        Text(stringResource(DesignR.string.recordings_start_over), color = MuxGridColors.TextPrimary, maxLines = 1)
                                     }
                                 }
+                                val watchedErrorMsg = stringResource(DesignR.string.recordings_error_watched_failed)
                                 OutlinedButton(
                                     enabled = !sheetBusy,
                                     onClick = {
@@ -567,7 +579,7 @@ internal fun MobileRecordingsScreen(
                                             try {
                                                 onToggleWatched(entry.id, !entry.isWatched)
                                                     .onSuccess { actionEntryId = null }
-                                                    .onFailure { sheetError = it.message ?: "Failed to update watched state" }
+                                                    .onFailure { sheetError = it.message ?: watchedErrorMsg }
                                             } finally {
                                                 sheetBusy = false
                                             }
@@ -579,7 +591,9 @@ internal fun MobileRecordingsScreen(
                                     Icon(MuxGridIcons.CheckCircle, contentDescription = null, tint = MuxGridColors.TextPrimary, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        text = if (entry.isWatched) "Mark as Unwatched" else "Mark as Watched",
+                                        text = stringResource(
+                                            if (entry.isWatched) DesignR.string.recordings_mark_unwatched else DesignR.string.recordings_mark_watched,
+                                        ),
                                         color = MuxGridColors.TextPrimary,
                                         maxLines = 1,
                                     )
@@ -595,7 +609,7 @@ internal fun MobileRecordingsScreen(
                             ) {
                                 Icon(MuxGridIcons.Delete, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Delete Recording", color = MuxGridColors.CoralLive, maxLines = 1)
+                                Text(stringResource(DesignR.string.recordings_delete_recording), color = MuxGridColors.CoralLive, maxLines = 1)
                             }
                         }
                         DvrState.SCHEDULED -> {
@@ -615,7 +629,11 @@ internal fun MobileRecordingsScreen(
                                 ) {
                                     Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text(if (isLiveWindow) "Watch Live" else "Watch Channel", fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    Text(
+                                        stringResource(if (isLiveWindow) DesignR.string.live_watch_live else DesignR.string.live_watch_channel),
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                    )
                                 }
                             }
                             OutlinedButton(
@@ -628,7 +646,7 @@ internal fun MobileRecordingsScreen(
                             ) {
                                 Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Cancel Timer", color = MuxGridColors.CoralLive, maxLines = 1)
+                                Text(stringResource(DesignR.string.recordings_cancel_timer), color = MuxGridColors.CoralLive, maxLines = 1)
                             }
                         }
                         DvrState.MISSED, DvrState.INVALID -> {
@@ -648,7 +666,7 @@ internal fun MobileRecordingsScreen(
                                 ) {
                                     Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Watch Channel", fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    Text(stringResource(DesignR.string.live_watch_channel), fontWeight = FontWeight.SemiBold, maxLines = 1)
                                 }
                             }
                             OutlinedButton(
@@ -661,7 +679,7 @@ internal fun MobileRecordingsScreen(
                             ) {
                                 Icon(MuxGridIcons.Delete, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Delete Recording", color = MuxGridColors.CoralLive, maxLines = 1)
+                                Text(stringResource(DesignR.string.recordings_delete_recording), color = MuxGridColors.CoralLive, maxLines = 1)
                             }
                         }
                     }
@@ -775,7 +793,7 @@ private fun RecordingNowCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(entry.title, style = MuxGridType.CardTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        text = "${channel?.name ?: "Channel"} · ${formatDurationMs(elapsed * 1000L)} / ${formatDurationMs(dur * 1000L)}",
+                        text = "${channel?.name ?: stringResource(DesignR.string.common_channel)} · ${formatDurationMs(elapsed * 1000L)} / ${formatDurationMs(dur * 1000L)}",
                         style = MuxGridType.TabularSmall,
                     )
                 }
@@ -792,7 +810,9 @@ private fun RecordingNowCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 MuxGridCompactButton(
-                    text = if (entry.hasResumePosition) "Resume Chase Play" else "Watch from Start",
+                    text = stringResource(
+                        if (entry.hasResumePosition) DesignR.string.recordings_resume_chase_play else DesignR.string.recordings_watch_from_start,
+                    ),
                     leadingIcon = if (entry.hasResumePosition) MuxGridIcons.Play else MuxGridIcons.Replay,
                     containerColor = MuxGridColors.Accent,
                     contentColor = MuxGridColors.OnAccent,
@@ -800,7 +820,7 @@ private fun RecordingNowCard(
                 )
                 if (entry.hasResumePosition) {
                     MuxGridCompactButton(
-                        text = "Start Over",
+                        text = stringResource(DesignR.string.recordings_start_over),
                         leadingIcon = MuxGridIcons.Replay,
                         containerColor = MuxGridColors.CardSurface,
                         contentColor = MuxGridColors.TextPrimary,
@@ -808,7 +828,7 @@ private fun RecordingNowCard(
                     )
                 }
                 MuxGridCompactButton(
-                    text = "Stop & Save",
+                    text = stringResource(DesignR.string.recordings_stop_and_save),
                     leadingIcon = MuxGridIcons.Stop,
                     containerColor = Color.Transparent,
                     contentColor = MuxGridColors.TextPrimary,
@@ -844,13 +864,14 @@ private fun CompletedRecordingRow(
     onOpenMenu: () -> Unit,
     startPadding: Dp = 16.dp,
 ) {
+    val dateLabels = rememberLocalizedDateLabels()
     val sizeLabel = formatFileSize(entry.dataSize)
     val metaParts = listOfNotNull(
         channel?.name,
-        formatEpochDayHm(entry.startEpochSec, nowEpochSec),
+        formatEpochDayHm(entry.startEpochSec, nowEpochSec, labels = dateLabels),
         if (entry.hasResumePosition && !entry.isFileMissing) {
             val remaining = (entry.durationSec - entry.playPositionSec).coerceAtLeast(0L)
-            "${remaining / 60L}m left"
+            stringResource(DesignR.string.time_minutes_left, (remaining / 60L).toInt())
         } else {
             formatDurationMinutes(entry.startEpochSec, entry.stopEpochSec)
         },
@@ -978,8 +999,14 @@ private fun SeriesGroupRow(
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 Text(group.title, style = MuxGridType.CardTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val countLabel = pluralStringResource(
+                    DesignR.plurals.recordings_group_count,
+                    group.entries.size,
+                    group.entries.size,
+                )
+                val latestLabel = formatEpochDayHm(latest.startEpochSec, nowEpochSec, labels = rememberLocalizedDateLabels())
                 Text(
-                    text = "${group.entries.size} recordings · Latest ${formatEpochDayHm(latest.startEpochSec, nowEpochSec)}",
+                    text = stringResource(DesignR.string.recordings_group_summary, countLabel, latestLabel),
                     style = MuxGridType.TabularSmall,
                     color = MuxGridColors.TextMuted,
                     maxLines = 1,
@@ -988,7 +1015,7 @@ private fun SeriesGroupRow(
             }
             if (unwatchedCount > 0) {
                 Text(
-                    text = "$unwatchedCount new",
+                    text = stringResource(DesignR.string.recordings_group_new_count, unwatchedCount),
                     color = MuxGridColors.AccentSoft,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -1001,7 +1028,7 @@ private fun SeriesGroupRow(
             }
             Icon(
                 imageVector = if (expanded) MuxGridIcons.ExpandLess else MuxGridIcons.ExpandMore,
-                contentDescription = if (expanded) "Collapse" else "Expand",
+                contentDescription = stringResource(if (expanded) DesignR.string.a11y_collapse else DesignR.string.a11y_expand),
                 tint = MuxGridColors.TextSecondary,
                 modifier = Modifier.size(20.dp),
             )
@@ -1077,6 +1104,7 @@ private fun ScheduledTimerRow(
                     startEpochSec = entry.startEpochSec,
                     stopEpochSec = entry.stopEpochSec,
                     nowEpochSec = nowEpochSec,
+                    labels = rememberLocalizedDateLabels(),
                 ),
                 style = MuxGridType.TabularSmall,
                 color = MuxGridColors.TextMuted,
@@ -1097,7 +1125,7 @@ private fun ScheduledTimerRow(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Icon(MuxGridIcons.Cancel, contentDescription = null, tint = MuxGridColors.CoralLive, modifier = Modifier.size(14.dp))
-                Text("Cancel Timer", color = MuxGridColors.CoralLive, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Text(stringResource(DesignR.string.recordings_cancel_timer), color = MuxGridColors.CoralLive, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
         }
     }
@@ -1153,7 +1181,7 @@ private fun FailedRecordingRow(
             Text(
                 text = listOfNotNull(
                     channel?.name,
-                    formatEpochDayHm(entry.startEpochSec, nowEpochSec),
+                    formatEpochDayHm(entry.startEpochSec, nowEpochSec, labels = rememberLocalizedDateLabels()),
                     entry.error?.takeIf { it.isNotBlank() },
                 ).joinToString(" · "),
                 style = MuxGridType.TabularSmall,
@@ -1169,7 +1197,7 @@ private fun FailedRecordingRow(
                 .clickable(onClick = onDelete)
                 .padding(8.dp),
         ) {
-            Icon(MuxGridIcons.Delete, contentDescription = "Delete Recording", tint = MuxGridColors.CoralLive, modifier = Modifier.size(18.dp))
+            Icon(MuxGridIcons.Delete, contentDescription = stringResource(DesignR.string.recordings_delete_recording), tint = MuxGridColors.CoralLive, modifier = Modifier.size(18.dp))
         }
     }
 }

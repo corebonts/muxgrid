@@ -92,6 +92,17 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import io.github.corebonts.muxgrid.core.designsystem.AppLocaleManager
+import io.github.corebonts.muxgrid.core.designsystem.R as DesignR
+import io.github.corebonts.muxgrid.core.designsystem.descriptionRes
+import io.github.corebonts.muxgrid.core.designsystem.labelRes
+import io.github.corebonts.muxgrid.core.designsystem.localizedCapabilitySummary
+import io.github.corebonts.muxgrid.core.designsystem.localizedConnectionStatusText
+import io.github.corebonts.muxgrid.core.designsystem.localizedLabel
+import io.github.corebonts.muxgrid.core.designsystem.localizedShortLabel
+import io.github.corebonts.muxgrid.core.designsystem.localizedSummary
+import io.github.corebonts.muxgrid.core.designsystem.rememberLocalizedDateLabels
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
@@ -556,7 +567,7 @@ internal fun TvConfirmDialog(
     confirmLabel: String,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    dismissLabel: String = "Cancel",
+    dismissLabel: String = stringResource(DesignR.string.common_cancel),
     isDestructive: Boolean = false,
     enabled: Boolean = true,
 ) {
@@ -825,7 +836,9 @@ private fun TvContent(
                             ) {
                                 Icon(
                                     imageVector = if (isGuideSearchOpen) MuxGridIcons.Close else MuxGridIcons.Search,
-                                    contentDescription = if (isGuideSearchOpen) "Close search" else "Search programs",
+                                    contentDescription = stringResource(
+                                if (isGuideSearchOpen) DesignR.string.guide_close_search else DesignR.string.guide_search_programs,
+                            ),
                                     modifier = Modifier.size(18.dp),
                                 )
                             }
@@ -1118,8 +1131,8 @@ private fun TvContent(
                 ),
         ) {
             val splashStatus = when (connectionState) {
-                ConnectionState.Connecting, is ConnectionState.Syncing -> "Synchronizing…"
-                else -> "Connecting…"
+                ConnectionState.Connecting, is ConnectionState.Syncing -> stringResource(DesignR.string.common_synchronizing)
+                else -> stringResource(DesignR.string.common_connecting)
             }
             MuxGridSplashScreen(
                 backgroundColor = MuxGridColors.CanvasTv,
@@ -1413,11 +1426,11 @@ private fun TvLiveChannelsTab(
 
         if (channels.isEmpty()) {
             val (emptyText, showSpinner) = if (hasAnyChannels) {
-                "No channels match this filter" to false
+                stringResource(DesignR.string.live_no_channels_match_filter) to false
             } else {
                 syncStatusMessage(
                     connectionState = connectionState,
-                    emptyLabel = "No channels available",
+                    emptyLabel = stringResource(DesignR.string.live_no_channels_available),
                 )
             }
             MuxGridSyncingState(
@@ -1427,6 +1440,11 @@ private fun TvLiveChannelsTab(
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
+            // Hoist invariant card labels once above LazyVerticalGrid for 32-bit ARM TV scroll performance
+            val liveRadioLabel = stringResource(DesignR.string.live_radio)
+            val liveStreamLabel = stringResource(DesignR.string.live_stream)
+            val nextProgramFmt = stringResource(DesignR.string.live_next_program)
+            val minsShortFmt = stringResource(DesignR.string.time_minutes_short)
             LazyVerticalGrid(
                 state = gridState,
                 columns = GridCells.Fixed(3),
@@ -1458,6 +1476,10 @@ private fun TvLiveChannelsTab(
                         isFavorite = channel.id in favorites,
                         imageLoader = imageLoader,
                         focusRequester = cardFocusRequester,
+                        liveRadioLabel = liveRadioLabel,
+                        liveStreamLabel = liveStreamLabel,
+                        nextProgramFmt = nextProgramFmt,
+                        minsShortFmt = minsShortFmt,
                         onFocused = { focusMemory.liveChannelId = channel.id },
                         onChannelClick = onChannelClick,
                         onLongClick = { ch ->
@@ -1485,12 +1507,14 @@ private fun TvLiveChannelsTab(
         } else {
             actionChannel.name
         }
+        val dateLabels = rememberLocalizedDateLabels()
         val metaText = when {
             nowEvent != null -> formatProgramModalMeta(
                 channelName = nowEvent.title,
                 startEpochSec = nowEvent.startEpochSec,
                 stopEpochSec = nowEvent.stopEpochSec,
                 nowEpochSec = nowEpochSec,
+                labels = dateLabels,
             )
             activeRecording != null -> formatProgramModalMeta(
                 channelName = activeRecording.title,
@@ -1498,9 +1522,10 @@ private fun TvLiveChannelsTab(
                 stopEpochSec = activeRecording.stopEpochSec,
                 nowEpochSec = nowEpochSec,
                 dataSizeBytes = activeRecording.dataSize,
+                labels = dateLabels,
             )
-            actionChannel.isRadio -> "Live Radio"
-            else -> "Live TV"
+            actionChannel.isRadio -> stringResource(DesignR.string.live_radio)
+            else -> stringResource(DesignR.string.live_tv)
         }
 
         val (subtitleText, descText) = resolveModalSubtitleAndDescription(
@@ -1576,7 +1601,7 @@ private fun TvLiveChannelsTab(
 
                     chNowNext?.next?.let { nextEv ->
                         Text(
-                            text = "Next ${formatEpochHm(nextEv.startEpochSec)} · ${nextEv.title}",
+                            text = stringResource(DesignR.string.live_next_program, formatEpochHm(nextEv.startEpochSec), nextEv.title),
                             style = MuxGridType.TabularSmall,
                             color = MuxGridColors.TextMuted,
                             maxLines = 1,
@@ -1603,7 +1628,7 @@ private fun TvLiveChannelsTab(
                     ) {
                         Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Watch Live", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                        Text(stringResource(DesignR.string.live_watch_live), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                     }
 
                     if (activeRecording != null) {
@@ -1624,7 +1649,9 @@ private fun TvLiveChannelsTab(
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = if (activeRecording.hasResumePosition) "Resume Chase Play" else "Watch from Start",
+                                text = stringResource(
+                                    if (activeRecording.hasResumePosition) DesignR.string.recordings_resume_chase_play else DesignR.string.recordings_watch_from_start,
+                                ),
                                 maxLines = 1,
                                 softWrap = false,
                             )
@@ -1642,7 +1669,7 @@ private fun TvLiveChannelsTab(
                             ) {
                                 Icon(MuxGridIcons.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Start Over", maxLines = 1, softWrap = false)
+                                Text(stringResource(DesignR.string.recordings_start_over), maxLines = 1, softWrap = false)
                             }
                         }
                         Button(
@@ -1654,7 +1681,7 @@ private fun TvLiveChannelsTab(
                         ) {
                             Icon(MuxGridIcons.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Stop & Save", maxLines = 1, softWrap = false)
+                            Text(stringResource(DesignR.string.recordings_stop_and_save), maxLines = 1, softWrap = false)
                         }
                         Button(
                             enabled = !actionBusy,
@@ -1665,7 +1692,7 @@ private fun TvLiveChannelsTab(
                         ) {
                             Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Abort Recording", maxLines = 1, softWrap = false)
+                            Text(stringResource(DesignR.string.recordings_abort_recording), maxLines = 1, softWrap = false)
                         }
                     } else if (linkedNowDvr?.state == DvrState.SCHEDULED) {
                         Button(
@@ -1677,9 +1704,10 @@ private fun TvLiveChannelsTab(
                         ) {
                             Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Cancel Timer", maxLines = 1, softWrap = false)
+                            Text(stringResource(DesignR.string.recordings_cancel_timer), maxLines = 1, softWrap = false)
                         }
                     } else if (nowEvent != null) {
+                        val scheduleFailedMsg = stringResource(DesignR.string.recordings_error_schedule_failed)
                         Button(
                             enabled = !actionBusy,
                             onClick = {
@@ -1689,7 +1717,7 @@ private fun TvLiveChannelsTab(
                                     try {
                                         onRecordEvent(nowEvent.id)
                                             .onSuccess { actionChannelId = null }
-                                            .onFailure { actionError = it.message ?: "Failed to schedule recording" }
+                                            .onFailure { actionError = it.message ?: scheduleFailedMsg }
                                     } finally {
                                         actionBusy = false
                                     }
@@ -1701,7 +1729,7 @@ private fun TvLiveChannelsTab(
                         ) {
                             Icon(MuxGridIcons.Record, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Record Now", maxLines = 1, softWrap = false)
+                            Text(stringResource(DesignR.string.recordings_record_now), maxLines = 1, softWrap = false)
                         }
                     }
 
@@ -1722,7 +1750,9 @@ private fun TvLiveChannelsTab(
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = if (isFav) "Remove from Favorites" else "Add to Favorites",
+                            text = stringResource(
+                                if (isFav) DesignR.string.live_remove_from_favorites else DesignR.string.live_add_to_favorites,
+                            ),
                             maxLines = 1,
                             softWrap = false,
                         )
@@ -1740,7 +1770,7 @@ private fun TvLiveChannelsTab(
                     ) {
                         Icon(MuxGridIcons.Guide, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("View in Guide", maxLines = 1, softWrap = false)
+                        Text(stringResource(DesignR.string.live_view_in_guide), maxLines = 1, softWrap = false)
                     }
 
                     Button(
@@ -1752,7 +1782,7 @@ private fun TvLiveChannelsTab(
                     ) {
                         Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Close", maxLines = 1, softWrap = false)
+                        Text(stringResource(DesignR.string.common_close), maxLines = 1, softWrap = false)
                     }
                 },
             )
@@ -1803,6 +1833,10 @@ private fun TvChannelCard(
     isFavorite: Boolean,
     imageLoader: ImageLoader,
     focusRequester: FocusRequester,
+    liveRadioLabel: String,
+    liveStreamLabel: String,
+    nextProgramFmt: String,
+    minsShortFmt: String,
     onFocused: () -> Unit,
     onChannelClick: (Channel) -> Unit,
     onLongClick: (Channel) -> Unit,
@@ -1813,8 +1847,8 @@ private fun TvChannelCard(
         channel.icon?.let { PiconModel(channel.id, it) }
     }
     val nextProgram = nowNext?.next
-    val nextLabel = remember(nextProgram?.id, nextProgram?.startEpochSec, nextProgram?.title) {
-        nextProgram?.let { "Next ${formatEpochHm(it.startEpochSec)} · ${it.title}" } ?: ""
+    val nextLabel = remember(nextProgram?.id, nextProgram?.startEpochSec, nextProgram?.title, nextProgramFmt) {
+        nextProgram?.let { String.format(nextProgramFmt, formatEpochHm(it.startEpochSec), it.title) } ?: ""
     }
     val handleClick = remember(channel, onChannelClick) { { onChannelClick(channel) } }
     val handleLongClick = remember(channel, onLongClick) { { onLongClick(channel) } }
@@ -1930,12 +1964,12 @@ private fun TvChannelCard(
                 )
                 nowNext.remainingMinutes(nowEpochSec)?.let { mins ->
                     Spacer(Modifier.width(8.dp))
-                    Text("${mins}m", style = MuxGridType.TabularSmall)
+                    Text(String.format(minsShortFmt, mins), style = MuxGridType.TabularSmall)
                 }
             }
         } else {
             Text(
-                text = if (channel.isRadio) "Live Radio" else "Live Stream",
+                text = if (channel.isRadio) liveRadioLabel else liveStreamLabel,
                 style = MuxGridType.CardSubtitle,
                 color = MuxGridColors.TextMuted,
             )
@@ -2139,19 +2173,20 @@ private fun TvSettingsTab(
             reportScrollState.scrollTo(0)
             runCatching { copyFocusRequester.requestFocus() }
         }
+        val debugCopiedToast = stringResource(DesignR.string.settings_debug_info_copied)
         TvModalDialog(
             onDismissRequest = { debugReport = null },
             minWidth = 500.dp,
             maxWidth = 700.dp,
         ) {
             Text(
-                text = "Debug Info",
+                text = stringResource(DesignR.string.settings_debug_info_title),
                 style = MuxGridType.Title,
                 fontSize = 18.sp,
                 color = MuxGridColors.TextPrimary,
             )
             Text(
-                text = "Non-personal hardware and software environment for issue reports.",
+                text = stringResource(DesignR.string.settings_debug_info_desc),
                 style = MuxGridType.CardSubtitle,
                 fontSize = 13.sp,
                 color = MuxGridColors.TextSecondary,
@@ -2205,7 +2240,7 @@ private fun TvSettingsTab(
                     shape = tvButtonShape(),
                     colors = tvDialogSecondaryButtonColors(),
                 ) {
-                    Text("Close", maxLines = 1, softWrap = false)
+                    Text(stringResource(DesignR.string.common_close), maxLines = 1, softWrap = false)
                 }
                 Button(
                     onClick = {
@@ -2213,14 +2248,14 @@ private fun TvSettingsTab(
                             context = context,
                             label = "MuxGrid Debug Info",
                             text = report,
-                            toastMessage = "Debug info copied",
+                            toastMessage = debugCopiedToast,
                         )
                     },
                     modifier = Modifier.focusRequester(copyFocusRequester),
                     shape = tvButtonShape(),
                     colors = tvPrimaryButtonColors(),
                 ) {
-                    Text("Copy", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                    Text(stringResource(DesignR.string.common_copy), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                 }
             }
         }
@@ -2259,13 +2294,13 @@ private fun TvSettingsTab(
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
-                        text = "Server Diagnostics",
+                        text = stringResource(DesignR.string.settings_server_diagnostics_title),
                         style = MuxGridType.Title,
                         fontSize = 18.sp,
                         color = MuxGridColors.TextPrimary,
                     )
                     Text(
-                        text = "Tvheadend permissions, protocol capabilities, and HTTP media port status.",
+                        text = stringResource(DesignR.string.settings_server_diagnostics_desc),
                         style = MuxGridType.CardSubtitle,
                         fontSize = 13.sp,
                         color = MuxGridColors.TextSecondary,
@@ -2280,7 +2315,7 @@ private fun TvSettingsTab(
                 ) {
                     Icon(
                         imageVector = MuxGridIcons.Refresh,
-                        contentDescription = "Re-run Diagnostics",
+                        contentDescription = stringResource(DesignR.string.a11y_rerun_diagnostics),
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -2332,7 +2367,7 @@ private fun TvSettingsTab(
                     shape = tvButtonShape(),
                     colors = tvDialogSecondaryButtonColors(),
                 ) {
-                    Text("Close", maxLines = 1, softWrap = false)
+                    Text(stringResource(DesignR.string.common_close), maxLines = 1, softWrap = false)
                 }
                 if (serverDiagnostics?.hasBlockers == true || serverDiagnostics?.hasDegraded == true) {
                     Button(
@@ -2343,7 +2378,7 @@ private fun TvSettingsTab(
                         shape = tvButtonShape(),
                         colors = tvPrimaryButtonColors(),
                     ) {
-                        Text("Edit Server", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                        Text(stringResource(DesignR.string.settings_edit_server), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                     }
                 }
             }
@@ -2379,7 +2414,7 @@ private fun TvServerSettingsCard(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = "TVHEADEND SERVER",
+            text = stringResource(DesignR.string.settings_section_server),
             style = MuxGridType.Eyebrow,
         )
         Row(
@@ -2401,7 +2436,7 @@ private fun TvServerSettingsCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = connectionStatusText(profile, connectionState),
+                    text = localizedConnectionStatusText(profile, connectionState),
                     style = MuxGridType.TabularSmall,
                     color = connectionStatusColor(connectionState),
                     maxLines = if (isServerError) 3 else 1,
@@ -2409,12 +2444,16 @@ private fun TvServerSettingsCard(
                 )
                 if (profile.isConfigured && (serverDiagnostics != null || isRunningDiagnostics)) {
                     val healthText = when {
-                        isRunningDiagnostics -> "Running server diagnostics…"
+                        isRunningDiagnostics -> stringResource(DesignR.string.settings_server_diagnostics_running_tv)
                         serverDiagnostics?.hasBlockers == true ->
-                            serverDiagnostics.blockerItems.firstOrNull()?.summary ?: "Diagnostics issue"
+                            serverDiagnostics.blockerItems.firstOrNull()?.localizedSummary()
+                                ?: stringResource(DesignR.string.settings_server_diagnostics_issue_detected)
                         serverDiagnostics?.hasDegraded == true ->
-                            "${serverDiagnostics.capabilitySummary} · Limited features"
-                        else -> serverDiagnostics?.capabilitySummary.orEmpty()
+                            stringResource(
+                                DesignR.string.settings_server_diagnostics_limited,
+                                serverDiagnostics.localizedCapabilitySummary(),
+                            )
+                        else -> serverDiagnostics?.localizedCapabilitySummary().orEmpty()
                     }
                     val healthColor = when {
                         isRunningDiagnostics || serverDiagnostics == null -> MuxGridColors.TextMuted
@@ -2445,7 +2484,7 @@ private fun TvServerSettingsCard(
                     ) {
                         Icon(
                             imageVector = MuxGridIcons.Refresh,
-                            contentDescription = "Reconnect",
+                            contentDescription = stringResource(DesignR.string.settings_reconnect),
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -2463,7 +2502,7 @@ private fun TvServerSettingsCard(
                     ) {
                         Icon(
                             imageVector = MuxGridIcons.Info,
-                            contentDescription = "Server Diagnostics",
+                            contentDescription = stringResource(DesignR.string.settings_server_diagnostics_title),
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -2477,7 +2516,7 @@ private fun TvServerSettingsCard(
                 ) {
                     Icon(
                         imageVector = MuxGridIcons.Edit,
-                        contentDescription = "Edit Server",
+                        contentDescription = stringResource(DesignR.string.settings_edit_server),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -2496,6 +2535,8 @@ private fun TvGeneralSettingsCard(
     onSelectThemeMode: (ThemeMode) -> Unit,
     onSetRadioAmbientGlowEnabled: (Boolean) -> Unit,
 ) {
+    val context = LocalContext.current
+    var selectedLanguageTag by remember { mutableStateOf(AppLocaleManager.currentLanguageTag(context)) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -2506,13 +2547,13 @@ private fun TvGeneralSettingsCard(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(
-            text = "GENERAL",
+            text = stringResource(DesignR.string.settings_section_general),
             style = MuxGridType.Eyebrow,
         )
 
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                text = "Start Screen",
+                text = stringResource(DesignR.string.settings_start_screen),
                 style = MuxGridType.CardSubtitle,
                 fontSize = 13.sp,
             )
@@ -2525,14 +2566,14 @@ private fun TvGeneralSettingsCard(
             ) {
                 StartScreen.entries.forEach { option ->
                     TvUnderlineOption(
-                        label = option.label,
+                        label = stringResource(option.labelRes()),
                         selected = startScreen == option,
                         onClick = { onSelectStartScreen(option) },
                     )
                 }
             }
             Text(
-                text = startScreen.description,
+                text = stringResource(startScreen.descriptionRes()),
                 style = MuxGridType.TabularSmall,
                 color = MuxGridColors.TextMuted,
             )
@@ -2542,7 +2583,7 @@ private fun TvGeneralSettingsCard(
 
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                text = "Theme",
+                text = stringResource(DesignR.string.settings_theme),
                 style = MuxGridType.CardSubtitle,
                 fontSize = 13.sp,
             )
@@ -2555,14 +2596,47 @@ private fun TvGeneralSettingsCard(
             ) {
                 ThemeMode.entries.forEach { option ->
                     TvUnderlineOption(
-                        label = option.label,
+                        label = stringResource(option.labelRes()),
                         selected = themeMode == option,
                         onClick = { onSelectThemeMode(option) },
                     )
                 }
             }
             Text(
-                text = themeMode.description,
+                text = stringResource(themeMode.descriptionRes()),
+                style = MuxGridType.TabularSmall,
+                color = MuxGridColors.TextMuted,
+            )
+        }
+
+        MuxGridDivider()
+
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = stringResource(DesignR.string.settings_language),
+                style = MuxGridType.CardSubtitle,
+                fontSize = 13.sp,
+            )
+            Row(
+                modifier = Modifier
+                    .focusGroup()
+                    .focusRestorer()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                AppLocaleManager.supportedLanguages.forEach { option ->
+                    TvUnderlineOption(
+                        label = option.localizedLabel(),
+                        selected = option.tag == selectedLanguageTag,
+                        onClick = {
+                            selectedLanguageTag = option.tag
+                            AppLocaleManager.setLanguageTag(context, option.tag)
+                        },
+                    )
+                }
+            }
+            Text(
+                text = stringResource(DesignR.string.settings_language_desc),
                 style = MuxGridType.TabularSmall,
                 color = MuxGridColors.TextMuted,
             )
@@ -2603,7 +2677,7 @@ private fun TvGeneralSettingsCard(
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
-                        text = "Radio Ambient Glow",
+                        text = stringResource(DesignR.string.settings_radio_ambient_glow),
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -2635,13 +2709,13 @@ private fun TvDecoderTimeshiftSettingsCard(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(
-            text = "VIDEO DECODER & TIMESHIFT",
+            text = stringResource(DesignR.string.settings_section_decoder_timeshift),
             style = MuxGridType.Eyebrow,
         )
 
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                text = "Hardware Decode Preset",
+                text = stringResource(DesignR.string.settings_decoder_title),
                 style = MuxGridType.CardSubtitle,
                 fontSize = 13.sp,
             )
@@ -2653,8 +2727,8 @@ private fun TvDecoderTimeshiftSettingsCard(
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 listOf(
-                    HwDecPreset.MEDIACODEC_ZERO_COPY to "Zero-Copy (TV Default)",
-                    HwDecPreset.MEDIACODEC_COPY_BWDIF to "Copy + bwdif",
+                    HwDecPreset.MEDIACODEC_ZERO_COPY to stringResource(DesignR.string.settings_decoder_zero_copy_tv),
+                    HwDecPreset.MEDIACODEC_COPY_BWDIF to stringResource(DesignR.string.settings_decoder_copy_bwdif_tv),
                 ).forEach { (preset, label) ->
                     TvUnderlineOption(
                         label = label,
@@ -2669,7 +2743,7 @@ private fun TvDecoderTimeshiftSettingsCard(
 
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                text = "Live Timeshift Cache Limit",
+                text = stringResource(DesignR.string.settings_timeshift_title),
                 style = MuxGridType.CardSubtitle,
                 fontSize = 13.sp,
             )
@@ -2682,14 +2756,14 @@ private fun TvDecoderTimeshiftSettingsCard(
             ) {
                 TimeshiftWindow.entries.forEach { option ->
                     TvUnderlineOption(
-                        label = option.shortLabel,
+                        label = option.localizedShortLabel(),
                         selected = timeshiftWindow == option,
                         onClick = { onSelectTimeshiftWindow(option) },
                     )
                 }
             }
             Text(
-                text = "${timeshiftWindow.description} · split pause/rewind · applies on next tune",
+                text = stringResource(DesignR.string.settings_timeshift_footer, stringResource(timeshiftWindow.descriptionRes())),
                 style = MuxGridType.TabularSmall,
                 color = MuxGridColors.TextMuted,
             )
@@ -2714,7 +2788,7 @@ private fun TvAppInfoSettingsCard(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text(
-            text = "APP INFO",
+            text = stringResource(DesignR.string.settings_section_app_info),
             style = MuxGridType.Eyebrow,
         )
 
@@ -2724,7 +2798,7 @@ private fun TvAppInfoSettingsCard(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = "Version",
+                    text = stringResource(DesignR.string.settings_version),
                     style = MuxGridType.CardSubtitle,
                     fontSize = 12.5.sp,
                 )
@@ -2736,7 +2810,7 @@ private fun TvAppInfoSettingsCard(
             }
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = "Build SHA",
+                    text = stringResource(DesignR.string.settings_build_sha),
                     style = MuxGridType.CardSubtitle,
                     fontSize = 12.5.sp,
                 )
@@ -2751,23 +2825,23 @@ private fun TvAppInfoSettingsCard(
         MuxGridDivider()
 
         TvSettingsActionRow(
-            title = "GitHub",
+            title = stringResource(DesignR.string.settings_github),
             subtitle = appInfo.githubDisplayUrl,
-            contentDescription = "Open GitHub",
+            contentDescription = stringResource(DesignR.string.a11y_open_github),
             onClick = onOpenGithub,
         )
 
         TvSettingsActionRow(
-            title = "Licenses & Notices",
-            subtitle = "Open-source attributions · GPL-3.0-or-later",
-            contentDescription = "Show Licenses and Notices",
+            title = stringResource(DesignR.string.settings_licenses_title),
+            subtitle = stringResource(DesignR.string.settings_licenses_subtitle),
+            contentDescription = stringResource(DesignR.string.a11y_show_licenses),
             onClick = onOpenLicenses,
         )
 
         TvSettingsActionRow(
-            title = "Debug Info",
-            subtitle = "Device, OS, and playback environment",
-            contentDescription = "Show Debug Info",
+            title = stringResource(DesignR.string.settings_debug_info_title),
+            subtitle = stringResource(DesignR.string.settings_debug_info_subtitle),
+            contentDescription = stringResource(DesignR.string.a11y_show_debug_info),
             onClick = onOpenDebugInfo,
         )
     }
@@ -2810,13 +2884,13 @@ private fun TvLicensesDialog(
         val current = selectedAttribution
         if (current == null) {
             Text(
-                text = "Licenses & Notices",
+                text = stringResource(DesignR.string.settings_licenses_title),
                 style = MuxGridType.Title,
                 fontSize = 18.sp,
                 color = MuxGridColors.TextPrimary,
             )
             Text(
-                text = AppNotices.DISTRIBUTION_NOTE,
+                text = stringResource(DesignR.string.settings_licenses_distribution_note),
                 style = MuxGridType.CardSubtitle,
                 fontSize = 13.sp,
                 color = MuxGridColors.TextSecondary,
@@ -2832,7 +2906,7 @@ private fun TvLicensesDialog(
                     TvSettingsActionRow(
                         title = entry.name,
                         subtitle = "${entry.license} · ${entry.displayUrl}",
-                        contentDescription = "Show ${entry.name} license",
+                        contentDescription = stringResource(DesignR.string.a11y_show_entry_license, entry.name),
                         onClick = { selectedAttribution = entry },
                         modifier = if (index == 0) Modifier.focusRequester(firstRowFocusRequester) else Modifier,
                     )
@@ -2847,7 +2921,7 @@ private fun TvLicensesDialog(
                     shape = tvButtonShape(),
                     colors = tvDialogSecondaryButtonColors(),
                 ) {
-                    Text("Close", maxLines = 1, softWrap = false)
+                    Text(stringResource(DesignR.string.common_close), maxLines = 1, softWrap = false)
                 }
             }
         } else {
@@ -2881,13 +2955,13 @@ private fun TvLicensesDialog(
                 ) {
                     Icon(
                         imageVector = MuxGridIcons.OpenInNew,
-                        contentDescription = "Open ${current.name} website",
+                        contentDescription = stringResource(DesignR.string.a11y_open_entry_website, current.name),
                         modifier = Modifier.size(18.dp),
                     )
                 }
             }
             Text(
-                text = "Press BACK or ▼ to leave the text.",
+                text = stringResource(DesignR.string.settings_licenses_tv_scroll_hint),
                 style = MuxGridType.TabularSmall,
                 color = MuxGridColors.TextMuted,
             )
@@ -2925,7 +2999,7 @@ private fun TvLicensesDialog(
                     .padding(12.dp),
             ) {
                 Text(
-                    text = documentText.ifBlank { "Loading..." },
+                    text = documentText.ifBlank { stringResource(DesignR.string.common_loading) },
                     fontSize = 12.sp,
                     lineHeight = 17.sp,
                     fontFamily = FontFamily.Monospace,
@@ -2941,7 +3015,7 @@ private fun TvLicensesDialog(
                     shape = tvButtonShape(),
                     colors = tvDialogSecondaryButtonColors(),
                 ) {
-                    Text("Back", maxLines = 1, softWrap = false)
+                    Text(stringResource(DesignR.string.common_back), maxLines = 1, softWrap = false)
                 }
             }
         }

@@ -26,6 +26,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,17 +53,17 @@ fun ServerDiagnosticsSummaryCard(
         DiagnosticSeverity.OK, DiagnosticSeverity.ADVISORY -> Triple(
             MuxGridColors.EmeraldOk,
             MuxGridIcons.CheckCircle,
-            buildServerHeadline("Ready to connect", report),
+            buildServerHeadline(stringResource(R.string.diagnostics_ready), report),
         )
         DiagnosticSeverity.DEGRADED -> Triple(
             MuxGridColors.AmberWarn,
             MuxGridIcons.Warning,
-            buildServerHeadline("Ready with limited features", report),
+            buildServerHeadline(stringResource(R.string.diagnostics_ready_limited), report),
         )
         DiagnosticSeverity.BLOCKER -> Triple(
             MuxGridColors.CoralLive,
             MuxGridIcons.Cancel,
-            "Connection check found an issue",
+            stringResource(R.string.diagnostics_issue_found),
         )
     }
 
@@ -111,16 +113,22 @@ fun ServerDiagnosticsSummaryCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 CapabilityPill(
-                    label = if (report.hasStreamingAccess) "Streaming" else "No Streaming",
+                    label = stringResource(
+                        if (report.hasStreamingAccess) R.string.diagnostics_chip_streaming else R.string.diagnostics_chip_no_streaming,
+                    ),
                     ok = report.hasStreamingAccess,
                 )
                 CapabilityPill(
-                    label = if (report.hasHttpMediaAccess) "HTTP Playback" else "HTTP Unreachable",
+                    label = stringResource(
+                        if (report.hasHttpMediaAccess) R.string.diagnostics_chip_http else R.string.diagnostics_chip_http_unreachable,
+                    ),
                     ok = report.hasHttpMediaAccess,
                     warnIfFalse = true,
                 )
                 CapabilityPill(
-                    label = if (report.hasDvrAccess) "DVR & Chase-Play" else "Read-only (No DVR)",
+                    label = stringResource(
+                        if (report.hasDvrAccess) R.string.diagnostics_chip_dvr else R.string.diagnostics_chip_read_only,
+                    ),
                     ok = report.hasDvrAccess,
                     warnIfFalse = true,
                 )
@@ -133,10 +141,10 @@ fun ServerDiagnosticsSummaryCard(
 
         if (advisoryItems.isNotEmpty()) {
             val toggleLabel = if (showNotes) {
-                "Hide notes"
+                stringResource(R.string.diagnostics_hide_notes)
             } else {
                 val n = advisoryItems.size
-                if (n == 1) "1 optional note" else "$n optional notes"
+                pluralStringResource(R.plurals.diagnostics_optional_notes, n, n)
             }
             var toggleFocused by remember { mutableStateOf(false) }
             Row(
@@ -185,12 +193,12 @@ private fun CompactDiagnosticFinding(item: DiagnosticItem) {
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Text(
-            text = "${item.title}: ${item.summary}",
+            text = "${item.localizedTitle()}: ${item.localizedSummary()}",
             color = itemColor,
             fontSize = 12.5.sp,
             fontWeight = FontWeight.SemiBold,
         )
-        item.detail?.takeIf { it.isNotBlank() }?.let { detail ->
+        item.localizedDetail()?.takeIf { it.isNotBlank() }?.let { detail ->
             Text(
                 text = detail,
                 color = MuxGridColors.TextSecondary,
@@ -198,7 +206,7 @@ private fun CompactDiagnosticFinding(item: DiagnosticItem) {
                 lineHeight = 15.sp,
             )
         }
-        item.suggestion?.takeIf { it.isNotBlank() }?.let { suggestion ->
+        item.localizedSuggestion()?.takeIf { it.isNotBlank() }?.let { suggestion ->
             Text(
                 text = suggestion,
                 color = MuxGridColors.TextPrimary.copy(alpha = MuxGridAlphas.BodyText),
@@ -275,7 +283,7 @@ fun ServerDiagnosticsDetailContent(
                         color = MuxGridColors.Accent,
                     )
                     Text(
-                        text = "Checking Tvheadend capabilities and media ports…",
+                        text = stringResource(R.string.diagnostics_checking),
                         style = MuxGridType.CardSubtitle,
                     )
                 } else {
@@ -286,7 +294,7 @@ fun ServerDiagnosticsDetailContent(
                         modifier = Modifier.size(18.dp),
                     )
                     Text(
-                        text = "No server diagnostics collected yet. Run a check to verify streaming, HTTP playback, and DVR permissions.",
+                        text = stringResource(R.string.diagnostics_empty),
                         style = MuxGridType.CardSubtitle,
                     )
                 }
@@ -296,10 +304,10 @@ fun ServerDiagnosticsDetailContent(
 
         val statusColor = diagnosticSeverityColor(report.overallSeverity)
         val statusLabel = when (report.overallSeverity) {
-            DiagnosticSeverity.OK -> "All required & optional features ready"
-            DiagnosticSeverity.ADVISORY -> "Ready · optional notes available"
-            DiagnosticSeverity.DEGRADED -> "Partial features · non-blocking"
-            DiagnosticSeverity.BLOCKER -> "Action required"
+            DiagnosticSeverity.OK -> stringResource(R.string.diagnostics_overall_ok)
+            DiagnosticSeverity.ADVISORY -> stringResource(R.string.diagnostics_overall_advisory)
+            DiagnosticSeverity.DEGRADED -> stringResource(R.string.diagnostics_overall_degraded)
+            DiagnosticSeverity.BLOCKER -> stringResource(R.string.diagnostics_overall_blocker)
         }
 
         Row(
@@ -332,13 +340,14 @@ fun ServerDiagnosticsDetailContent(
                     fontSize = 13.5.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
+                val capabilitySummaryText = report.localizedCapabilitySummary()
                 val metaParts = buildList {
                     val srv = listOf(report.serverName, report.serverVersion)
                         .filter { it.isNotBlank() }
                         .joinToString(" ")
                     if (srv.isNotBlank()) add(srv)
                     report.htspVersion?.let { add("HTSP v$it") }
-                    add(report.capabilitySummary)
+                    add(capabilitySummaryText)
                 }
                 Text(
                     text = metaParts.joinToString(" · "),
@@ -400,20 +409,20 @@ private fun DiagnosticChecklistRow(item: DiagnosticItem) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = item.title,
+                    text = item.localizedTitle(),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MuxGridColors.TextPrimary,
                 )
                 Text(
-                    text = severityLabel(item.severity),
+                    text = stringResource(item.severity.badgeLabelRes()),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
                     color = color,
                 )
             }
             Text(
-                text = item.summary,
+                text = item.localizedSummary(),
                 fontSize = 12.sp,
                 color = if (item.severity == DiagnosticSeverity.OK) {
                     MuxGridColors.TextSecondary
@@ -421,7 +430,7 @@ private fun DiagnosticChecklistRow(item: DiagnosticItem) {
                     color
                 },
             )
-            item.detail?.takeIf { it.isNotBlank() }?.let { detail ->
+            item.localizedDetail()?.takeIf { it.isNotBlank() }?.let { detail ->
                 Text(
                     text = detail,
                     fontSize = 11.5.sp,
@@ -429,9 +438,9 @@ private fun DiagnosticChecklistRow(item: DiagnosticItem) {
                     color = MuxGridColors.TextSecondary,
                 )
             }
-            item.suggestion?.takeIf { it.isNotBlank() }?.let { suggestion ->
+            item.localizedSuggestion()?.takeIf { it.isNotBlank() }?.let { suggestion ->
                 Text(
-                    text = "Tip: $suggestion",
+                    text = stringResource(R.string.diagnostics_tip, suggestion),
                     fontSize = 11.5.sp,
                     lineHeight = 15.sp,
                     color = MuxGridColors.TextPrimary.copy(alpha = MuxGridAlphas.BodyText),

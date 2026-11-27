@@ -46,6 +46,14 @@ data class AudioLevels(
     }
 }
 
+enum class TimeshiftNotice {
+    AT_LIVE_EDGE,
+    LOW_STORAGE_MEMORY_BUFFER,
+    BUFFER_NEARLY_FULL,
+    BUFFER_FULL_RESUMED,
+    LIVE_STREAM_RECONNECTED,
+}
+
 sealed interface PlaybackError {
     val message: String
 
@@ -61,6 +69,11 @@ sealed interface PlaybackError {
                     "Tuner busy: recording \"$recordingTitle\""
                 else -> "Tuner busy: another recording is using the tuner"
             }
+    }
+
+    data object StreamEndedUnexpectedly : PlaybackError {
+        override val message: String
+            get() = "Stream ended unexpectedly"
     }
 
     data class StreamOpenFailed(
@@ -94,7 +107,7 @@ data class PlaybackState(
     val isSeeking: Boolean = false,
     val seekTargetMs: Long? = null,
     val bufferedPositionMs: Long = 0L,
-    val timeshiftNotice: String? = null,
+    val timeshiftNotice: TimeshiftNotice? = null,
     val audioTracks: List<MediaTrack> = emptyList(),
     val subtitleTracks: List<MediaTrack> = emptyList(),
     val selectedAudioId: Int? = null,

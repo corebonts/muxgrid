@@ -84,6 +84,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            isPseudoLocalesEnabled = true
+        }
         release {
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
@@ -100,11 +103,13 @@ android {
             isDebuggable = false
             isMinifyEnabled = false
             isShrinkResources = false
+            isPseudoLocalesEnabled = false
             matchingFallbacks += listOf("release")
         }
     }
 
     androidResources {
+        generateLocaleConfig = true
         // mpv-android-lib bundles unused DroidSansFallback (subfont.ttf) and cacert.pem;
         // MuxGrid never calls Utils.copyAssets() and streams through LocalMediaProxy.
         ignoreAssetsPattern = listOfNotNull(
@@ -112,6 +117,11 @@ android {
             "!subfont.ttf",
             "!cacert.pem",
         ).joinToString(":")
+    }
+
+    lint {
+        warning += setOf("MissingTranslation")
+        error += setOf("StringFormatInvalid", "StringFormatMatches", "StringFormatCount", "ExtraTranslation")
     }
 
     compileOptions {

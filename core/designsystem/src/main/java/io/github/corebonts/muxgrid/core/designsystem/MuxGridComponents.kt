@@ -76,6 +76,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -506,13 +507,13 @@ fun EpgLiveProgressSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "ON NOW",
+                text = stringResource(R.string.live_on_now),
                 color = MuxGridColors.CoralLive,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "${remaining}m left",
+                text = stringResource(R.string.time_minutes_left, remaining),
                 style = MuxGridType.TabularSmall,
                 color = MuxGridColors.TextSecondary,
             )
@@ -751,12 +752,8 @@ fun connectionStatusColor(state: ConnectionState): Color = when (state) {
     ConnectionState.Disconnected -> MuxGridColors.TextMuted
 }
 
-fun MainTab.label(): String = when (this) {
-    MainTab.LIVE -> "Live"
-    MainTab.GUIDE -> "Guide"
-    MainTab.RECORDINGS -> "Recordings"
-    MainTab.SETTINGS -> "Settings"
-}
+@Composable
+fun MainTab.label(): String = localizedLabel()
 
 fun MainTab.icon(selected: Boolean): ImageVector = when (this) {
     MainTab.LIVE -> if (selected) MuxGridIcons.LiveFilled else MuxGridIcons.Live
@@ -859,7 +856,7 @@ fun ModalCloseIconButton(
     ) {
         Icon(
             imageVector = MuxGridIcons.Close,
-            contentDescription = "Close",
+            contentDescription = stringResource(R.string.common_close),
             tint = if (closeFocused) MuxGridColors.OnFocusBorder else MuxGridColors.TextSecondary,
             modifier = Modifier.size(18.dp),
         )
@@ -921,7 +918,7 @@ fun TrackAndPresetPanel(
                     modifier = Modifier.size(20.dp),
                 )
                 Text(
-                    text = "Display Options",
+                    text = stringResource(R.string.player_display_options),
                     style = MuxGridType.Title,
                     fontSize = 18.sp,
                 )
@@ -930,10 +927,10 @@ fun TrackAndPresetPanel(
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("AUDIO", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+            Text(stringResource(R.string.player_section_audio), style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
             if (audioTracks.isEmpty()) {
                 Text(
-                    text = "No audio tracks detected yet",
+                    text = stringResource(R.string.player_no_audio_tracks),
                     style = MuxGridType.TabularSmall,
                     modifier = Modifier.padding(horizontal = 2.dp),
                 )
@@ -949,7 +946,7 @@ fun TrackAndPresetPanel(
                     audioTracks.forEachIndexed { idx, track ->
                         val selected = track.id == effectiveAudioId
                         SelectableOptionRow(
-                            label = track.displayLabel,
+                            label = track.localizedDisplayLabel(),
                             selected = selected,
                             onClick = { onSelectAudio(track.id) },
                             modifier = if (idx == 0) Modifier.focusRequester(firstOptionFocusRequester) else Modifier,
@@ -960,7 +957,7 @@ fun TrackAndPresetPanel(
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("SUBTITLES (DVB / TEXT)", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+            Text(stringResource(R.string.player_section_subtitles), style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -969,7 +966,7 @@ fun TrackAndPresetPanel(
                 verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 SelectableOptionRow(
-                    label = "Off",
+                    label = stringResource(R.string.common_off),
                     selected = selectedSubtitleId == null,
                     onClick = { onSelectSubtitle(null) },
                     modifier = if (audioTracks.isEmpty()) Modifier.focusRequester(firstOptionFocusRequester) else Modifier,
@@ -977,7 +974,7 @@ fun TrackAndPresetPanel(
                 subtitleTracks.forEach { track ->
                     val selected = track.id == selectedSubtitleId
                     SelectableOptionRow(
-                        label = track.displayLabel,
+                        label = track.localizedDisplayLabel(),
                         selected = selected,
                         onClick = { onSelectSubtitle(track.id) },
                     )
@@ -986,7 +983,7 @@ fun TrackAndPresetPanel(
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("DECODER PRESET", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+            Text(stringResource(R.string.player_section_decoder_preset), style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -995,12 +992,12 @@ fun TrackAndPresetPanel(
                 verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 SelectableOptionRow(
-                    label = "Hardware Zero-Copy (mediacodec — TV Default)",
+                    label = stringResource(R.string.settings_decoder_zero_copy_full),
                     selected = hwDecPreset == HwDecPreset.MEDIACODEC_ZERO_COPY,
                     onClick = { onSelectPreset(HwDecPreset.MEDIACODEC_ZERO_COPY) },
                 )
                 SelectableOptionRow(
-                    label = "HW Copy + bwdif Deinterlace (Phone Default)",
+                    label = stringResource(R.string.settings_decoder_copy_bwdif_full),
                     selected = hwDecPreset == HwDecPreset.MEDIACODEC_COPY_BWDIF,
                     onClick = { onSelectPreset(HwDecPreset.MEDIACODEC_COPY_BWDIF) },
                 )
@@ -1009,7 +1006,7 @@ fun TrackAndPresetPanel(
 
         if (aspectMode != null && onSelectAspectMode != null) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("ASPECT & ZOOM", style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
+                Text(stringResource(R.string.player_section_aspect_zoom), style = MuxGridType.Eyebrow, modifier = Modifier.padding(horizontal = 2.dp))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1032,7 +1029,7 @@ fun TrackAndPresetPanel(
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Text(
-                                text = mode.label,
+                                text = mode.localizedLabel(),
                                 color = when {
                                     modeFocused -> MuxGridColors.OnFocusBorder
                                     selected -> MuxGridColors.TextPrimary
@@ -1094,7 +1091,7 @@ private fun SelectableOptionRow(
             Spacer(Modifier.width(10.dp))
             Icon(
                 imageVector = MuxGridIcons.Check,
-                contentDescription = "Active",
+                contentDescription = stringResource(R.string.common_active),
                 tint = if (focused) MuxGridColors.OnFocusBorder else MuxGridColors.Accent,
                 modifier = Modifier.size(16.dp),
             )
@@ -1127,13 +1124,8 @@ fun buildLiveFilters(tags: List<ChannelTag>): List<LiveFilter> {
     return base
 }
 
-fun LiveFilter.label(): String = when (this) {
-    LiveFilter.All -> "All"
-    LiveFilter.Tv -> "TV"
-    LiveFilter.Radio -> "Radio"
-    LiveFilter.Favorites -> "Favorites"
-    is LiveFilter.Tag -> name
-}
+@Composable
+fun LiveFilter.label(): String = localizedLabel()
 
 fun LiveFilter.icon(): ImageVector? = when (this) {
     LiveFilter.Tv -> MuxGridIcons.Tv
@@ -1159,11 +1151,11 @@ fun DvrStateBadge(
     modifier: Modifier = Modifier,
 ) {
     val (color, label) = when {
-        state == DvrState.RECORDING -> MuxGridColors.CoralLive to "REC"
-        state == DvrState.SCHEDULED -> MuxGridColors.AccentSoft to "Scheduled"
-        state == DvrState.COMPLETED && isWatched -> MuxGridColors.EmeraldOk to "Watched"
-        state == DvrState.MISSED -> MuxGridColors.AmberWarn to "Missed"
-        state == DvrState.INVALID -> MuxGridColors.CoralLive to "Failed"
+        state == DvrState.RECORDING -> MuxGridColors.CoralLive to stringResource(R.string.recordings_status_rec)
+        state == DvrState.SCHEDULED -> MuxGridColors.AccentSoft to stringResource(R.string.recordings_status_scheduled)
+        state == DvrState.COMPLETED && isWatched -> MuxGridColors.EmeraldOk to stringResource(R.string.recordings_status_watched)
+        state == DvrState.MISSED -> MuxGridColors.AmberWarn to stringResource(R.string.recordings_status_missed)
+        state == DvrState.INVALID -> MuxGridColors.CoralLive to stringResource(R.string.recordings_status_failed)
         else -> return
     }
     Row(
@@ -1263,34 +1255,54 @@ data class DvrConfirmSpec(
     val failureFallbackMessage: String,
 )
 
-fun dvrConfirmSpec(kind: DvrConfirmKind, entryTitle: String): DvrConfirmSpec = when (kind) {
-    DvrConfirmKind.STOP_AND_SAVE -> DvrConfirmSpec(
-        title = "Stop Recording?",
-        message = "Stop \"$entryTitle\" now and save what has been recorded so far?",
-        confirmLabel = "Stop & Save",
+data class DvrConfirmSpecRes(
+    @androidx.annotation.StringRes val titleRes: Int,
+    @androidx.annotation.StringRes val messageRes: Int,
+    @androidx.annotation.StringRes val confirmLabelRes: Int,
+    val isDestructive: Boolean,
+    @androidx.annotation.StringRes val failureFallbackRes: Int,
+)
+
+fun dvrConfirmSpecRes(kind: DvrConfirmKind): DvrConfirmSpecRes = when (kind) {
+    DvrConfirmKind.STOP_AND_SAVE -> DvrConfirmSpecRes(
+        titleRes = R.string.recordings_confirm_stop_title,
+        messageRes = R.string.recordings_confirm_stop_message,
+        confirmLabelRes = R.string.recordings_stop_and_save,
         isDestructive = false,
-        failureFallbackMessage = "Failed to stop recording",
+        failureFallbackRes = R.string.recordings_confirm_stop_failed,
     )
-    DvrConfirmKind.ABORT_RECORDING -> DvrConfirmSpec(
-        title = "Abort Recording?",
-        message = "Abort \"$entryTitle\"? The in-progress recording will be cancelled and discarded.",
-        confirmLabel = "Abort Recording",
+    DvrConfirmKind.ABORT_RECORDING -> DvrConfirmSpecRes(
+        titleRes = R.string.recordings_confirm_abort_title,
+        messageRes = R.string.recordings_confirm_abort_message,
+        confirmLabelRes = R.string.recordings_abort_recording,
         isDestructive = true,
-        failureFallbackMessage = "Failed to abort recording",
+        failureFallbackRes = R.string.recordings_confirm_abort_failed,
     )
-    DvrConfirmKind.CANCEL_TIMER -> DvrConfirmSpec(
-        title = "Cancel Scheduled Recording?",
-        message = "Cancel the scheduled timer for \"$entryTitle\"?",
-        confirmLabel = "Cancel Timer",
+    DvrConfirmKind.CANCEL_TIMER -> DvrConfirmSpecRes(
+        titleRes = R.string.recordings_confirm_cancel_title,
+        messageRes = R.string.recordings_confirm_cancel_message,
+        confirmLabelRes = R.string.recordings_cancel_timer,
         isDestructive = true,
-        failureFallbackMessage = "Failed to cancel timer",
+        failureFallbackRes = R.string.recordings_confirm_cancel_failed,
     )
-    DvrConfirmKind.DELETE_RECORDING -> DvrConfirmSpec(
-        title = "Delete Recording?",
-        message = "Delete \"$entryTitle\" from Tvheadend storage? This cannot be undone.",
-        confirmLabel = "Delete Recording",
+    DvrConfirmKind.DELETE_RECORDING -> DvrConfirmSpecRes(
+        titleRes = R.string.recordings_confirm_delete_title,
+        messageRes = R.string.recordings_confirm_delete_message,
+        confirmLabelRes = R.string.recordings_delete_recording,
         isDestructive = true,
-        failureFallbackMessage = "Failed to delete recording",
+        failureFallbackRes = R.string.recordings_confirm_delete_failed,
+    )
+}
+
+@Composable
+fun dvrConfirmSpec(kind: DvrConfirmKind, entryTitle: String): DvrConfirmSpec {
+    val res = dvrConfirmSpecRes(kind)
+    return DvrConfirmSpec(
+        title = stringResource(res.titleRes),
+        message = stringResource(res.messageRes, entryTitle),
+        confirmLabel = stringResource(res.confirmLabelRes),
+        isDestructive = res.isDestructive,
+        failureFallbackMessage = stringResource(res.failureFallbackRes),
     )
 }
 
@@ -1301,7 +1313,7 @@ fun MuxGridConfirmDialog(
     confirmLabel: String,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    dismissLabel: String = "Cancel",
+    dismissLabel: String = stringResource(R.string.common_cancel),
     isDestructive: Boolean = false,
     enabled: Boolean = true,
 ) {

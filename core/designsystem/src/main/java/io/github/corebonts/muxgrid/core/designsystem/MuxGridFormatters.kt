@@ -1,5 +1,9 @@
 package io.github.corebonts.muxgrid.core.designsystem
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.res.stringResource
 import io.github.corebonts.muxgrid.core.model.Channel
 import io.github.corebonts.muxgrid.core.model.ConnectionState
 import io.github.corebonts.muxgrid.core.model.DvrEntry
@@ -22,7 +26,10 @@ data class DvrSeriesGroup(
     val latestStartEpochSec: Long,
 )
 
-fun groupCompletedDvrEntries(entries: Collection<DvrEntry>): List<DvrSeriesGroup> {
+fun groupCompletedDvrEntries(
+    entries: Collection<DvrEntry>,
+    untitledFallback: String = "Untitled Recording",
+): List<DvrSeriesGroup> {
     val completed = entries.filter { it.state == DvrState.COMPLETED }
     if (completed.isEmpty()) return emptyList()
 
@@ -36,7 +43,7 @@ fun groupCompletedDvrEntries(entries: Collection<DvrEntry>): List<DvrSeriesGroup
         val sorted = list.sortedByDescending { it.startEpochSec }
         DvrSeriesGroup(
             key = key,
-            title = sorted.first().title.ifBlank { "Untitled Recording" },
+            title = sorted.first().title.ifBlank { untitledFallback },
             entries = sorted,
             latestStartEpochSec = sorted.first().startEpochSec,
         )
@@ -161,12 +168,13 @@ fun formatProgramModalMeta(
     nowEpochSec: Long,
     dataSizeBytes: Long = 0L,
     zoneId: ZoneId = ZoneId.systemDefault(),
+    labels: LocalizedDateLabels = LocalizedDateLabels(),
 ): String = buildString {
     if (!channelName.isNullOrBlank()) {
         append(channelName)
         append(" · ")
     }
-    append(formatEpochDayHm(startEpochSec, nowEpochSec, zoneId))
+    append(formatEpochDayHm(startEpochSec, nowEpochSec, zoneId, labels))
     append('–')
     append(formatEpochHm(stopEpochSec, zoneId))
     append(" (")
@@ -353,20 +361,63 @@ fun searchEpgEvents(
     ).take(limit)
 }
 
-private val DAY_SHORT_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE, MMM d")
-private val DATE_TIME_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d · HH:mm")
+data class LocalizedDateLabels(
+    val today: String = "Today",
+    val tomorrow: String = "Tomorrow",
+    val yesterday: String = "Yesterday",
+    val locale: Locale = Locale.getDefault(),
+)
+
+@Composable
+fun rememberLocalizedDateLabels(): LocalizedDateLabels {
+    val today = stringResource(R.string.date_today)
+    val tomorrow = stringResource(R.string.date_tomorrow)
+    val yesterday = stringResource(R.string.date_yesterday)
+    val locale = LocalLocale.current.platformLocale
+    return remember(today, tomorrow, yesterday, locale) {
+        LocalizedDateLabels(
+            today = today,
+            tomorrow = tomorrow,
+            yesterday = yesterday,
+            locale = locale,
+        )
+    }
+}
+
+private var cachedFormatterLocale: Locale? = null
+private var cachedDayShortFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE, MMM d")
+private var cachedDateTimeFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d · HH:mm")
+
+private fun dayShortFormatter(locale: Locale): DateTimeFormatter {
+    if (cachedFormatterLocale != locale) {
+        cachedDayShortFmt = DateTimeFormatter.ofPattern("EEE, MMM d", locale)
+        cachedDateTimeFmt = DateTimeFormatter.ofPattern("MMM d · HH:mm", locale)
+        cachedFormatterLocale = locale
+    }
+    return cachedDayShortFmt
+}
+
+private fun dateTimeFormatter(locale: Locale): DateTimeFormatter {
+    if (cachedFormatterLocale != locale) {
+        cachedDayShortFmt = DateTimeFormatter.ofPattern("EEE, MMM d", locale)
+        cachedDateTimeFmt = DateTimeFormatter.ofPattern("MMM d · HH:mm", locale)
+        cachedFormatterLocale = locale
+    }
+    return cachedDateTimeFmt
+}
 
 fun formatDayLabel(
     day: LocalDate,
     nowEpochSec: Long,
     zoneId: ZoneId = ZoneId.systemDefault(),
+    labels: LocalizedDateLabels = LocalizedDateLabels(),
 ): String {
     val today = Instant.ofEpochSecond(nowEpochSec).atZone(zoneId).toLocalDate()
     return when (day) {
-        today -> "Today"
-        today.plusDays(1) -> "Tomorrow"
-        today.minusDays(1) -> "Yesterday"
-        else -> day.format(DAY_SHORT_FMT)
+        today -> labels.today
+        today.plusDays(1) -> labels.tomorrow
+        today.minusDays(1) -> labels.yesterday
+        else -> day.format(dayShortFormatter(labels.locale))
     }
 }
 
@@ -374,14 +425,15 @@ fun formatEpochDayHm(
     epochSec: Long,
     nowEpochSec: Long,
     zoneId: ZoneId = ZoneId.systemDefault(),
+    labels: LocalizedDateLabels = LocalizedDateLabels(),
 ): String {
     val date = Instant.ofEpochSecond(epochSec).atZone(zoneId).toLocalDate()
     val today = Instant.ofEpochSecond(nowEpochSec).atZone(zoneId).toLocalDate()
     return when (date) {
-        today -> "Today · ${formatEpochHm(epochSec, zoneId)}"
-        today.plusDays(1) -> "Tomorrow · ${formatEpochHm(epochSec, zoneId)}"
-        today.minusDays(1) -> "Yesterday · ${formatEpochHm(epochSec, zoneId)}"
-        else -> Instant.ofEpochSecond(epochSec).atZone(zoneId).format(DATE_TIME_FMT)
+        today -> "${labels.today} · ${formatEpochHm(epochSec, zoneId)}"
+        today.plusDays(1) -> "${labels.tomorrow} · ${formatEpochHm(epochSec, zoneId)}"
+        today.minusDays(1) -> "${labels.yesterday} · ${formatEpochHm(epochSec, zoneId)}"
+        else -> Instant.ofEpochSecond(epochSec).atZone(zoneId).format(dateTimeFormatter(labels.locale))
     }
 }
 
@@ -583,6 +635,7 @@ fun PlaybackState.streamBadgeText(includeDeinterlace: Boolean = false): String? 
 
 fun PlaybackError.displayTitle(): String = when (this) {
     is PlaybackError.TunerBusy -> "Tuner Busy"
+    is PlaybackError.StreamEndedUnexpectedly,
     is PlaybackError.StreamOpenFailed,
     is PlaybackError.PlaybackFailed,
     -> "Playback Error"
@@ -590,6 +643,7 @@ fun PlaybackError.displayTitle(): String = when (this) {
 
 fun PlaybackError.displayDetail(): String? = when (this) {
     is PlaybackError.TunerBusy -> "The single tuner is currently busy recording on another mux."
+    is PlaybackError.StreamEndedUnexpectedly,
     is PlaybackError.StreamOpenFailed,
     is PlaybackError.PlaybackFailed,
     -> null

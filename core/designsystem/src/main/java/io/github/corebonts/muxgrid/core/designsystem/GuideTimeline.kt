@@ -451,12 +451,13 @@ fun TimelineRuler(
         val count = (((lastSlot - firstSlot) / HALF_HOUR_SEC).toInt() + 1).coerceIn(1, 32)
         List(count) { idx -> firstSlot + idx * HALF_HOUR_SEC }
     }
-    val slotMeta = remember(slotStarts, nowEpochSec / 3600L, zoneId) {
+    val dateLabels = rememberLocalizedDateLabels()
+    val slotMeta = remember(slotStarts, nowEpochSec / 3600L, zoneId, dateLabels) {
         slotStarts.map { sec ->
             val zdt = Instant.ofEpochSecond(sec).atZone(zoneId)
             val isMidnight = zdt.hour == 0 && zdt.minute == 0
             val label = if (isMidnight) {
-                "${formatDayLabel(zdt.toLocalDate(), nowEpochSec, zoneId)} · 00:00"
+                "${formatDayLabel(zdt.toLocalDate(), nowEpochSec, zoneId, dateLabels)} · 00:00"
             } else {
                 formatEpochHm(sec, zoneId)
             }

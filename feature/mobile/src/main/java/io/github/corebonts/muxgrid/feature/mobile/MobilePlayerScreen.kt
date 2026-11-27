@@ -69,6 +69,11 @@ import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
+import io.github.corebonts.muxgrid.core.designsystem.R as DesignR
+import io.github.corebonts.muxgrid.core.designsystem.localizedDetail
+import io.github.corebonts.muxgrid.core.designsystem.localizedMessage
+import io.github.corebonts.muxgrid.core.designsystem.localizedTitle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -432,7 +437,7 @@ internal fun MobilePlayerScreen(
                         )
                     }
                     Text(
-                        text = playbackState.channelName ?: activeChannel?.name ?: "Audio Stream",
+                        text = playbackState.channelName ?: activeChannel?.name ?: stringResource(DesignR.string.player_audio_stream),
                         style = MuxGridType.Title,
                         color = Color.White,
                     )
@@ -453,7 +458,9 @@ internal fun MobilePlayerScreen(
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                     ) {
                         Text(
-                            text = if (playbackState.isRadio) "LIVE RADIO" else "BACKGROUND AUDIO",
+                            text = stringResource(
+                                if (playbackState.isRadio) DesignR.string.player_live_radio_banner else DesignR.string.player_background_audio_banner,
+                            ),
                             color = MuxGridColors.AccentSoft,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -545,7 +552,7 @@ internal fun MobilePlayerScreen(
 
         playbackState.timeshiftNotice?.let { notice ->
             TimeshiftNoticeBanner(
-                notice = notice,
+                notice = notice.localizedMessage(),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
@@ -585,7 +592,7 @@ internal fun MobilePlayerScreen(
                     ) {
                         TopHudIconButton(
                             icon = MuxGridIcons.ExpandMore,
-                            contentDescription = "Minimize player",
+                            contentDescription = stringResource(DesignR.string.a11y_minimize_player),
                             iconSize = 22.dp,
                             onClick = onExit,
                         )
@@ -601,7 +608,10 @@ internal fun MobilePlayerScreen(
                             Spacer(Modifier.width(8.dp))
                         }
                         Column {
-                            val titleText = playbackState.displayTitle(fallbackChannelName = activeChannel?.name)
+                            val titleText = playbackState.displayTitle(
+                                fallbackChannelName = activeChannel?.name,
+                                recordingFallback = stringResource(DesignR.string.common_recording),
+                            )
                             val subtitleText = if (playbackState.isRecordingPlayback) {
                                 playbackState.channelName ?: activeChannel?.name
                             } else {
@@ -635,13 +645,13 @@ internal fun MobilePlayerScreen(
                         if (canEnterPip && !isAudioStage) {
                             TopHudIconButton(
                                 icon = MuxGridIcons.Pip,
-                                contentDescription = "Picture-in-Picture",
+                                contentDescription = stringResource(DesignR.string.a11y_pip),
                                 onClick = onEnterPip,
                             )
                         }
                         TopHudIconButton(
                             icon = MuxGridIcons.Close,
-                            contentDescription = "Stop playback",
+                            contentDescription = stringResource(DesignR.string.a11y_stop_playback),
                             onClick = onStop,
                         )
                     }
@@ -655,9 +665,11 @@ internal fun MobilePlayerScreen(
                     else -> playbackState.isTimeshiftSeekable
                 }
                 val jumpStartDescription = when {
-                    playbackState.isRecordingPlayback -> "Start Over"
-                    activeRecording != null -> if (activeRecording.hasResumePosition) "Resume Chase Play" else "Watch from Start"
-                    else -> "Jump to start of timeshift buffer"
+                    playbackState.isRecordingPlayback -> stringResource(DesignR.string.recordings_start_over)
+                    activeRecording != null -> stringResource(
+                        if (activeRecording.hasResumePosition) DesignR.string.recordings_resume_chase_play else DesignR.string.recordings_watch_from_start,
+                    )
+                    else -> stringResource(DesignR.string.player_jump_timeshift_start)
                 }
                 val canJumpLive = when {
                     playbackState.isRecordingPlayback -> playbackState.isGrowingRecording && activeChannel != null
@@ -675,7 +687,7 @@ internal fun MobilePlayerScreen(
                     if (isPortrait && canZap) {
                         CenterTransportButton(
                             icon = MuxGridIcons.ExpandLess,
-                            contentDescription = "Next channel",
+                            contentDescription = stringResource(DesignR.string.a11y_next_channel),
                             enabled = canZapChannels,
                             size = 40.dp,
                             iconSize = 22.dp,
@@ -713,7 +725,7 @@ internal fun MobilePlayerScreen(
                         )
                         CenterTransportButton(
                             icon = MuxGridIcons.Replay10,
-                            contentDescription = "Seek back 10 seconds",
+                            contentDescription = stringResource(DesignR.string.a11y_seek_back_10s),
                             enabled = canSeekTimeline,
                             size = 46.dp,
                             iconSize = 24.dp,
@@ -743,7 +755,9 @@ internal fun MobilePlayerScreen(
                             } else {
                                 Icon(
                                     imageVector = if (playbackState.isPaused) MuxGridIcons.Play else MuxGridIcons.Pause,
-                                    contentDescription = if (playbackState.isPaused) "Play" else "Pause",
+                                    contentDescription = stringResource(
+                                        if (playbackState.isPaused) DesignR.string.common_play else DesignR.string.common_pause,
+                                    ),
                                     tint = Color.White,
                                     modifier = Modifier.size(34.dp),
                                 )
@@ -751,7 +765,7 @@ internal fun MobilePlayerScreen(
                         }
                         CenterTransportButton(
                             icon = MuxGridIcons.Forward30,
-                            contentDescription = "Seek forward 30 seconds",
+                            contentDescription = stringResource(DesignR.string.a11y_seek_forward_30s),
                             enabled = canSeekTimeline,
                             size = 46.dp,
                             iconSize = 24.dp,
@@ -762,7 +776,7 @@ internal fun MobilePlayerScreen(
                         )
                         CenterTransportButton(
                             icon = MuxGridIcons.SkipNext,
-                            contentDescription = "Watch Live",
+                            contentDescription = stringResource(DesignR.string.live_watch_live),
                             enabled = canJumpLive,
                             highlighted = canJumpLive,
                             size = 44.dp,
@@ -780,7 +794,7 @@ internal fun MobilePlayerScreen(
                     if (isPortrait && canZap) {
                         CenterTransportButton(
                             icon = MuxGridIcons.ExpandMore,
-                            contentDescription = "Previous channel",
+                            contentDescription = stringResource(DesignR.string.a11y_previous_channel),
                             enabled = canZapChannels,
                             size = 40.dp,
                             iconSize = 22.dp,
@@ -840,14 +854,14 @@ internal fun MobilePlayerScreen(
                                 ) {
                                     CompactHudButton(
                                         icon = MuxGridIcons.Info,
-                                        label = "Playback info",
+                                        label = stringResource(DesignR.string.player_playback_info),
                                         showLabel = showHudActionLabels,
                                         onClick = { infoPanelOpen = !infoPanelOpen },
                                     )
                                     CompactHudButton(
                                         icon = MuxGridIcons.Tracks,
-                                        label = "Options",
-                                        contentDescription = "Display Options",
+                                        label = stringResource(DesignR.string.player_options_short),
+                                        contentDescription = stringResource(DesignR.string.player_display_options),
                                         showLabel = showHudActionLabels,
                                         onClick = { trackPanelOpen = !trackPanelOpen },
                                     )
@@ -913,7 +927,9 @@ internal fun MobilePlayerScreen(
                                             .background(MuxGridColors.CoralLive),
                                     )
                                     Text(
-                                        text = if (playbackState.isRadio) "RADIO" else "LIVE",
+                                        text = stringResource(
+                                            if (playbackState.isRadio) DesignR.string.live_radio_badge else DesignR.string.live_badge,
+                                        ),
                                         color = Color.White,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
@@ -930,21 +946,21 @@ internal fun MobilePlayerScreen(
                                 ) {
                                     CompactHudButton(
                                         icon = MuxGridIcons.Info,
-                                        label = "Playback info",
+                                        label = stringResource(DesignR.string.player_playback_info),
                                         showLabel = showHudActionLabels,
                                         onClick = { infoPanelOpen = !infoPanelOpen },
                                     )
                                     CompactHudButton(
                                         icon = MuxGridIcons.Tracks,
-                                        label = "Options",
-                                        contentDescription = "Display Options",
+                                        label = stringResource(DesignR.string.player_options_short),
+                                        contentDescription = stringResource(DesignR.string.player_display_options),
                                         showLabel = showHudActionLabels,
                                         onClick = { trackPanelOpen = !trackPanelOpen },
                                     )
                                     if (canZap) {
                                         if (!isPortrait) {
                                             MuxGridCompactButton(
-                                                text = "Ch −",
+                                                text = stringResource(DesignR.string.player_ch_prev),
                                                 containerColor = MuxGridColors.ScrimSurface,
                                                 contentColor = Color.White,
                                                 borderColor = Color.White.copy(alpha = MuxGridAlphas.ScrimBorder),
@@ -955,7 +971,7 @@ internal fun MobilePlayerScreen(
                                             )
                                         }
                                         MuxGridCompactButton(
-                                            text = "Channels",
+                                            text = stringResource(DesignR.string.player_channels),
                                             leadingIcon = MuxGridIcons.ChannelsList,
                                             containerColor = MuxGridColors.ScrimSurface,
                                             contentColor = Color.White,
@@ -964,7 +980,7 @@ internal fun MobilePlayerScreen(
                                         )
                                         if (!isPortrait) {
                                             MuxGridCompactButton(
-                                                text = "Ch +",
+                                                text = stringResource(DesignR.string.player_ch_next),
                                                 containerColor = MuxGridColors.ScrimSurface,
                                                 contentColor = Color.White,
                                                 borderColor = Color.White.copy(alpha = MuxGridAlphas.ScrimBorder),
@@ -1022,7 +1038,7 @@ internal fun MobilePlayerScreen(
                                         text = if (displayOffsetMs >= PlaybackSeekDefaults.LIVE_EDGE_DISPLAY_THRESHOLD_MS) {
                                             "-${formatDurationSec(shownOffsetSec)}"
                                         } else {
-                                            "Live edge"
+                                            stringResource(DesignR.string.player_live_edge)
                                         },
                                         style = MuxGridType.TabularSmall,
                                         color = Color.White,
@@ -1038,7 +1054,7 @@ internal fun MobilePlayerScreen(
                                         )
                                     }
                                     Text(
-                                        text = "Buffer ${formatDurationSec(stableBufSec)}",
+                                        text = stringResource(DesignR.string.player_buffer_duration, formatDurationSec(stableBufSec)),
                                         style = MuxGridType.TabularSmall,
                                         color = Color.White.copy(alpha = 0.78f),
                                     )
@@ -1096,7 +1112,7 @@ internal fun MobilePlayerScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text("Quick Zap", style = MuxGridType.Title, fontSize = 17.sp)
+                            Text(stringResource(DesignR.string.player_quick_zap), style = MuxGridType.Title, fontSize = 17.sp)
                             Box(
                                 modifier = Modifier
                                     .clip(MuxGridShapes.Sm)
@@ -1106,7 +1122,7 @@ internal fun MobilePlayerScreen(
                             ) {
                                 Icon(
                                     imageVector = MuxGridIcons.Close,
-                                    contentDescription = "Close",
+                                    contentDescription = stringResource(DesignR.string.common_close),
                                     tint = MuxGridColors.TextSecondary,
                                     modifier = Modifier.size(20.dp),
                                 )
@@ -1276,18 +1292,18 @@ internal fun MobilePlayerScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
-                        text = err.displayTitle(),
+                        text = err.localizedTitle(),
                         style = MuxGridType.Title,
                         fontSize = 18.sp,
                         color = MuxGridColors.TextPrimary,
                     )
                     Text(
-                        text = err.message,
+                        text = err.localizedMessage(),
                         style = MuxGridType.CardSubtitle,
                         fontSize = 14.sp,
                         color = MuxGridColors.TextSecondary,
                     )
-                    err.displayDetail()?.let { detail ->
+                    err.localizedDetail()?.let { detail ->
                         Text(
                             text = detail,
                             style = MuxGridType.TabularSmall,
@@ -1300,7 +1316,7 @@ internal fun MobilePlayerScreen(
                     ) {
                         TextButton(onClick = onPlaybackCompleted) {
                             Text(
-                                text = "OK",
+                                text = stringResource(DesignR.string.common_ok),
                                 color = MuxGridColors.AccentSoft,
                                 fontWeight = FontWeight.SemiBold,
                             )

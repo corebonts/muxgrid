@@ -42,9 +42,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
+import io.github.corebonts.muxgrid.core.designsystem.R as DesignR
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import io.github.corebonts.muxgrid.core.designsystem.AppLocaleManager
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridColors
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridShapes
 import io.github.corebonts.muxgrid.core.designsystem.MuxGridTheme
@@ -73,6 +76,10 @@ class MainActivity : ComponentActivity() {
     private var isInPipModeState by mutableStateOf(false)
     private var isMobilePlayerRouteActive by mutableStateOf(false)
     private var openPlayerSignal by mutableIntStateOf(0)
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLocaleManager.wrapContext(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
@@ -247,7 +254,7 @@ class MainActivity : ComponentActivity() {
                         containerColor = MuxGridColors.CardSurfaceElevated,
                         titleContentColor = MuxGridColors.TextPrimary,
                         textContentColor = MuxGridColors.TextSecondary,
-                        title = { Text("Previous Crash Log") },
+                        title = { Text(stringResource(DesignR.string.crash_log_title)) },
                         text = {
                             Column(
                                 modifier = Modifier
@@ -266,6 +273,7 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         confirmButton = {
+                            val copiedToast = stringResource(DesignR.string.crash_log_copied)
                             Row {
                                 TextButton(
                                     onClick = {
@@ -273,14 +281,14 @@ class MainActivity : ComponentActivity() {
                                             context = context,
                                             label = "MuxGrid Crash",
                                             text = crashText,
-                                            toastMessage = "Crash log copied",
+                                            toastMessage = copiedToast,
                                         )
                                     },
                                 ) {
-                                    Text("Copy", color = MuxGridColors.TextSecondary)
+                                    Text(stringResource(DesignR.string.common_copy), color = MuxGridColors.TextSecondary)
                                 }
                                 TextButton(onClick = dismissCrashDialog) {
-                                    Text("Dismiss", color = MuxGridColors.AccentSoft)
+                                    Text(stringResource(DesignR.string.common_dismiss), color = MuxGridColors.AccentSoft)
                                 }
                             }
                         },

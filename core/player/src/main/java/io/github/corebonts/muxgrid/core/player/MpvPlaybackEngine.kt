@@ -23,6 +23,7 @@ import io.github.corebonts.muxgrid.core.model.PlaybackState
 import io.github.corebonts.muxgrid.core.model.PlaybackStatus
 import io.github.corebonts.muxgrid.core.model.StreamTicket
 import io.github.corebonts.muxgrid.core.model.SubtitlePreference
+import io.github.corebonts.muxgrid.core.model.TimeshiftNotice
 import io.github.corebonts.muxgrid.core.model.TimeshiftWindow
 import io.github.corebonts.muxgrid.core.model.TrackType
 import io.github.corebonts.muxgrid.core.model.VideoAspectMode
@@ -847,7 +848,7 @@ class MpvPlaybackEngine(
         val current = _state.value
         val clampedMs = current.clampSeekPositionMs(positionMs)
         if (current.isSeekClampedAtGrowingEdge(positionMs)) {
-            postTimeshiftNotice("At live edge", autoClearMs = LIVE_EDGE_NOTICE_MS)
+            postTimeshiftNotice(TimeshiftNotice.AT_LIVE_EDGE, autoClearMs = LIVE_EDGE_NOTICE_MS)
         }
         val reqSeq = seekRequestSeq.incrementAndGet()
         if (!current.isSeeking) {
@@ -1416,7 +1417,7 @@ class MpvPlaybackEngine(
         instance.setPropertyString("force-seekable", "no")
         if (requested != TimeshiftWindow.OFF && !useDisk) {
             postTimeshiftNotice(
-                "Low storage: live timeshift using memory buffer",
+                TimeshiftNotice.LOW_STORAGE_MEMORY_BUFFER,
                 autoClearMs = TIMESHIFT_NOTICE_LONG_MS,
             )
         }
@@ -1648,15 +1649,15 @@ class MpvPlaybackEngine(
             if (fillRatio >= TIMESHIFT_FULL_RESUME_RATIO) {
                 instance.setPropertyBoolean("pause", false)
                 postTimeshiftNotice(
-                    "Timeshift buffer full — playback resumed",
+                    TimeshiftNotice.BUFFER_FULL_RESUMED,
                     autoClearMs = TIMESHIFT_NOTICE_LONG_MS,
                 )
             } else if (fillRatio >= TIMESHIFT_WARN_RATIO) {
-                postTimeshiftNotice(TIMESHIFT_NEARLY_FULL_NOTICE, autoClearMs = null)
-            } else if (currentState.timeshiftNotice == TIMESHIFT_NEARLY_FULL_NOTICE) {
+                postTimeshiftNotice(TimeshiftNotice.BUFFER_NEARLY_FULL, autoClearMs = null)
+            } else if (currentState.timeshiftNotice == TimeshiftNotice.BUFFER_NEARLY_FULL) {
                 _state.update { it.copy(timeshiftNotice = null) }
             }
-        } else if (!currentState.isPaused && currentState.timeshiftNotice == TIMESHIFT_NEARLY_FULL_NOTICE) {
+        } else if (!currentState.isPaused && currentState.timeshiftNotice == TimeshiftNotice.BUFFER_NEARLY_FULL) {
             _state.update { it.copy(timeshiftNotice = null) }
         }
 
@@ -1691,14 +1692,14 @@ class MpvPlaybackEngine(
         return firstStart to lastEnd
     }
 
-    private fun postTimeshiftNotice(message: String, autoClearMs: Long?) {
+    private fun postTimeshiftNotice(notice: TimeshiftNotice, autoClearMs: Long?) {
         noticeClearJob?.cancel()
-        _state.update { it.copy(timeshiftNotice = message) }
+        _state.update { it.copy(timeshiftNotice = notice) }
         if (autoClearMs != null) {
             noticeClearJob = engineScope.launch {
                 delay(autoClearMs)
                 _state.update { current ->
-                    if (current.timeshiftNotice == message) current.copy(timeshiftNotice = null) else current
+                    if (current.timeshiftNotice == notice) current.copy(timeshiftNotice = null) else current
                 }
             }
         }
@@ -2137,7 +2138,7 @@ class MpvPlaybackEngine(
                     } else if (hadFileLoaded && !retriedLiveReconnect) {
                         retriedLiveReconnect = true
                         timeshiftSmoother.reset()
-                        postTimeshiftNotice("Live stream reconnected", autoClearMs = TIMESHIFT_NOTICE_SHORT_MS)
+                        postTimeshiftNotice(TimeshiftNotice.LIVE_STREAM_RECONNECTED, autoClearMs = TIMESHIFT_NOTICE_SHORT_MS)
                         val url = liveStrategy.resolveLiveUrl(channel.id)
                         submitMpvTask {
                             val instance = mpv ?: return@submitMpvTask
@@ -2164,7 +2165,7 @@ class MpvPlaybackEngine(
                             if (current.channelId == channel.id && current.error == null) {
                                 current.copy(
                                     status = PlaybackStatus.ERROR,
-                                    error = PlaybackError.PlaybackFailed("Stream ended unexpectedly"),
+                                    error = PlaybackError.StreamEndedUnexpectedly,
                                 )
                             } else {
                                 current
@@ -2585,7 +2586,6 @@ class MpvPlaybackEngine(
         private const val INDEX_SPLICE_JUMP_THRESHOLD_MS = 15_000L
         private const val BACK_CACHE_SEEK_MARGIN_MS = 2_000L
         private const val COLD_RESUME_BINARY_SEARCH_MIN_SEC = 15L
-        private const val TIMESHIFT_NEARLY_FULL_NOTICE = "Timeshift pause buffer nearly full"
         internal const val RADIO_CACHE_PAUSE_WAIT_ARG = "0.95"
         internal const val DEFAULT_CACHE_PAUSE_WAIT_ARG = "1.0"
         internal const val RADIO_DEMUXER_LAVF_O = "analyzeduration=500000,probesize=262144"

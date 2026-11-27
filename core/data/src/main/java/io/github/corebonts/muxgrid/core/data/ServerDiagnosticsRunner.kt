@@ -5,6 +5,7 @@ import io.github.corebonts.muxgrid.core.htsp.HtspClient
 import io.github.corebonts.muxgrid.core.htsp.ProbeOutcome
 import io.github.corebonts.muxgrid.core.model.DiagnosticCheckId
 import io.github.corebonts.muxgrid.core.model.DiagnosticItem
+import io.github.corebonts.muxgrid.core.model.DiagnosticMessageCode
 import io.github.corebonts.muxgrid.core.model.DiagnosticSeverity
 import io.github.corebonts.muxgrid.core.model.PortProbeResult
 import io.github.corebonts.muxgrid.core.model.ServerDiagnosticsReport
@@ -158,6 +159,8 @@ internal object ServerDiagnosticsRunner {
                 summary = "Cannot reach HTSP port ${profile.htspPort}",
                 detail = htsp.connectionError,
                 suggestion = "Check the server host/IP, ensure Tvheadend is running, and verify TCP port ${profile.htspPort} is open.",
+                messageCode = DiagnosticMessageCode.HTSP_UNREACHABLE,
+                messageArgs = listOf(profile.htspPort.toString()),
             )
             items += buildHttpDiagnosticItem(profile, http, hasDvrAccess = false, htspAuthenticated = false)
             return ServerDiagnosticsReport(
@@ -170,16 +173,18 @@ internal object ServerDiagnosticsRunner {
             )
         }
 
+        val serverSummary = listOf(htsp.serverName, htsp.serverVersion)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
         items += DiagnosticItem(
             id = DiagnosticCheckId.HTSP_CONNECTION,
             title = "HTSP Connection",
             severity = DiagnosticSeverity.OK,
-            summary = listOf(htsp.serverName, htsp.serverVersion)
-                .filter { it.isNotBlank() }
-                .joinToString(" ")
-                .ifBlank { "Connected on port ${profile.htspPort}" },
+            summary = serverSummary.ifBlank { "Connected on port ${profile.htspPort}" },
             detail = "Port ${profile.htspPort} reachable" +
                 (htsp.htspVersion?.let { " · HTSP v$it" } ?: ""),
+            messageCode = DiagnosticMessageCode.HTSP_CONNECTED,
+            messageArgs = listOf(serverSummary, profile.htspPort.toString(), htsp.htspVersion?.toString().orEmpty()),
         )
 
         if (!htsp.authSucceeded) {
@@ -190,6 +195,7 @@ internal object ServerDiagnosticsRunner {
                 summary = "Username or password rejected",
                 detail = htsp.connectionError,
                 suggestion = "Verify credentials and Allowed networks in Tvheadend → Configuration → Users → Access Entries.",
+                messageCode = DiagnosticMessageCode.AUTH_FAILED,
             )
             items += buildHttpDiagnosticItem(profile, http, hasDvrAccess = false, htspAuthenticated = false)
             return ServerDiagnosticsReport(
@@ -213,18 +219,22 @@ internal object ServerDiagnosticsRunner {
                 summary = "Connected anonymously (LAN access)",
                 detail = "Signed in without credentials.",
                 suggestion = "Sign in with a dedicated Tvheadend account if you want DVR recording permissions.",
+                messageCode = DiagnosticMessageCode.AUTH_ANONYMOUS_NO_DVR,
             )
             isAnonymous -> DiagnosticItem(
                 id = DiagnosticCheckId.AUTHENTICATION,
                 title = "Authentication",
                 severity = DiagnosticSeverity.OK,
                 summary = "Anonymous LAN access accepted",
+                messageCode = DiagnosticMessageCode.AUTH_ANONYMOUS_OK,
             )
             else -> DiagnosticItem(
                 id = DiagnosticCheckId.AUTHENTICATION,
                 title = "Authentication",
                 severity = DiagnosticSeverity.OK,
                 summary = "Signed in as '${profile.username}'",
+                messageCode = DiagnosticMessageCode.AUTH_SIGNED_IN,
+                messageArgs = listOf(profile.username),
             )
         }
 
@@ -238,6 +248,8 @@ internal object ServerDiagnosticsRunner {
                     summary = "HTSP v$htspVer is too old",
                     detail = "MuxGrid requires HTSP v15 or newer (Tvheadend 4.0+).",
                     suggestion = "Upgrade Tvheadend to 4.2.8 or 4.3+.",
+                    messageCode = DiagnosticMessageCode.HTSP_VERSION_TOO_OLD,
+                    messageArgs = listOf(htspVer.toString()),
                 )
                 htspVer < 27 -> DiagnosticItem(
                     id = DiagnosticCheckId.HTSP_PROTOCOL_VERSION,
@@ -251,12 +263,20 @@ internal object ServerDiagnosticsRunner {
                         append("cross-device resume sync (HTSP v27+) are unavailable; MuxGrid keeps watch progress locally.")
                     },
                     suggestion = "Upgrade Tvheadend to 4.3+ for full DVR control and resume sync.",
+                    messageCode = if (htspVer < 25) {
+                        DiagnosticMessageCode.HTSP_VERSION_LEGACY_NO_STOP
+                    } else {
+                        DiagnosticMessageCode.HTSP_VERSION_LEGACY_NO_RESUME
+                    },
+                    messageArgs = listOf(htspVer.toString()),
                 )
                 else -> DiagnosticItem(
                     id = DiagnosticCheckId.HTSP_PROTOCOL_VERSION,
                     title = "HTSP Version",
                     severity = DiagnosticSeverity.OK,
                     summary = "HTSP v$htspVer",
+                    messageCode = DiagnosticMessageCode.HTSP_VERSION_OK,
+                    messageArgs = listOf(htspVer.toString()),
                 )
             }
         }
@@ -267,6 +287,7 @@ internal object ServerDiagnosticsRunner {
                 title = "HTSP Streaming",
                 severity = DiagnosticSeverity.OK,
                 summary = "Streaming & EPG permission enabled",
+                messageCode = DiagnosticMessageCode.HTSP_STREAMING_OK,
             )
             ProbeOutcome.NO_ACCESS -> DiagnosticItem(
                 id = DiagnosticCheckId.HTSP_STREAMING,
@@ -275,6 +296,7 @@ internal object ServerDiagnosticsRunner {
                 summary = "Missing HTSP Streaming permission",
                 detail = "Tvheadend denied HTSP streaming access; channels, EPG, and playback require it.",
                 suggestion = "In Tvheadend → Configuration → Users → Access Entries, enable Streaming → HTSP.",
+                messageCode = DiagnosticMessageCode.HTSP_STREAMING_NO_ACCESS,
             )
             ProbeOutcome.UNSUPPORTED, ProbeOutcome.ERROR -> DiagnosticItem(
                 id = DiagnosticCheckId.HTSP_STREAMING,
@@ -283,6 +305,7 @@ internal object ServerDiagnosticsRunner {
                 summary = "HTSP streaming check failed",
                 detail = "Server did not complete the HTSP streaming capability check.",
                 suggestion = "Check Tvheadend logs and Streaming → HTSP permissions.",
+                messageCode = DiagnosticMessageCode.HTSP_STREAMING_FAILED,
             )
         }
 
@@ -295,6 +318,7 @@ internal object ServerDiagnosticsRunner {
                 title = "HTSP DVR",
                 severity = DiagnosticSeverity.OK,
                 summary = "Recording & chase-play enabled",
+                messageCode = DiagnosticMessageCode.HTSP_DVR_OK,
             )
             ProbeOutcome.NO_ACCESS -> DiagnosticItem(
                 id = DiagnosticCheckId.HTSP_DVR,
@@ -303,6 +327,7 @@ internal object ServerDiagnosticsRunner {
                 summary = "Read-only mode (no HTSP DVR)",
                 detail = "Live TV and Guide work normally. Scheduling, deleting, in-progress chase-play, and server resume sync are disabled.",
                 suggestion = "Enable Recorder → HTSP DVR in Tvheadend → Configuration → Users → Access Entries.",
+                messageCode = DiagnosticMessageCode.HTSP_DVR_NO_ACCESS,
             )
             ProbeOutcome.UNSUPPORTED, ProbeOutcome.ERROR -> DiagnosticItem(
                 id = DiagnosticCheckId.HTSP_DVR,
@@ -310,6 +335,7 @@ internal object ServerDiagnosticsRunner {
                 severity = DiagnosticSeverity.ADVISORY,
                 summary = "DVR access could not be verified",
                 detail = "This server did not report DVR configuration metadata.",
+                messageCode = DiagnosticMessageCode.HTSP_DVR_UNVERIFIED,
             )
         }
 
@@ -320,6 +346,7 @@ internal object ServerDiagnosticsRunner {
                     title = "Stream Profile",
                     severity = DiagnosticSeverity.OK,
                     summary = "'pass' MPEG-TS profile active",
+                    messageCode = DiagnosticMessageCode.STREAM_PROFILE_PASS_OK,
                 )
             } else {
                 val found = htsp.availableProfiles.joinToString(", ").ifEmpty { "none" }
@@ -330,6 +357,8 @@ internal object ServerDiagnosticsRunner {
                     summary = "'pass' stream profile missing",
                     detail = "Live TV requests '?profile=pass', but server reported: $found.",
                     suggestion = "Enable the 'pass' profile in Tvheadend → Configuration → Stream → Stream Profiles.",
+                    messageCode = DiagnosticMessageCode.STREAM_PROFILE_PASS_MISSING,
+                    messageArgs = listOf(found),
                 )
             }
         }
@@ -338,13 +367,16 @@ internal object ServerDiagnosticsRunner {
         if (clockOffsetMs != null) {
             val absOffsetMs = abs(clockOffsetMs)
             items += if (absOffsetMs > CLOCK_DRIFT_ADVISORY_MS) {
+                val offsetFormatted = formatClockOffset(clockOffsetMs)
                 DiagnosticItem(
                     id = DiagnosticCheckId.SERVER_CLOCK,
                     title = "Server Clock",
                     severity = DiagnosticSeverity.ADVISORY,
-                    summary = "Clock offset by ${formatClockOffset(clockOffsetMs)}",
+                    summary = "Clock offset by $offsetFormatted",
                     detail = "MuxGrid compensates automatically so EPG and live progress stay accurate.",
                     suggestion = "Enable NTP on the Tvheadend server if timers start slightly early or late.",
+                    messageCode = DiagnosticMessageCode.SERVER_CLOCK_OFFSET,
+                    messageArgs = listOf(offsetFormatted),
                 )
             } else {
                 DiagnosticItem(
@@ -352,6 +384,7 @@ internal object ServerDiagnosticsRunner {
                     title = "Server Clock",
                     severity = DiagnosticSeverity.OK,
                     summary = "Server clock in sync",
+                    messageCode = DiagnosticMessageCode.SERVER_CLOCK_OK,
                 )
             }
         }
@@ -362,7 +395,9 @@ internal object ServerDiagnosticsRunner {
             if (free != null && total != null && total > 0L) {
                 val freeRatio = free.toDouble() / total.toDouble()
                 val isLow = free < LOW_DISK_FREE_BYTES || freeRatio < LOW_DISK_FREE_RATIO
-                val summaryStr = "${formatStorageBytes(free)} free of ${formatStorageBytes(total)}"
+                val freeStr = formatStorageBytes(free)
+                val totalStr = formatStorageBytes(total)
+                val summaryStr = "$freeStr free of $totalStr"
                 items += if (isLow) {
                     DiagnosticItem(
                         id = DiagnosticCheckId.DVR_DISK_SPACE,
@@ -371,6 +406,8 @@ internal object ServerDiagnosticsRunner {
                         summary = "Low storage: $summaryStr",
                         detail = "Free space on the Tvheadend recording disk is running low.",
                         suggestion = "Delete watched recordings or expand storage on the server.",
+                        messageCode = DiagnosticMessageCode.DVR_DISK_LOW,
+                        messageArgs = listOf(freeStr, totalStr),
                     )
                 } else {
                     DiagnosticItem(
@@ -378,6 +415,8 @@ internal object ServerDiagnosticsRunner {
                         title = "Recording Storage",
                         severity = DiagnosticSeverity.OK,
                         summary = summaryStr,
+                        messageCode = DiagnosticMessageCode.DVR_DISK_OK,
+                        messageArgs = listOf(freeStr, totalStr),
                     )
                 }
             } else if (!htsp.diskSpaceError.isNullOrBlank()) {
@@ -388,6 +427,7 @@ internal object ServerDiagnosticsRunner {
                     summary = "Storage status unavailable",
                     detail = htsp.diskSpaceError,
                     suggestion = "Verify the recording path in Tvheadend → Configuration → Recording.",
+                    messageCode = DiagnosticMessageCode.DVR_DISK_UNAVAILABLE,
                 )
             }
         }
@@ -421,6 +461,8 @@ internal object ServerDiagnosticsRunner {
                 summary = "HTTP port ${profile.httpPort} unreachable",
                 detail = "Live TV and completed recording playback stream over HTTP (${http.error ?: "connection failed"}).",
                 suggestion = "Check TCP port ${profile.httpPort} in Tvheadend and your firewall or reverse proxy.",
+                messageCode = DiagnosticMessageCode.HTTP_UNREACHABLE,
+                messageArgs = listOf(profile.httpPort.toString(), http.error.orEmpty()),
             )
         }
         val code = http.statusCode ?: 200
@@ -430,6 +472,8 @@ internal object ServerDiagnosticsRunner {
                 title = "HTTP Media Port",
                 severity = DiagnosticSeverity.OK,
                 summary = "HTTP port ${profile.httpPort} reachable",
+                messageCode = DiagnosticMessageCode.HTTP_OK,
+                messageArgs = listOf(profile.httpPort.toString()),
             )
             code == 401 || code == 403 -> when {
                 !htspAuthenticated -> DiagnosticItem(
@@ -438,6 +482,8 @@ internal object ServerDiagnosticsRunner {
                     severity = DiagnosticSeverity.ADVISORY,
                     summary = "HTTP port ${profile.httpPort} reachable (auth required)",
                     detail = "HTTP endpoint responded and requested authentication (HTTP $code).",
+                    messageCode = DiagnosticMessageCode.HTTP_AUTH_UNAUTHENTICATED,
+                    messageArgs = listOf(profile.httpPort.toString(), code.toString()),
                 )
                 hasDvrAccess -> DiagnosticItem(
                     id = DiagnosticCheckId.HTTP_MEDIA,
@@ -445,6 +491,8 @@ internal object ServerDiagnosticsRunner {
                     severity = DiagnosticSeverity.OK,
                     summary = "HTTP port ${profile.httpPort} reachable",
                     detail = "Playback uses HTSP stream tickets and picons use HTSP VFS, so Web UI login is not needed.",
+                    messageCode = DiagnosticMessageCode.HTTP_AUTH_OK_WITH_DVR,
+                    messageArgs = listOf(profile.httpPort.toString()),
                 )
                 else -> DiagnosticItem(
                     id = DiagnosticCheckId.HTTP_MEDIA,
@@ -453,6 +501,8 @@ internal object ServerDiagnosticsRunner {
                     summary = "HTTP port ${profile.httpPort} returned HTTP $code",
                     detail = "Live TV and DVR stream tickets still work, but HTTP picon fallback is restricted.",
                     suggestion = "Enable HTSP DVR or HTTP Digest/Basic access if channel logos do not appear.",
+                    messageCode = DiagnosticMessageCode.HTTP_AUTH_LIMITED,
+                    messageArgs = listOf(profile.httpPort.toString(), code.toString()),
                 )
             }
             else -> DiagnosticItem(
@@ -461,6 +511,8 @@ internal object ServerDiagnosticsRunner {
                 severity = DiagnosticSeverity.ADVISORY,
                 summary = "HTTP port ${profile.httpPort} returned HTTP $code",
                 detail = "HTTP endpoint responded with status $code.",
+                messageCode = DiagnosticMessageCode.HTTP_UNEXPECTED_STATUS,
+                messageArgs = listOf(profile.httpPort.toString(), code.toString()),
             )
         }
     }

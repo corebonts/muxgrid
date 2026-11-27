@@ -54,6 +54,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.res.stringResource
+import io.github.corebonts.muxgrid.core.designsystem.R as DesignR
+import io.github.corebonts.muxgrid.core.designsystem.localizedDetail
+import io.github.corebonts.muxgrid.core.designsystem.localizedMessage
+import io.github.corebonts.muxgrid.core.designsystem.localizedTitle
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -514,7 +519,7 @@ internal fun TvPlayerScreen(
 
         playbackState.timeshiftNotice?.let { notice ->
             TimeshiftNoticeBanner(
-                notice = notice,
+                notice = notice.localizedMessage(),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(28.dp),
@@ -550,18 +555,18 @@ internal fun TvPlayerScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
-                        text = err.displayTitle(),
+                        text = err.localizedTitle(),
                         style = MuxGridType.Title,
                         fontSize = 18.sp,
                         color = MuxGridColors.TextPrimary,
                     )
                     Text(
-                        text = err.message,
+                        text = err.localizedMessage(),
                         style = MuxGridType.CardSubtitle,
                         fontSize = 14.sp,
                         color = MuxGridColors.TextSecondary,
                     )
-                    err.displayDetail()?.let { detail ->
+                    err.localizedDetail()?.let { detail ->
                         Text(
                             text = detail,
                             style = MuxGridType.TabularSmall,
@@ -578,7 +583,7 @@ internal fun TvPlayerScreen(
                             shape = tvButtonShape(),
                             colors = tvPrimaryButtonColors(),
                         ) {
-                            Text("OK", fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(DesignR.string.common_ok), fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -721,7 +726,7 @@ internal fun TvPlayerScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(
-                                text = playbackState.programTitle ?: "Recording",
+                                text = playbackState.programTitle ?: stringResource(DesignR.string.common_recording),
                                 color = Color.White,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -766,7 +771,7 @@ internal fun TvPlayerScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(
-                                text = playbackState.channelName ?: activeChannel?.name ?: "Live TV",
+                                text = playbackState.channelName ?: activeChannel?.name ?: stringResource(DesignR.string.live_tv),
                                 color = Color.White,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -777,9 +782,16 @@ internal fun TvPlayerScreen(
                         }
                         Text(
                             text = if (offsetMs >= PlaybackSeekDefaults.LIVE_EDGE_DISPLAY_THRESHOLD_MS) {
-                                "-${formatDurationSec(stableOffsetSec)} · Buffer ${formatDurationSec(stableBufSec)}"
+                                stringResource(
+                                    DesignR.string.player_offset_with_buffer,
+                                    formatDurationSec(stableOffsetSec),
+                                    formatDurationSec(stableBufSec),
+                                )
                             } else {
-                                "LIVE · Buffer ${formatDurationSec(stableBufSec)}"
+                                stringResource(
+                                    DesignR.string.player_live_with_buffer,
+                                    formatDurationSec(stableBufSec),
+                                )
                             },
                             style = MuxGridType.TabularNumber,
                             color = if (offsetMs >= PlaybackSeekDefaults.LIVE_EDGE_DISPLAY_THRESHOLD_MS) {
@@ -945,9 +957,9 @@ internal fun TvPlayerScreen(
                                 ) {
                                     Text(
                                         text = if (shownOffsetMs >= PlaybackSeekDefaults.LIVE_EDGE_DISPLAY_THRESHOLD_MS) {
-                                            "-${formatDurationSec(stableOffsetSec)} behind live"
+                                            stringResource(DesignR.string.player_behind_live, formatDurationSec(stableOffsetSec))
                                         } else {
-                                            "LIVE"
+                                            stringResource(DesignR.string.live_badge)
                                         },
                                         style = MuxGridType.TabularSmall,
                                         color = if (shownOffsetMs >= PlaybackSeekDefaults.LIVE_EDGE_DISPLAY_THRESHOLD_MS) {
@@ -961,7 +973,7 @@ internal fun TvPlayerScreen(
                                     }
                                 }
                                 Text(
-                                    text = "Timeshift buffer ${formatDurationSec(stableBufSec)}",
+                                    text = stringResource(DesignR.string.player_timeshift_buffer_duration, formatDurationSec(stableBufSec)),
                                     style = MuxGridType.TabularSmall,
                                 )
                             }
@@ -1126,7 +1138,9 @@ private fun TvHudControlsRow(
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    text = if (activeRecording.hasResumePosition) "Resume Chase Play" else "Watch from Start",
+                    text = stringResource(
+                        if (activeRecording.hasResumePosition) DesignR.string.recordings_resume_chase_play else DesignR.string.recordings_watch_from_start,
+                    ),
                     maxLines = 1,
                     softWrap = false,
                 )
@@ -1143,7 +1157,7 @@ private fun TvHudControlsRow(
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(6.dp))
-                Text("Start Over", maxLines = 1, softWrap = false)
+                Text(stringResource(DesignR.string.recordings_start_over), maxLines = 1, softWrap = false)
             }
         }
         if (canSeekTimeline) {
@@ -1154,7 +1168,7 @@ private fun TvHudControlsRow(
             ) {
                 Icon(
                     imageVector = MuxGridIcons.Replay30,
-                    contentDescription = "Seek back 30 seconds",
+                    contentDescription = stringResource(DesignR.string.a11y_seek_back_30s),
                     modifier = Modifier.size(20.dp),
                 )
             }
@@ -1171,7 +1185,7 @@ private fun TvHudControlsRow(
                 modifier = Modifier.size(20.dp),
             )
             Spacer(Modifier.width(6.dp))
-            Text(if (isPaused) "Play" else "Pause", fontWeight = FontWeight.SemiBold)
+            Text(stringResource(if (isPaused) DesignR.string.common_play else DesignR.string.common_pause), fontWeight = FontWeight.SemiBold)
         }
         if (canSeekTimeline) {
             Button(
@@ -1181,7 +1195,7 @@ private fun TvHudControlsRow(
             ) {
                 Icon(
                     imageVector = MuxGridIcons.Forward30,
-                    contentDescription = "Seek forward 30 seconds",
+                    contentDescription = stringResource(DesignR.string.a11y_seek_forward_30s),
                     modifier = Modifier.size(20.dp),
                 )
             }
@@ -1193,7 +1207,7 @@ private fun TvHudControlsRow(
                 shape = buttonShape,
                 colors = primaryColors,
             ) {
-                Text("Watch Live", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                Text(stringResource(DesignR.string.live_watch_live), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                 Spacer(Modifier.width(6.dp))
                 Icon(
                     imageVector = MuxGridIcons.SkipNext,
@@ -1207,7 +1221,7 @@ private fun TvHudControlsRow(
                 shape = buttonShape,
                 colors = primaryColors,
             ) {
-                Text("Watch Live", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                Text(stringResource(DesignR.string.live_watch_live), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                 Spacer(Modifier.width(6.dp))
                 Icon(
                     imageVector = MuxGridIcons.SkipNext,
@@ -1227,7 +1241,7 @@ private fun TvHudControlsRow(
                 modifier = Modifier.size(18.dp),
             )
             Spacer(Modifier.width(6.dp))
-            Text("Stop")
+            Text(stringResource(DesignR.string.common_stop))
         }
         if (!isRecordingPlayback && canZap) {
             Button(
@@ -1235,14 +1249,14 @@ private fun TvHudControlsRow(
                 shape = buttonShape,
                 colors = secondaryColors,
             ) {
-                Text("Ch −", maxLines = 1, softWrap = false)
+                Text(stringResource(DesignR.string.player_ch_prev), maxLines = 1, softWrap = false)
             }
             Button(
                 onClick = { onZapDelta(1) },
                 shape = buttonShape,
                 colors = secondaryColors,
             ) {
-                Text("Ch +", maxLines = 1, softWrap = false)
+                Text(stringResource(DesignR.string.player_ch_next), maxLines = 1, softWrap = false)
             }
         }
         Button(
@@ -1253,7 +1267,7 @@ private fun TvHudControlsRow(
         ) {
             Icon(
                 imageVector = MuxGridIcons.Tracks,
-                contentDescription = "Display Options",
+                contentDescription = stringResource(DesignR.string.player_display_options),
                 modifier = Modifier.size(20.dp),
             )
         }
@@ -1265,7 +1279,7 @@ private fun TvHudControlsRow(
         ) {
             Icon(
                 imageVector = MuxGridIcons.Info,
-                contentDescription = "Playback info",
+                contentDescription = stringResource(DesignR.string.player_playback_info),
                 modifier = Modifier.size(20.dp),
             )
         }
@@ -1432,7 +1446,7 @@ private fun TvAudioStage(
                 )
             }
             Text(
-                text = playbackState.channelName ?: activeChannel?.name ?: "Audio Stream",
+                text = playbackState.channelName ?: activeChannel?.name ?: stringResource(DesignR.string.player_audio_stream),
                 style = MuxGridType.Title,
                 fontSize = 26.sp,
                 color = Color.White,
@@ -1458,9 +1472,11 @@ private fun TvAudioStage(
                 }
             }
             val badgeLabel = when {
-                playbackState.isPaused -> if (playbackState.isRadio) "PAUSED · RADIO" else "PAUSED · AUDIO"
-                playbackState.isRadio -> "LIVE RADIO"
-                else -> "BACKGROUND AUDIO"
+                playbackState.isPaused -> stringResource(
+                    if (playbackState.isRadio) DesignR.string.player_paused_radio_banner else DesignR.string.player_paused_audio_banner,
+                )
+                playbackState.isRadio -> stringResource(DesignR.string.player_live_radio_banner)
+                else -> stringResource(DesignR.string.player_background_audio_banner)
             }
             Box(
                 modifier = Modifier

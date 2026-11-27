@@ -67,6 +67,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
+import io.github.corebonts.muxgrid.core.designsystem.R as DesignR
+import io.github.corebonts.muxgrid.core.designsystem.rememberLocalizedDateLabels
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -407,7 +410,7 @@ internal fun TvGuideScreen(
                             ) {
                                 if (searchQuery.isEmpty()) {
                                     Text(
-                                        text = "Search programs…",
+                                        text = stringResource(DesignR.string.guide_search_placeholder),
                                         style = searchTextStyle.copy(color = MuxGridColors.TextMuted),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -426,12 +429,13 @@ internal fun TvGuideScreen(
                     ) {
                         Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Clear", fontSize = 12.sp)
+                        Text(stringResource(DesignR.string.common_clear), fontSize = 12.sp)
                     }
                 }
             }
         } else {
             // Now button (pinned) + Day jump bar (auto-scrolled to keep selected in viewport)
+            val dateLabels = rememberLocalizedDateLabels()
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -450,7 +454,7 @@ internal fun TvGuideScreen(
                 ) {
                     Icon(MuxGridIcons.Schedule, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Now", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(DesignR.string.guide_now), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.width(6.dp))
                 LazyRow(
@@ -469,7 +473,7 @@ internal fun TvGuideScreen(
                     ) { idx, dayDate ->
                         val selected = idx == selectedDayIndex
                         TvFilterChip(
-                            label = formatDayLabel(dayDate, nowEpochSec),
+                            label = formatDayLabel(dayDate, nowEpochSec, activeZone, dateLabels),
                             selected = selected,
                             unselectedContainerColor = MuxGridColors.CardSurface,
                             unselectedContentColor = MuxGridColors.TextSecondary,
@@ -493,9 +497,11 @@ internal fun TvGuideScreen(
         if (searchOpen && trimmedQuery.isNotEmpty()) {
             if (searchResults.isEmpty()) {
                 Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("No programs match \"$trimmedQuery\"", style = MuxGridType.CardSubtitle, fontSize = 16.sp)
+                    Text(stringResource(DesignR.string.guide_no_programs_match, trimmedQuery), style = MuxGridType.CardSubtitle, fontSize = 16.sp)
                 }
             } else {
+                val searchDateLabels = rememberLocalizedDateLabels()
+                val onNowLabel = stringResource(DesignR.string.live_on_now)
                 LazyColumn(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentPadding = PaddingValues(bottom = 6.dp),
@@ -560,7 +566,7 @@ internal fun TvGuideScreen(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
-                                    text = "${ch.name} · ${formatEpochDayHm(ev.startEpochSec, nowEpochSec)}–${formatEpochHm(ev.stopEpochSec)} (${formatDurationMinutes(ev.startEpochSec, ev.stopEpochSec)})",
+                                    text = "${ch.name} · ${formatEpochDayHm(ev.startEpochSec, nowEpochSec, activeZone, searchDateLabels)}–${formatEpochHm(ev.stopEpochSec)} (${formatDurationMinutes(ev.startEpochSec, ev.stopEpochSec)})",
                                     style = MuxGridType.TabularSmall,
                                     color = MuxGridColors.AccentSoft,
                                     maxLines = 1,
@@ -571,7 +577,7 @@ internal fun TvGuideScreen(
                                 DvrStateBadge(state = linkedDvr.state, isWatched = linkedDvr.isWatched)
                             } else if (isLiveNow) {
                                 Text(
-                                    text = "ON NOW",
+                                    text = onNowLabel,
                                     color = MuxGridColors.CoralLive,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
@@ -584,7 +590,7 @@ internal fun TvGuideScreen(
         } else if (channels.isEmpty()) {
             val (emptyText, showSpinner) = syncStatusMessage(
                 connectionState = connectionState,
-                emptyLabel = "No channels available",
+                emptyLabel = stringResource(DesignR.string.live_no_channels_available),
             )
             MuxGridSyncingState(
                 message = emptyText,
@@ -644,7 +650,7 @@ internal fun TvGuideScreen(
                             modifier = Modifier.width(channelColWidth).padding(start = 6.dp),
                         ) {
                             Text(
-                                text = "CHANNELS",
+                                text = stringResource(DesignR.string.guide_channels_header),
                                 style = MuxGridType.Eyebrow,
                             )
                         }
@@ -658,6 +664,8 @@ internal fun TvGuideScreen(
                         )
                     }
 
+                    // Hoist invariant EPG cell label once above LazyColumn for 32-bit ARM TV scroll performance
+                    val noProgramDataLabel = stringResource(DesignR.string.guide_no_program_data)
                     // Channel rows
                     LazyColumn(
                         state = listState,
@@ -793,7 +801,7 @@ internal fun TvGuideScreen(
                                             contentAlignment = Alignment.CenterStart,
                                         ) {
                                             Text(
-                                                text = "No program data",
+                                                text = noProgramDataLabel,
                                                 fontSize = 11.sp,
                                                 color = MuxGridColors.TextMuted,
                                                 maxLines = 1,
@@ -1052,7 +1060,7 @@ internal fun TvGuideScreen(
                             Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = if (isLiveNow) "Watch Live" else "Watch Channel",
+                                text = stringResource(if (isLiveNow) DesignR.string.live_watch_live else DesignR.string.live_watch_channel),
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 softWrap = false,
@@ -1087,7 +1095,9 @@ internal fun TvGuideScreen(
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    text = if (linkedDvr.hasResumePosition) "Resume Chase Play" else "Watch from Start",
+                                    text = stringResource(
+                                        if (linkedDvr.hasResumePosition) DesignR.string.recordings_resume_chase_play else DesignR.string.recordings_watch_from_start,
+                                    ),
                                     maxLines = 1,
                                     softWrap = false,
                                 )
@@ -1105,7 +1115,7 @@ internal fun TvGuideScreen(
                                 ) {
                                     Icon(MuxGridIcons.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Start Over", maxLines = 1, softWrap = false)
+                                    Text(stringResource(DesignR.string.recordings_start_over), maxLines = 1, softWrap = false)
                                 }
                             }
                             Button(
@@ -1117,7 +1127,7 @@ internal fun TvGuideScreen(
                             ) {
                                 Icon(MuxGridIcons.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Stop & Save", maxLines = 1, softWrap = false)
+                                Text(stringResource(DesignR.string.recordings_stop_and_save), maxLines = 1, softWrap = false)
                             }
                             Button(
                                 enabled = !actionBusy,
@@ -1128,7 +1138,7 @@ internal fun TvGuideScreen(
                             ) {
                                 Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Abort Recording", maxLines = 1, softWrap = false)
+                                Text(stringResource(DesignR.string.recordings_abort_recording), maxLines = 1, softWrap = false)
                             }
                         }
                         DvrState.SCHEDULED -> {
@@ -1141,7 +1151,7 @@ internal fun TvGuideScreen(
                             ) {
                                 Icon(MuxGridIcons.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Cancel Timer", maxLines = 1, softWrap = false)
+                                Text(stringResource(DesignR.string.recordings_cancel_timer), maxLines = 1, softWrap = false)
                             }
                         }
                         DvrState.COMPLETED -> if (!linkedDvr.isFileMissing) {
@@ -1158,7 +1168,9 @@ internal fun TvGuideScreen(
                                 Icon(MuxGridIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    text = if (linkedDvr.hasResumePosition) "Resume Recording" else "Play Recording",
+                                    text = stringResource(
+                                        if (linkedDvr.hasResumePosition) DesignR.string.recordings_resume_recording else DesignR.string.recordings_play_recording,
+                                    ),
                                     maxLines = 1,
                                     softWrap = false,
                                 )
@@ -1176,11 +1188,12 @@ internal fun TvGuideScreen(
                                 ) {
                                     Icon(MuxGridIcons.Replay, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Start Over", maxLines = 1, softWrap = false)
+                                    Text(stringResource(DesignR.string.recordings_start_over), maxLines = 1, softWrap = false)
                                 }
                             }
                         }
                         else -> if (!isPast) {
+                            val scheduleFailedMsg = stringResource(DesignR.string.recordings_error_schedule_failed)
                             Button(
                                 enabled = !actionBusy,
                                 onClick = {
@@ -1190,7 +1203,7 @@ internal fun TvGuideScreen(
                                         try {
                                             onScheduleRecording(ev.id)
                                                 .onSuccess { actionEventKey = null }
-                                                .onFailure { actionError = it.message ?: "Failed to schedule recording" }
+                                                .onFailure { actionError = it.message ?: scheduleFailedMsg }
                                         } finally {
                                             actionBusy = false
                                         }
@@ -1202,7 +1215,11 @@ internal fun TvGuideScreen(
                             ) {
                                 Icon(MuxGridIcons.Record, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text(if (isLiveNow) "Record Now" else "Record", maxLines = 1, softWrap = false)
+                                Text(
+                                    stringResource(if (isLiveNow) DesignR.string.recordings_record_now else DesignR.string.recordings_record),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                )
                             }
                         }
                     }
@@ -1222,7 +1239,7 @@ internal fun TvGuideScreen(
                     ) {
                         Icon(MuxGridIcons.Close, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Close", maxLines = 1, softWrap = false)
+                        Text(stringResource(DesignR.string.common_close), maxLines = 1, softWrap = false)
                     }
                 },
             )
@@ -1319,11 +1336,17 @@ private fun TvGuidePreviewBar(
                             DvrStateBadge(state = dvr.state, isWatched = dvr.isWatched)
                             Spacer(Modifier.width(10.dp))
                         }
+                        val previewDateLabels = rememberLocalizedDateLabels()
+                        val remainingLabel = if (isLiveNow) {
+                            stringResource(DesignR.string.time_minutes_left, previewEvent.remainingMinutes(nowEpochSec))
+                        } else {
+                            null
+                        }
                         val timeText = buildString {
-                            append("${formatEpochDayHm(previewEvent.startEpochSec, nowEpochSec)}–${formatEpochHm(previewEvent.stopEpochSec)}")
+                            append("${formatEpochDayHm(previewEvent.startEpochSec, nowEpochSec, labels = previewDateLabels)}–${formatEpochHm(previewEvent.stopEpochSec)}")
                             append(" (${formatDurationMinutes(previewEvent.startEpochSec, previewEvent.stopEpochSec)})")
-                            if (isLiveNow) {
-                                append(" · ${previewEvent.remainingMinutes(nowEpochSec)}m left")
+                            if (remainingLabel != null) {
+                                append(" · $remainingLabel")
                             }
                         }
                         Text(
@@ -1334,7 +1357,7 @@ private fun TvGuidePreviewBar(
                     }
                     val synopsis = previewEvent.description ?: previewEvent.summary ?: previewEvent.subtitle
                     Text(
-                        text = synopsis?.takeIf { it.isNotBlank() } ?: "Press OK to watch or schedule recording",
+                        text = synopsis?.takeIf { it.isNotBlank() } ?: stringResource(DesignR.string.guide_press_ok_hint),
                         style = MuxGridType.CardSubtitle,
                         color = MuxGridColors.TextSecondary,
                         minLines = 2,
@@ -1345,13 +1368,13 @@ private fun TvGuidePreviewBar(
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(
-                        text = "Program Guide",
+                        text = stringResource(DesignR.string.guide_title),
                         style = MuxGridType.Title,
                         fontSize = 17.sp,
                         maxLines = 1,
                     )
                     Text(
-                        text = "Browse upcoming programs across all channels",
+                        text = stringResource(DesignR.string.guide_browse_hint),
                         style = MuxGridType.CardSubtitle,
                         minLines = 2,
                         maxLines = 2,

@@ -635,21 +635,21 @@ class MuxGridGuideFormattersTest {
     }
 
     @Test
-    fun `dvrConfirmSpec uses consistent action labels across all confirmation kinds`() {
-        val stopSpec = dvrConfirmSpec(DvrConfirmKind.STOP_AND_SAVE, "Evening News")
-        assertEquals("Stop & Save", stopSpec.confirmLabel)
+    fun `dvrConfirmSpecRes uses consistent action resources and destructive flags across all confirmation kinds`() {
+        val stopSpec = dvrConfirmSpecRes(DvrConfirmKind.STOP_AND_SAVE)
+        assertEquals(R.string.recordings_stop_and_save, stopSpec.confirmLabelRes)
         assertFalse(stopSpec.isDestructive)
 
-        val abortSpec = dvrConfirmSpec(DvrConfirmKind.ABORT_RECORDING, "Evening News")
-        assertEquals("Abort Recording", abortSpec.confirmLabel)
+        val abortSpec = dvrConfirmSpecRes(DvrConfirmKind.ABORT_RECORDING)
+        assertEquals(R.string.recordings_abort_recording, abortSpec.confirmLabelRes)
         assertTrue(abortSpec.isDestructive)
 
-        val cancelSpec = dvrConfirmSpec(DvrConfirmKind.CANCEL_TIMER, "Evening News")
-        assertEquals("Cancel Timer", cancelSpec.confirmLabel)
+        val cancelSpec = dvrConfirmSpecRes(DvrConfirmKind.CANCEL_TIMER)
+        assertEquals(R.string.recordings_cancel_timer, cancelSpec.confirmLabelRes)
         assertTrue(cancelSpec.isDestructive)
 
-        val deleteSpec = dvrConfirmSpec(DvrConfirmKind.DELETE_RECORDING, "Evening News")
-        assertEquals("Delete Recording", deleteSpec.confirmLabel)
+        val deleteSpec = dvrConfirmSpecRes(DvrConfirmKind.DELETE_RECORDING)
+        assertEquals(R.string.recordings_delete_recording, deleteSpec.confirmLabelRes)
         assertTrue(deleteSpec.isDestructive)
     }
 
