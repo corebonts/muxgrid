@@ -2,6 +2,29 @@
 
 All notable changes to **MuxGrid** are documented in this file.
 
+## [0.9.0] — 2026-11-27 — Tune in, glow up
+
+### 4-Theme Redesign & Cross-Platform UX
+- Replaced the Auto / Light / Dark themes with four OLED-safe dark palettes: **Amber** (default & legacy fallback), **Carbon**, **Aurora**, and **Indigo** (`ThemeMode`, `MuxGridColors`, `MuxGridTheme`, `MuxGridTokens`).
+- Added shader-backed root backdrops (`MuxGridCanvasBackdrop`) using AGSL `RuntimeShader` smoothstep/dither on API 33+ and a bilinear-upscaled offscreen fallback on API 28–32, paired with translucent Haze card blur for **Aurora** on mobile.
+- Unified Settings pickers (`MuxGridSegmentedControl`, `MuxGridThemeSwatchPicker`, `MuxGridRadioOptionRow`, and pop-up language selector), harmonized Mobile and TV navigation active indicators and modal actions, and refined EPG Now/Live hierarchy (`2dp` Now hairline, `EpgLiveSurface`, live/recording side stripe).
+
+### Audio-Reactive Ambient Radio Glow
+- Added audio-reactive **Ambient Radio Glow** (`AmbientRadioGlow`, `AmbientRadioGlowEngine`, `AudioLevelMapper`) for Mobile (`MobilePlayerScreen`) and 10-ft Android TV (`TvAudioStage` in `TvPlayerScreen`), driven by a zero-permission `libmpv` FFmpeg `astats` audio meter with draw-phase AGSL rendering (API 33+) / pre-allocated offscreen fallback (API 28–32) and a persisted **Radio Ambient Glow** toggle in Settings.
+- Pre-attached the audio meter to eliminate radio startup stutter and kept the mobile radio stage centered when the player HUD is visible.
+
+### Playback, Chase-Play & Unified Modals
+- Added seamless **Live ↔ Chase-Play** handoff, **Start Over**, and unified channel/program/recording detail modals across Mobile and Android TV.
+- Unified Mobile and TV player HUD timeline transport controls (`|<`, `-10s`/`-30s`, `Play/Pause`, `+30s`, `>|`) for quick jumps between live edge, start over, and timeshift buffer start.
+
+### Onboarding Wizard, Preflight Diagnostics & Startup Performance
+- Added an adaptive 3-step **Server Setup** wizard (`Host` → `Ports` → `Account & Preflight`) and **Server Preflight Diagnostics** (`ServerDiagnosticsRunner`, `ServerDiagnosticsUi`) verifying HTSP streaming, HTTP media, HTSP DVR access, `pass` profile availability, HTSP version, clock drift, and DVR disk space during onboarding and in **Settings → Server Diagnostics**.
+- Optimized HTSP startup pipelining and diagnostics concurrency (`HtspClient`, `HtspSession`).
+
+### Localization & Navigation Polish
+- Centralized translatable UI strings and plurals in `:core:designsystem`, added an in-app **Language** selector (`Settings → General → Language`) alongside Android 13+ per-app locale support (`AppLocaleManager`, `generateLocaleConfig`), added full **Hungarian (`hu`)** localization, string parity tests (`StringResourcesTest`), and `docs/TRANSLATIONS.md`.
+- Added swipeable `HorizontalPager` category/filter tabs on mobile Live TV and Recordings (`MobileFeature`, `MobileRecordingsScreen`, `BroadcastPagerTabRowTest`) and removed redundant manual refresh actions in favor of automatic real-time HTSP push sync.
+
 ## [0.8.1] — 2026-11-22 — Ready for a splash?
 
 ### Cold-Start Splash & Unified Syncing UX

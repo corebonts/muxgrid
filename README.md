@@ -8,7 +8,7 @@
   <a href="#download--install"><img src="https://img.shields.io/badge/minSdk-28%20(Android%209%2B)-3DDC84?logo=android&logoColor=white" alt="minSdk 28 (Android 9+)" /></a>
 </p>
 
-A lightweight, native Android and Android TV client for **Tvheadend** (`4.3+`), built for sub-second channel zapping, local live pause/rewind (timeshift), smooth playback of completed and actively recording DVR shows, background audio playback on mobile, and a low-glare **Broadcast Monitor** dark interface (Carbon & Signal Amber).
+A lightweight, native Android and Android TV client for **Tvheadend** (`4.3+`), built for sub-second channel zapping, local live pause/rewind (timeshift), smooth playback of completed and actively recording DVR shows, background audio playback on mobile, and a low-glare **Broadcast Monitor** dark interface across four themes (**Amber**, **Carbon**, **Aurora**, and **Indigo**).
 
 Built as a **single unified codebase** producing ABI-split APKs for Android phones, tablets, and Android TV / Google TV devices (`minSdk 28`).
 
@@ -40,21 +40,23 @@ Built as a **single unified codebase** producing ABI-split APKs for Android phon
   - Disk-backed local `libmpv` ring buffer with configurable size limits in Settings (`Off`, `512 MB`, `1 GB`, `2 GB`, `4 GB`), free-space checks, and automatic recovery when pause reaches the forward buffer cap.
   - Buffered-range seekbar with `-MM:SS · Back to Live` quick jump.
 - **Program Guide (EPG):**
-  - **Phone & Tablet:** Free 2D-scrolling horizontal multi-channel timeline grid across portrait, landscape, and tablet (with a collapsible icon-only channel column when scrolling forward in portrait, plus keyboard/gamepad auto-follow), day tabs, **Now** jump, expandable icon-triggered search, and a program detail bottom sheet (**Watch Live**, **Record**, **Cancel Recording**).
-  - **Android TV:** Continuous horizontal timeline grid with sticky channel column, live "Now" hairline, D-pad Left/Right focus auto-follow across hours and days, top-bar program search, and a fixed-height bottom details bar for focused programs.
+  - **Phone & Tablet:** Free 2D-scrolling horizontal multi-channel timeline grid across portrait, landscape, and tablet (with a collapsible icon-only channel column when scrolling forward in portrait, plus keyboard/gamepad auto-follow), day tabs, **Now** jump, expandable icon-triggered search, and a unified program detail bottom sheet (**Watch Live**, **Watch from Start** / **Resume Chase Play**, **Start Over**, **Record**, **Stop & Save**, **Cancel Timer**).
+  - **Android TV:** Continuous horizontal timeline grid with sticky channel column, live "Now" hairline, D-pad Left/Right focus auto-follow across hours and days, top-bar program search, a fixed-height bottom details bar for focused programs, and a unified show details & DVR actions modal.
 - **DVR & Recording Management:**
   - Dedicated sections/shelves for **Recording Now**, **Completed** (grouped by series/title), and **Scheduled** timers.
   - Schedule, stop, cancel, and delete recordings directly via HTSP.
-  - **Watch from Start (Chase-Play):** Seamless playback and seeking of actively growing recordings over an in-process HTSP VFS tail-follow loopback proxy (`LocalMediaProxy`).
+  - **Watch from Start (Chase-Play) & Start Over:** Seamless Live ↔ Chase-Play handoff, **Start Over**, and fast seeking of actively growing recordings over an in-process HTSP VFS tail-follow loopback proxy (`LocalMediaProxy`).
   - Server-side resume position (`playposition`) and watched state (`playcount`) synced across devices, with local fallback for read-only users.
 - **Background Audio & Picture-in-Picture (Phone & Tablet):**
   - Media3 `MediaSessionService` foreground playback with lock-screen controls, Bluetooth/headset media keys, audio focus handling, headphone-disconnect pause, and Wi-Fi/partial wake locks.
   - Persistent mini-player bar and unified **Background Playback** selector (`Off`, `Audio` with `vid=no` backgrounding, or `PiP`) in Settings, with automatic radio backgrounding.
 - **Tailored Mobile & 10-ft TV Controls:**
-  - **Mobile:** Swipeable category/filter tabs on Live TV and Recordings, double-tap seek (`-10s` / `+30s`), vertical edge drags for brightness and volume, aspect ratio selector, in-player **Playback Info** diagnostics, persisted subtitle preferences, Quick-Zap channel drawer, adaptive tablet/landscape layout, **Auto / Light / Dark** themes, in-app **Language** selector (English & Hungarian, plus Android 13+ per-app language), configurable **Start Screen**, and Haze backdrop blur on non-video chrome.
-  - **Android TV:** Collapsible left Navigation Rail (`androidx.tv:tv-material`), instant `Ch+`/`Ch-` / D-pad Up/Down zapping with minimal OSD, progressive D-pad seeking (`10s → 30s → 1m → 5m → 10m` tap ladder with gear-locked continuous hold capped at `30s`), in-player **Playback Info** panel, **Auto / Light / Dark** themes, in-app **Language** selector, configurable **Start Screen**, and an overlay Quick Channel Strip.
+  - **Mobile:** Swipeable category/filter tabs on Live TV and Recordings, unified player timeline transport (`|<` / `>|` for Start Over, Chase-Play, and Live), double-tap seek (`-10s` / `+30s`), vertical edge drags for brightness and volume, aspect ratio selector, in-player **Playback Info** diagnostics, persisted subtitle preferences, Quick-Zap channel drawer, adaptive tablet/landscape layout, 4 dark themes (**Amber**, **Carbon**, **Aurora**, **Indigo**) with shader-backed backdrops, **Radio Ambient Glow** toggle, in-app **Language** selector (English & Hungarian, plus Android 13+ per-app language), configurable **Start Screen**, and Haze backdrop blur on non-video chrome.
+  - **Android TV:** Collapsible left Navigation Rail (`androidx.tv:tv-material`), instant `Ch+`/`Ch-` / D-pad Up/Down zapping with minimal OSD, unified player timeline transport (`|<` / `>|`), progressive D-pad seeking (`10s → 30s → 1m → 5m → 10m` tap ladder with gear-locked continuous hold capped at `30s`), in-player **Playback Info** panel, 4 dark themes (**Amber**, **Carbon**, **Aurora**, **Indigo**) with shader-backed backdrops, **Radio Ambient Glow** toggle, in-app **Language** selector, configurable **Start Screen**, and an overlay Quick Channel Strip.
 
 ## Server Setup (Tvheadend)
+
+MuxGrid includes a guided **3-step Onboarding Wizard & Server Preflight Diagnostics** (accessible during setup and in **Settings → Server Diagnostics**) to verify HTSP (`9982/tcp`), HTTP (`9981/tcp`), DVR permissions, `pass` stream profile availability, clock drift, and DVR disk space.
 
 MuxGrid requires **Tvheadend 4.3+** with both **HTSP (`9982/tcp`)** and **HTTP (`9981/tcp`)** reachable over your LAN or VPN, and the **`pass`** stream profile enabled.
 
