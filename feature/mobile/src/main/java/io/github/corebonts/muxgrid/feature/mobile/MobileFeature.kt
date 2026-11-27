@@ -39,6 +39,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -62,6 +64,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -87,6 +90,7 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import io.github.corebonts.muxgrid.core.data.PiconModel
 import io.github.corebonts.muxgrid.core.data.TvheadendRepository
+import io.github.corebonts.muxgrid.core.designsystem.BroadcastPagerTabRow
 import io.github.corebonts.muxgrid.core.designsystem.BroadcastUnderlineTab
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.ConnectionStatusDot
@@ -315,8 +319,7 @@ fun MobileRoot(
                             val nowEpochSec = rememberNowEpochSec(offsetMs)
                             MobileLiveChannelsTab(
                                 connectionState = connectionState,
-                                channels = filteredChannels,
-                                hasAnyChannels = channels.isNotEmpty(),
+                                channels = channels,
                                 filters = remember(tags) { buildLiveFilters(tags) },
                                 activeFilter = activeFilter,
                                 favorites = favorites,
@@ -996,11 +999,18 @@ private fun MobileMiniPlayerBar(
     }
 }
 
+private fun LiveFilter.stableKey(): String = when (this) {
+    LiveFilter.All -> "all"
+    LiveFilter.Tv -> "tv"
+    LiveFilter.Radio -> "radio"
+    LiveFilter.Favorites -> "favorites"
+    is LiveFilter.Tag -> "tag:$tagId"
+}
+
 @Composable
 private fun MobileLiveChannelsTab(
     connectionState: ConnectionState,
     channels: List<Channel>,
-    hasAnyChannels: Boolean,
     filters: List<LiveFilter>,
     activeFilter: LiveFilter,
     favorites: Set<Long>,
@@ -1027,101 +1037,68 @@ private fun MobileLiveChannelsTab(
     var actionBusy by remember { mutableStateOf(false) }
     var actionMessage by remember { mutableStateOf<String?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Broadcast Monitor underline filter tabs
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(MobileTopBarHeight)
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            filters.forEach { filter ->
-                val selected = filter == activeFilter
-                BroadcastUnderlineTab(
-                    label = filter.label(),
-                    selected = selected,
-                    leadingIcon = filter.icon(),
-                    onClick = { onSelectFilter(filter) },
-                    modifier = Modifier.fillMaxHeight(),
-                )
+    val activeIndex = filters.indexOf(activeFilter).takeIf { it >= 0 } ?: 0
+    val pagerState = rememberPagerState(
+        initialPage = activeIndex,
+        pageCount = { filters.size },
+    )
+
+    LaunchedEffect(pagerState, filters) {
+        snapshotFlow { pagerState.settledPage to pagerState.isScrollInProgress }
+            .collect { (page, scrolling) ->
+                if (!scrolling) {
+                    filters.getOrNull(page)?.let { settledFilter ->
+                        if (settledFilter != activeFilter) {
+                            onSelectFilter(settledFilter)
+                        }
+                    }
+                }
             }
+    }
+    LaunchedEffect(activeIndex) {
+        if (pagerState.currentPage != activeIndex && pagerState.targetPage != activeIndex) {
+            pagerState.animateScrollToPage(activeIndex)
         }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        BroadcastPagerTabRow(
+            tabs = filters,
+            pagerState = pagerState,
+            labelFor = { it.label() },
+            leadingIconFor = { it.icon() },
+            onTabClick = { _, filter -> onSelectFilter(filter) },
+        )
         MuxGridDivider()
 
-        if (channels.isEmpty()) {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                item {
-                    val (emptyText, showSpinner) = if (hasAnyChannels) {
-                        "No channels match this filter" to false
-                    } else {
-                        syncStatusMessage(
-                            connectionState = connectionState,
-                            emptyLabel = "No channels available",
-                        )
-                    }
-                    MuxGridSyncingState(
-                        message = emptyText,
-                        showSpinner = showSpinner,
-                        isTv = false,
-                        modifier = Modifier.fillParentMaxSize(),
-                    )
-                }
+        HorizontalPager(
+            state = pagerState,
+            key = { page -> filters.getOrNull(page)?.stableKey() ?: page },
+            beyondViewportPageCount = 1,
+            modifier = Modifier.fillMaxSize(),
+        ) { page ->
+            val pageFilter = filters.getOrNull(page) ?: return@HorizontalPager
+            val pageChannels = remember(channels, pageFilter, favorites) {
+                filterChannels(channels, pageFilter, favorites)
             }
-        } else if (gridColumns > 1) {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(gridColumns),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = bottomContentPadding),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(channels, key = { it.id }) { channel ->
-                    MobileChannelCard(
-                        channel = channel,
-                        nowNext = nowNextMap[channel.id],
-                        isRecording = channel.id in activeRecordingsByChannel,
-                        nowEpochSec = nowEpochSec,
-                        isFavorite = channel.id in favorites,
-                        imageLoader = imageLoader,
-                        asCard = true,
-                        onClick = { onChannelClick(channel) },
-                        onLongClick = {
-                            actionMessage = null
-                            actionChannelId = channel.id
-                        },
-                        onToggleFavorite = { onToggleFavorite(channel) },
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 4.dp, bottom = bottomContentPadding),
-            ) {
-                items(channels, key = { it.id }) { channel ->
-                    Column {
-                        MobileChannelCard(
-                            channel = channel,
-                            nowNext = nowNextMap[channel.id],
-                            isRecording = channel.id in activeRecordingsByChannel,
-                            nowEpochSec = nowEpochSec,
-                            isFavorite = channel.id in favorites,
-                            imageLoader = imageLoader,
-                            asCard = false,
-                            onClick = { onChannelClick(channel) },
-                            onLongClick = {
-                                actionMessage = null
-                                actionChannelId = channel.id
-                            },
-                            onToggleFavorite = { onToggleFavorite(channel) },
-                        )
-                        MuxGridDivider(modifier = Modifier.padding(start = 74.dp, end = 16.dp))
-                    }
-                }
-            }
+            MobileLiveChannelList(
+                connectionState = connectionState,
+                channels = pageChannels,
+                hasAnyChannels = channels.isNotEmpty(),
+                favorites = favorites,
+                nowNextMap = nowNextMap,
+                activeRecordingsByChannel = activeRecordingsByChannel,
+                nowEpochSec = nowEpochSec,
+                imageLoader = imageLoader,
+                gridColumns = gridColumns,
+                bottomContentPadding = bottomContentPadding,
+                onChannelClick = onChannelClick,
+                onChannelLongClick = { channel ->
+                    actionMessage = null
+                    actionChannelId = channel.id
+                },
+                onToggleFavorite = onToggleFavorite,
+            )
         }
     }
 
@@ -1404,6 +1381,90 @@ private fun MobileLiveChannelsTab(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun MobileLiveChannelList(
+    connectionState: ConnectionState,
+    channels: List<Channel>,
+    hasAnyChannels: Boolean,
+    favorites: Set<Long>,
+    nowNextMap: Map<Long, NowNextProgram>,
+    activeRecordingsByChannel: Map<Long, DvrEntry>,
+    nowEpochSec: Long,
+    imageLoader: ImageLoader,
+    gridColumns: Int,
+    bottomContentPadding: Dp,
+    onChannelClick: (Channel) -> Unit,
+    onChannelLongClick: (Channel) -> Unit,
+    onToggleFavorite: (Channel) -> Unit,
+) {
+    if (channels.isEmpty()) {
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            item {
+                val (emptyText, showSpinner) = if (hasAnyChannels) {
+                    "No channels match this filter" to false
+                } else {
+                    syncStatusMessage(
+                        connectionState = connectionState,
+                        emptyLabel = "No channels available",
+                    )
+                }
+                MuxGridSyncingState(
+                    message = emptyText,
+                    showSpinner = showSpinner,
+                    isTv = false,
+                    modifier = Modifier.fillParentMaxSize(),
+                )
+            }
+        }
+    } else if (gridColumns > 1) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(gridColumns),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = bottomContentPadding),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(channels, key = { it.id }) { channel ->
+                MobileChannelCard(
+                    channel = channel,
+                    nowNext = nowNextMap[channel.id],
+                    isRecording = channel.id in activeRecordingsByChannel,
+                    nowEpochSec = nowEpochSec,
+                    isFavorite = channel.id in favorites,
+                    imageLoader = imageLoader,
+                    asCard = true,
+                    onClick = { onChannelClick(channel) },
+                    onLongClick = { onChannelLongClick(channel) },
+                    onToggleFavorite = { onToggleFavorite(channel) },
+                )
+            }
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 4.dp, bottom = bottomContentPadding),
+        ) {
+            items(channels, key = { it.id }) { channel ->
+                Column {
+                    MobileChannelCard(
+                        channel = channel,
+                        nowNext = nowNextMap[channel.id],
+                        isRecording = channel.id in activeRecordingsByChannel,
+                        nowEpochSec = nowEpochSec,
+                        isFavorite = channel.id in favorites,
+                        imageLoader = imageLoader,
+                        asCard = false,
+                        onClick = { onChannelClick(channel) },
+                        onLongClick = { onChannelLongClick(channel) },
+                        onToggleFavorite = { onToggleFavorite(channel) },
+                    )
+                    MuxGridDivider(modifier = Modifier.padding(start = 74.dp, end = 16.dp))
+                }
+            }
+        }
     }
 }
 

@@ -19,6 +19,7 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -53,10 +55,13 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,8 +81,11 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -88,10 +96,16 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.roundToInt
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
@@ -133,13 +147,14 @@ fun BroadcastUnderlineTab(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     leadingIcon: ImageVector? = null,
+    showUnderline: Boolean = selected,
 ) {
     val accentColor = MuxGridColors.Accent
     Box(
         modifier = modifier
             .clickable(onClick = onClick)
             .drawBehind {
-                if (selected) {
+                if (showUnderline) {
                     val strokePx = 2.dp.toPx()
                     drawRect(
                         color = accentColor,
@@ -169,6 +184,123 @@ fun BroadcastUnderlineTab(
                 fontSize = 13.sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
+            )
+        }
+    }
+}
+
+internal data class TabBounds(
+    val leftPx: Float,
+    val widthPx: Float,
+)
+
+internal fun computePagerIndicatorBounds(
+    tabCount: Int,
+    currentPage: Int,
+    currentPageOffsetFraction: Float,
+    boundsFor: (Int) -> TabBounds?,
+): TabBounds? {
+    if (tabCount <= 0) return null
+    val pagePosition = (currentPage + currentPageOffsetFraction)
+        .coerceIn(0f, (tabCount - 1).toFloat())
+    val fromIndex = floor(pagePosition).toInt().coerceIn(0, tabCount - 1)
+    val toIndex = ceil(pagePosition).toInt().coerceIn(0, tabCount - 1)
+    val fromBounds = boundsFor(fromIndex) ?: return null
+    val toBounds = boundsFor(toIndex) ?: fromBounds
+    val fraction = pagePosition - fromIndex
+    return TabBounds(
+        leftPx = lerp(fromBounds.leftPx, toBounds.leftPx, fraction),
+        widthPx = lerp(fromBounds.widthPx, toBounds.widthPx, fraction),
+    )
+}
+
+/**
+ * Scrollable underline tab bar synchronized with a [PagerState] so the accent underline glides
+ * smoothly across tabs as the user swipes between pages.
+ */
+@Composable
+fun <T> BroadcastPagerTabRow(
+    tabs: List<T>,
+    pagerState: PagerState,
+    labelFor: @Composable (T) -> String,
+    modifier: Modifier = Modifier,
+    leadingIconFor: ((T) -> ImageVector?)? = null,
+    onTabClick: ((index: Int, tab: T) -> Unit)? = null,
+) {
+    val scope = rememberCoroutineScope()
+    val tabScrollState = rememberScrollState()
+    val tabBounds = remember { mutableStateMapOf<Int, TabBounds>() }
+    var viewportWidthPx by remember { mutableIntStateOf(0) }
+    var hasScrolledOnce by remember { mutableStateOf(false) }
+    val accentColor = MuxGridColors.Accent
+    val horizontalPaddingPx = with(LocalDensity.current) { 16.dp.toPx() }
+
+    LaunchedEffect(tabs.size) {
+        tabBounds.keys.filter { it >= tabs.size }.forEach { tabBounds.remove(it) }
+    }
+
+    LaunchedEffect(pagerState.currentPage, viewportWidthPx, tabs.size) {
+        if (viewportWidthPx <= 0 || tabs.isEmpty()) return@LaunchedEffect
+        val bounds = snapshotFlow { tabBounds[pagerState.currentPage] }
+            .filterNotNull()
+            .first()
+        val target = (horizontalPaddingPx + bounds.leftPx + bounds.widthPx / 2f - viewportWidthPx / 2f)
+            .roundToInt()
+            .coerceIn(0, tabScrollState.maxValue)
+        if (!hasScrolledOnce) {
+            tabScrollState.scrollTo(target)
+            hasScrolledOnce = true
+        } else {
+            tabScrollState.animateScrollTo(target)
+        }
+    }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(MobileTopBarHeight)
+            .onSizeChanged { viewportWidthPx = it.width }
+            .horizontalScroll(tabScrollState)
+            .padding(horizontal = 16.dp)
+            .drawBehind {
+                val indicator = computePagerIndicatorBounds(
+                    tabCount = tabs.size,
+                    currentPage = pagerState.currentPage,
+                    currentPageOffsetFraction = pagerState.currentPageOffsetFraction,
+                    boundsFor = { tabBounds[it] },
+                ) ?: return@drawBehind
+                val strokePx = 2.dp.toPx()
+                drawRect(
+                    color = accentColor,
+                    topLeft = Offset(indicator.leftPx, size.height - strokePx),
+                    size = Size(indicator.widthPx, strokePx),
+                )
+            },
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        tabs.forEachIndexed { index, tab ->
+            val selected = index == pagerState.currentPage
+            BroadcastUnderlineTab(
+                label = labelFor(tab),
+                selected = selected,
+                leadingIcon = leadingIconFor?.invoke(tab),
+                showUnderline = false,
+                onClick = {
+                    onTabClick?.invoke(index, tab)
+                    scope.launch { pagerState.animateScrollToPage(index) }
+                },
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .onPlaced { coords ->
+                        val bounds = TabBounds(
+                            leftPx = coords.positionInParent().x,
+                            widthPx = coords.size.width.toFloat(),
+                        )
+                        if (tabBounds[index] != bounds) {
+                            tabBounds[index] = bounds
+                        }
+                    },
             )
         }
     }

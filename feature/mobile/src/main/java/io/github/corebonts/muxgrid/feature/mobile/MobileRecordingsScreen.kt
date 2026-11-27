@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -45,7 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.ImageLoader
 import io.github.corebonts.muxgrid.core.data.PiconModel
-import io.github.corebonts.muxgrid.core.designsystem.BroadcastUnderlineTab
+import io.github.corebonts.muxgrid.core.designsystem.BroadcastPagerTabRow
 import io.github.corebonts.muxgrid.core.designsystem.ChannelPiconBadge
 import io.github.corebonts.muxgrid.core.designsystem.DvrConfirmKind
 import io.github.corebonts.muxgrid.core.designsystem.DvrSeriesGroup
@@ -100,7 +102,10 @@ internal fun MobileRecordingsScreen(
     onToggleWatched: suspend (Long, Boolean) -> Result<Unit>,
 ) {
     val scope = rememberCoroutineScope()
-    var filter by remember { mutableStateOf(RecordingsFilter.ALL) }
+    val pagerState = rememberPagerState(
+        initialPage = 0,
+        pageCount = { RecordingsFilter.entries.size },
+    )
     var expandedGroupKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
     var actionEntryId by remember { mutableStateOf<Long?>(null) }
     var pendingConfirm by remember { mutableStateOf<Pair<DvrConfirmKind, DvrEntry>?>(null) }
@@ -127,23 +132,11 @@ internal fun MobileRecordingsScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Underline filter tabs matching Live & Guide
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(MobileTopBarHeight)
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            RecordingsFilter.entries.forEach { tab ->
-                BroadcastUnderlineTab(
-                    label = tab.label,
-                    selected = filter == tab,
-                    onClick = { filter = tab },
-                    modifier = Modifier.fillMaxHeight(),
-                )
-            }
-        }
+        BroadcastPagerTabRow(
+            tabs = RecordingsFilter.entries,
+            pagerState = pagerState,
+            labelFor = { it.label },
+        )
         MuxGridDivider()
 
         actionFeedback?.let { msg ->
@@ -155,147 +148,155 @@ internal fun MobileRecordingsScreen(
             )
         }
 
-        val showRecordingNow = recordingNow.isNotEmpty() && filter != RecordingsFilter.COMPLETED
-        val showCompleted = completedGroups.isNotEmpty() && filter != RecordingsFilter.SCHEDULED
-        val showScheduled = scheduled.isNotEmpty() && filter != RecordingsFilter.COMPLETED
-        val showFailed = failed.isNotEmpty() && filter == RecordingsFilter.ALL
+        HorizontalPager(
+            state = pagerState,
+            key = { page -> RecordingsFilter.entries[page].name },
+            beyondViewportPageCount = 1,
+            modifier = Modifier.fillMaxSize(),
+        ) { page ->
+            val filter = RecordingsFilter.entries[page]
+            val showRecordingNow = recordingNow.isNotEmpty() && filter != RecordingsFilter.COMPLETED
+            val showCompleted = completedGroups.isNotEmpty() && filter != RecordingsFilter.SCHEDULED
+            val showScheduled = scheduled.isNotEmpty() && filter != RecordingsFilter.COMPLETED
+            val showFailed = failed.isNotEmpty() && filter == RecordingsFilter.ALL
 
-        if (!showRecordingNow && !showCompleted && !showScheduled && !showFailed) {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                item {
-                    val (emptyText, showSpinner) = syncStatusMessage(
-                        connectionState = connectionState,
-                        emptyLabel = "No recordings or scheduled timers",
-                    )
-                    MuxGridSyncingState(
-                        message = emptyText,
-                        showSpinner = showSpinner,
-                        isTv = false,
-                        modifier = Modifier.fillParentMaxSize(),
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 6.dp, bottom = bottomContentPadding),
-            ) {
-                if (showRecordingNow) {
-                    item(key = "hdr_rec_now") {
-                        SectionHeader("RECORDING NOW")
-                    }
-                    items(recordingNow, key = { "rec_${it.id}" }) { entry ->
-                        val ch = channelById[entry.channelId]
-                        RecordingNowCard(
-                            entry = entry,
-                            channel = ch,
-                            nowEpochSec = nowEpochSec,
-                            imageLoader = imageLoader,
-                            onResumeOrWatchFromStart = {
-                                onPlayRecording(entry, ch, entry.effectiveStartSec)
-                            },
-                            onStartOver = {
-                                onPlayRecording(entry, ch, 0L)
-                            },
-                            onStop = {
-                                pendingConfirm = DvrConfirmKind.STOP_AND_SAVE to entry
-                            },
-                            onOpenMenu = {
-                                sheetError = null
-                                actionEntryId = entry.id
-                            },
+            if (!showRecordingNow && !showCompleted && !showScheduled && !showFailed) {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    item {
+                        val (emptyText, showSpinner) = syncStatusMessage(
+                            connectionState = connectionState,
+                            emptyLabel = "No recordings or scheduled timers",
+                        )
+                        MuxGridSyncingState(
+                            message = emptyText,
+                            showSpinner = showSpinner,
+                            isTv = false,
+                            modifier = Modifier.fillParentMaxSize(),
                         )
                     }
                 }
-
-                if (showCompleted) {
-                    item(key = "hdr_completed") {
-                        SectionHeader("COMPLETED")
-                    }
-                    items(completedGroups, key = { "grp_${it.key}" }) { group ->
-                        if (group.entries.size == 1) {
-                            val entry = group.entries.first()
-                            CompletedRecordingRow(
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 6.dp, bottom = bottomContentPadding),
+                ) {
+                    if (showRecordingNow) {
+                        item(key = "hdr_rec_now") {
+                            SectionHeader("RECORDING NOW")
+                        }
+                        items(recordingNow, key = { "rec_${it.id}" }) { entry ->
+                            val ch = channelById[entry.channelId]
+                            RecordingNowCard(
                                 entry = entry,
-                                channel = channelById[entry.channelId],
+                                channel = ch,
                                 nowEpochSec = nowEpochSec,
                                 imageLoader = imageLoader,
-                                onResumeOrPlay = {
-                                    onPlayRecording(entry, channelById[entry.channelId], entry.effectiveStartSec)
+                                onResumeOrWatchFromStart = {
+                                    onPlayRecording(entry, ch, entry.effectiveStartSec)
+                                },
+                                onStartOver = {
+                                    onPlayRecording(entry, ch, 0L)
+                                },
+                                onStop = {
+                                    pendingConfirm = DvrConfirmKind.STOP_AND_SAVE to entry
                                 },
                                 onOpenMenu = {
                                     sheetError = null
                                     actionEntryId = entry.id
                                 },
                             )
-                            MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
-                        } else {
-                            val expanded = group.key in expandedGroupKeys
-                            SeriesGroupRow(
-                                group = group,
-                                expanded = expanded,
-                                channelById = channelById,
+                        }
+                    }
+
+                    if (showCompleted) {
+                        item(key = "hdr_completed") {
+                            SectionHeader("COMPLETED")
+                        }
+                        items(completedGroups, key = { "grp_${it.key}" }) { group ->
+                            if (group.entries.size == 1) {
+                                val entry = group.entries.first()
+                                CompletedRecordingRow(
+                                    entry = entry,
+                                    channel = channelById[entry.channelId],
+                                    nowEpochSec = nowEpochSec,
+                                    imageLoader = imageLoader,
+                                    onResumeOrPlay = {
+                                        onPlayRecording(entry, channelById[entry.channelId], entry.effectiveStartSec)
+                                    },
+                                    onOpenMenu = {
+                                        sheetError = null
+                                        actionEntryId = entry.id
+                                    },
+                                )
+                                MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
+                            } else {
+                                val expanded = group.key in expandedGroupKeys
+                                SeriesGroupRow(
+                                    group = group,
+                                    expanded = expanded,
+                                    channelById = channelById,
+                                    nowEpochSec = nowEpochSec,
+                                    imageLoader = imageLoader,
+                                    onToggleExpand = {
+                                        expandedGroupKeys = if (expanded) {
+                                            expandedGroupKeys - group.key
+                                        } else {
+                                            expandedGroupKeys + group.key
+                                        }
+                                    },
+                                    onPlayEntry = { entry, startSec ->
+                                        onPlayRecording(entry, channelById[entry.channelId], startSec)
+                                    },
+                                    onOpenMenu = {
+                                        sheetError = null
+                                        actionEntryId = it.id
+                                    },
+                                )
+                                MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
+                            }
+                        }
+                    }
+
+                    if (showScheduled) {
+                        item(key = "hdr_scheduled") {
+                            SectionHeader("SCHEDULED")
+                        }
+                        items(scheduled, key = { "sched_${it.id}" }) { entry ->
+                            ScheduledTimerRow(
+                                entry = entry,
+                                channel = channelById[entry.channelId],
                                 nowEpochSec = nowEpochSec,
                                 imageLoader = imageLoader,
-                                onToggleExpand = {
-                                    expandedGroupKeys = if (expanded) {
-                                        expandedGroupKeys - group.key
-                                    } else {
-                                        expandedGroupKeys + group.key
-                                    }
-                                },
-                                onPlayEntry = { entry, startSec ->
-                                    onPlayRecording(entry, channelById[entry.channelId], startSec)
-                                },
                                 onOpenMenu = {
                                     sheetError = null
-                                    actionEntryId = it.id
+                                    actionEntryId = entry.id
+                                },
+                                onCancel = {
+                                    pendingConfirm = DvrConfirmKind.CANCEL_TIMER to entry
                                 },
                             )
                             MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
                         }
                     }
-                }
 
-                if (showScheduled) {
-                    item(key = "hdr_scheduled") {
-                        SectionHeader("SCHEDULED")
-                    }
-                    items(scheduled, key = { "sched_${it.id}" }) { entry ->
-                        ScheduledTimerRow(
-                            entry = entry,
-                            channel = channelById[entry.channelId],
-                            nowEpochSec = nowEpochSec,
-                            imageLoader = imageLoader,
-                            onOpenMenu = {
-                                sheetError = null
-                                actionEntryId = entry.id
-                            },
-                            onCancel = {
-                                pendingConfirm = DvrConfirmKind.CANCEL_TIMER to entry
-                            },
-                        )
-                        MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
-                    }
-                }
-
-                if (showFailed) {
-                    item(key = "hdr_failed") {
-                        SectionHeader("MISSED / FAILED")
-                    }
-                    items(failed, key = { "fail_${it.id}" }) { entry ->
-                        FailedRecordingRow(
-                            entry = entry,
-                            channel = channelById[entry.channelId],
-                            nowEpochSec = nowEpochSec,
-                            imageLoader = imageLoader,
-                            onOpenMenu = {
-                                sheetError = null
-                                actionEntryId = entry.id
-                            },
-                            onDelete = { pendingConfirm = DvrConfirmKind.DELETE_RECORDING to entry },
-                        )
-                        MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
+                    if (showFailed) {
+                        item(key = "hdr_failed") {
+                            SectionHeader("MISSED / FAILED")
+                        }
+                        items(failed, key = { "fail_${it.id}" }) { entry ->
+                            FailedRecordingRow(
+                                entry = entry,
+                                channel = channelById[entry.channelId],
+                                nowEpochSec = nowEpochSec,
+                                imageLoader = imageLoader,
+                                onOpenMenu = {
+                                    sheetError = null
+                                    actionEntryId = entry.id
+                                },
+                                onDelete = { pendingConfirm = DvrConfirmKind.DELETE_RECORDING to entry },
+                            )
+                            MuxGridDivider(modifier = Modifier.padding(start = 72.dp, end = 16.dp))
+                        }
                     }
                 }
             }
